@@ -994,6 +994,7 @@ pub struct AgentResponse {
 struct ListAgentsResponse {
     agents: Vec<AgentResponse>,
 }
+
 fn build_agent_url(uid: &str) -> String {
     format!("agent/identities/{}", urlencoding::encode(uid))
 }
@@ -1012,6 +1013,63 @@ pub struct ListConnectedSelfHostedWorkersResponse {
 }
 
 pub(crate) const CONNECTED_SELF_HOSTED_WORKERS_PATH: &str = "agent/connected-self-hosted-workers";
+
+/// A memory store returned by the public API.
+#[derive(Clone, serde::Deserialize, serde::Serialize, Debug, PartialEq)]
+pub struct MemoryStoreItem {
+    pub uid: String,
+    pub owner_type: String,
+    pub owner_uid: String,
+    pub description: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(serde::Deserialize)]
+struct ListMemoryStoresResponse {
+    memory_stores: Vec<MemoryStoreItem>,
+}
+
+/// A memory in a memory store returned by the public API.
+#[derive(Clone, serde::Deserialize, serde::Serialize, Debug, PartialEq)]
+pub struct MemoryItem {
+    pub uid: String,
+    pub content: String,
+    pub version_id: String,
+    pub source: String,
+    pub source_id: Option<String>,
+    pub source_run_id: Option<String>,
+    pub is_tombstoned: bool,
+    pub tombstoned_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(serde::Deserialize)]
+struct ListMemoriesResponse {
+    memories: Vec<MemoryItem>,
+}
+
+#[derive(Clone, Copy, serde::Serialize, Debug, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MemorySource {
+    Manual,
+}
+
+#[derive(Clone, serde::Serialize, Debug, PartialEq)]
+pub struct CreateMemoryRequest {
+    pub content: String,
+    pub version: Option<String>,
+    pub source: MemorySource,
+    pub source_id: Option<String>,
+    pub reason: String,
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize, Debug, PartialEq)]
+pub struct CreateMemoryResponse {
+    pub memory_id: String,
+    pub version_id: String,
+}
 
 #[cfg_attr(test, automock)]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
@@ -1228,6 +1286,19 @@ pub trait AIClient: 'static + Send + Sync {
     ) -> anyhow::Result<serde_json::Value, anyhow::Error>;
 
     async fn delete_agent(&self, uid: &str) -> anyhow::Result<(), anyhow::Error>;
+
+    async fn list_memory_stores(&self) -> anyhow::Result<Vec<MemoryStoreItem>, anyhow::Error>;
+
+    async fn list_memory_store_memories(
+        &self,
+        store_uid: &str,
+    ) -> anyhow::Result<Vec<MemoryItem>, anyhow::Error>;
+
+    async fn create_memory_store_memory(
+        &self,
+        store_uid: &str,
+        request: CreateMemoryRequest,
+    ) -> anyhow::Result<CreateMemoryResponse, anyhow::Error>;
 
     async fn cancel_ambient_agent_task(
         &self,
@@ -2261,6 +2332,34 @@ impl AIClient for ServerApi {
         };
         let response: ListSkillsResponse = self.get_public_api(&path).await?;
         Ok(response.agents)
+    }
+    async fn list_memory_stores(&self) -> anyhow::Result<Vec<MemoryStoreItem>, anyhow::Error> {
+        let response: ListMemoryStoresResponse = self.get_public_api("memory_stores").await?;
+        Ok(response.memory_stores)
+    }
+
+    async fn list_memory_store_memories(
+        &self,
+        store_uid: &str,
+    ) -> anyhow::Result<Vec<MemoryItem>, anyhow::Error> {
+        let encoded_store_uid = urlencoding::encode(store_uid);
+        let response: ListMemoriesResponse = self
+            .get_public_api(&format!("memory_stores/{encoded_store_uid}/memories"))
+            .await?;
+        Ok(response.memories)
+    }
+
+    async fn create_memory_store_memory(
+        &self,
+        store_uid: &str,
+        request: CreateMemoryRequest,
+    ) -> anyhow::Result<CreateMemoryResponse, anyhow::Error> {
+        let encoded_store_uid = urlencoding::encode(store_uid);
+        self.post_public_api(
+            &format!("memory_stores/{encoded_store_uid}/memories"),
+            &request,
+        )
+        .await
     }
 
     async fn list_agents(&self) -> anyhow::Result<Vec<AgentResponse>, anyhow::Error> {

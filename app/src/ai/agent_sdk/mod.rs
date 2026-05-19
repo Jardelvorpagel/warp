@@ -24,6 +24,7 @@ use warp_cli::federate::FederateCommand;
 use warp_cli::harness_support::{HarnessSupportCommand, ReportArtifactCommand, TaskStatus};
 use warp_cli::integration::IntegrationCommand;
 use warp_cli::mcp::MCPCommand;
+use warp_cli::memory_store::MemoryStoreCommand;
 use warp_cli::model::ModelCommand;
 use warp_cli::provider::ProviderCommand;
 use warp_cli::schedule::ScheduleSubcommand;
@@ -91,6 +92,7 @@ mod integration;
 mod integration_output;
 mod mcp;
 mod mcp_config;
+mod memory_store;
 mod model;
 mod oauth_flow;
 pub mod output;
@@ -149,6 +151,9 @@ fn dispatch_command(
         CliCommand::MCP(mcp_cmd) => mcp::run(ctx, global_options, mcp_cmd),
         CliCommand::Run(task_cmd) => run_task(ctx, global_options, task_cmd),
         CliCommand::Model(model_cmd) => model::run(ctx, global_options, model_cmd),
+        CliCommand::MemoryStore(memory_store_cmd) => {
+            memory_store::run(ctx, global_options, memory_store_cmd)
+        }
         CliCommand::Login => admin::login(ctx),
         CliCommand::Logout => admin::logout(ctx),
         CliCommand::Whoami => admin::whoami(ctx, global_options.output_format),
@@ -1511,6 +1516,7 @@ fn command_requires_auth(command: &CliCommand) -> bool {
         CliCommand::Model(model_cmd) => match model_cmd {
             ModelCommand::List => true,
         },
+        CliCommand::MemoryStore(_) => true,
         CliCommand::Login => false,
         CliCommand::Logout => false,
         CliCommand::Whoami => true,
@@ -1700,6 +1706,11 @@ fn command_to_telemetry_event(command: &CliCommand) -> CliTelemetryEvent {
             },
         },
         CliCommand::Model(ModelCommand::List) => CliTelemetryEvent::ModelList,
+        CliCommand::MemoryStore(memory_store_cmd) => match memory_store_cmd {
+            MemoryStoreCommand::List => CliTelemetryEvent::MemoryStoreList,
+            MemoryStoreCommand::ListMemories(_) => CliTelemetryEvent::MemoryStoreListMemories,
+            MemoryStoreCommand::CreateMemory(_) => CliTelemetryEvent::MemoryStoreCreateMemory,
+        },
         CliCommand::Login => CliTelemetryEvent::Login,
         CliCommand::Logout => CliTelemetryEvent::Logout,
         CliCommand::Whoami => CliTelemetryEvent::Whoami,

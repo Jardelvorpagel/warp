@@ -31,6 +31,7 @@ pub mod integration;
 pub mod json_filter;
 pub mod local_control;
 pub mod mcp;
+pub mod memory_store;
 pub mod model;
 pub mod provider;
 pub mod schedule;
@@ -516,6 +517,9 @@ pub enum CliCommand {
     /// Manage available models.
     #[command(subcommand)]
     Model(crate::model::ModelCommand),
+    /// Manage memory stores.
+    #[command(subcommand, alias = "memory-stores")]
+    MemoryStore(crate::memory_store::MemoryStoreCommand),
 
     /// Log in to Warp.
     Login,
