@@ -428,28 +428,67 @@ pub(crate) fn is_shared_git_ref(path: &Path) -> bool {
     if extract_worktree_git_dir(path).is_some() {
         return false;
     }
-    let components: Vec<_> = path.components().collect();
-    let Some(git_index) = components.iter().position(|c| c.as_os_str() == ".git") else {
+    let Some(suffix) = git_suffix_components(path) else {
         return false;
     };
-    let after_git = &components[git_index + 1..];
-    after_git
-        .first()
-        .map(|c| c.as_os_str() == "refs")
-        .unwrap_or(false)
-        && after_git
-            .get(1)
-            .map(|c| c.as_os_str() == "heads")
-            .unwrap_or(false)
+    let names = suffix
+        .iter()
+        .map(|c| c.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    matches!(names.as_slice(), [Some("refs"), Some("heads"), Some(_), ..])
 }
 
-/// Returns `true` for loose remote-tracking refs under the shared `.git`
-/// directory:
+/// Returns `true` for shared ref paths or ancestors that must be routed through
+/// the shared common-git-dir path.
+pub(crate) fn is_shared_git_ref_or_ancestor(path: &Path) -> bool {
+    if is_shared_git_ref(path) {
+        return true;
+    }
+    if extract_worktree_git_dir(path).is_some() {
+        return false;
+    }
+    let Some(suffix) = git_suffix_components(path) else {
+        return false;
+    };
+    let names = suffix
+        .iter()
+        .map(|c| c.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    matches!(
+        names.as_slice(),
+        [Some("refs")] | [Some("refs"), Some("heads")]
+    )
+}
+
+/// Returns `true` for loose remote-tracking ref files under the shared `.git`
+/// directory, such as `.git/refs/remotes/origin/main`.
+pub(crate) fn is_remote_tracking_ref(path: &Path) -> bool {
+    if extract_worktree_git_dir(path).is_some() {
+        return false;
+    }
+    let Some(suffix) = git_suffix_components(path) else {
+        return false;
+    };
+    let names = suffix
+        .iter()
+        .map(|c| c.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    matches!(
+        names.as_slice(),
+        [Some("refs"), Some("remotes"), Some(_), Some(_), ..]
+    )
+}
+
+/// Returns `true` for loose remote-tracking refs under the shared `.git` directory or their ancestor directories
+/// (note: this is for watcher allowlisting only; event classification should use [`is_remote_tracking_ref`] instead):
 /// - `.git/refs/remotes/origin/main`
 /// - `.git/refs/` (the ancestor directory that contains the refs/remotes/ directory)
 /// - `.git/refs/remotes/` (the ancestor directory that contains the refs/remotes/ directory)
 /// - `.git/refs/remotes/<remote>/` (the ancestor directory that contains the refs/remotes/<remote>/ directory)
-pub(crate) fn is_remote_tracking_ref(path: &Path) -> bool {
+pub(crate) fn is_remote_tracking_ref_or_ancestor(path: &Path) -> bool {
+    if is_remote_tracking_ref(path) {
+        return true;
+    }
     if extract_worktree_git_dir(path).is_some() {
         return false;
     }
@@ -556,7 +595,7 @@ pub fn should_ignore_git_path(path: &Path) -> bool {
     // Ignore everything inside .git/ except the allowlisted patterns.
     !is_commit_related_git_file(path)
         && !is_index_lock_file(path)
-        && !is_remote_tracking_ref(path)
+        && !is_remote_tracking_ref_or_ancestor(path)
         && !is_tracking_state_git_file(path)
 }
 

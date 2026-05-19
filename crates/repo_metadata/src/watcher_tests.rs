@@ -465,6 +465,57 @@ fn test_remote_tracking_ref_routes_only_to_repos_tracking_that_ref() {
 }
 
 #[test]
+fn test_shared_ref_ancestor_routes_to_repos_sharing_common_git_dir() {
+    VirtualFS::test("shared_ref_ancestor_routes", |dirs, mut vfs| {
+        stub_git_repository(&mut vfs, "repo");
+        vfs.mkdir("repo/.git/refs");
+        vfs.mkdir("repo/.git/worktrees");
+        vfs.mkdir("repo/.git/worktrees/wt");
+        vfs.mkdir("wt");
+        vfs.with_files(vec![Stub::FileWithContent(
+            "repo/.git/worktrees/wt/HEAD",
+            "ref: refs/heads/feature",
+        )]);
+
+        let repo_path = dirs.tests().join("repo");
+        let worktree_path = dirs.tests().join("wt");
+        let external_git_dir = dirs.tests().join("repo/.git/worktrees/wt");
+        let refs_path = dirs.tests().join("repo/.git/refs");
+
+        App::test((), |mut app| async move {
+            let watcher_handle = app.add_singleton_model(DirectoryWatcher::new_for_testing);
+
+            let main_repo_handle = watcher_handle
+                .update(&mut app, |watcher, ctx| {
+                    watcher.add_directory(
+                        StandardizedPath::from_local_canonicalized(&repo_path).unwrap(),
+                        ctx,
+                    )
+                })
+                .unwrap();
+            let worktree_repo_handle = watcher_handle
+                .update(&mut app, |watcher, ctx| {
+                    watcher.add_directory_with_git_dir(
+                        StandardizedPath::from_local_canonicalized(&worktree_path).unwrap(),
+                        Some(
+                            StandardizedPath::from_local_canonicalized(&external_git_dir).unwrap(),
+                        ),
+                        ctx,
+                    )
+                })
+                .unwrap();
+
+            let affected = watcher_handle.update(&mut app, |watcher, ctx| {
+                watcher.find_repos_for_git_event(&refs_path, ctx)
+            });
+            assert_eq!(affected.len(), 2);
+            assert!(affected.contains(&main_repo_handle));
+            assert!(affected.contains(&worktree_repo_handle));
+        });
+    });
+}
+
+#[test]
 fn test_common_config_routes_to_repos_sharing_common_git_dir() {
     VirtualFS::test("common_config_routes", |dirs, mut vfs| {
         stub_git_repository(&mut vfs, "repo");

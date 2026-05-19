@@ -225,7 +225,8 @@ fn test_path_passes_filters_windows() {
 fn test_git_path_filtering_allowlist() {
     use super::{
         is_commit_related_git_file, is_common_git_config, is_index_lock_file,
-        is_remote_tracking_ref, is_tracking_state_git_file, should_ignore_git_path,
+        is_remote_tracking_ref, is_remote_tracking_ref_or_ancestor, is_tracking_state_git_file,
+        should_ignore_git_path,
     };
     use std::path::Path;
 
@@ -375,12 +376,26 @@ fn test_git_path_filtering_allowlist() {
     assert!(is_remote_tracking_ref(Path::new(
         "/repo/.git/refs/remotes/origin/feature/nested"
     )));
-    // Ancestor directories of remote-tracking refs are now matched too
-    // (needed to keep them in the watcher's watch set).
-    assert!(is_remote_tracking_ref(Path::new("/repo/.git/refs")));
-    assert!(is_remote_tracking_ref(Path::new("/repo/.git/refs/remotes")));
-    assert!(is_remote_tracking_ref(Path::new(
+    // Ancestor directories of remote-tracking refs are matched only by the
+    // watcher allowlist helper, not the event classifier.
+    assert!(!is_remote_tracking_ref(Path::new("/repo/.git/refs")));
+    assert!(!is_remote_tracking_ref(Path::new(
+        "/repo/.git/refs/remotes"
+    )));
+    assert!(!is_remote_tracking_ref(Path::new(
         "/repo/.git/refs/remotes/origin"
+    )));
+    assert!(is_remote_tracking_ref_or_ancestor(Path::new(
+        "/repo/.git/refs"
+    )));
+    assert!(is_remote_tracking_ref_or_ancestor(Path::new(
+        "/repo/.git/refs/remotes"
+    )));
+    assert!(is_remote_tracking_ref_or_ancestor(Path::new(
+        "/repo/.git/refs/remotes/origin"
+    )));
+    assert!(is_remote_tracking_ref_or_ancestor(Path::new(
+        "/repo/.git/refs/remotes/origin/main"
     )));
     // `.git/` itself is NOT claimed by this predicate; the other predicates
     // cover it for filtering, and including it would hijack routing.
@@ -426,7 +441,7 @@ fn test_git_path_filtering_allowlist() {
 
 #[test]
 fn test_is_shared_git_ref() {
-    use super::is_shared_git_ref;
+    use super::{is_shared_git_ref, is_shared_git_ref_or_ancestor};
     use std::path::Path;
 
     // Shared refs — broadcast to all repos
@@ -434,10 +449,19 @@ fn test_is_shared_git_ref() {
     assert!(is_shared_git_ref(Path::new(
         "/repo/.git/refs/heads/feature"
     )));
+    assert!(is_shared_git_ref_or_ancestor(Path::new("/repo/.git/refs")));
+    assert!(is_shared_git_ref_or_ancestor(Path::new(
+        "/repo/.git/refs/heads"
+    )));
+    assert!(is_shared_git_ref_or_ancestor(Path::new(
+        "/repo/.git/refs/heads/main"
+    )));
 
     // Repo-specific — NOT shared
     assert!(!is_shared_git_ref(Path::new("/repo/.git/HEAD")));
     assert!(!is_shared_git_ref(Path::new("/repo/.git/index.lock")));
+    assert!(!is_shared_git_ref(Path::new("/repo/.git/refs")));
+    assert!(!is_shared_git_ref(Path::new("/repo/.git/refs/heads")));
 
     // Worktree paths — NOT shared
     assert!(!is_shared_git_ref(Path::new(
@@ -450,6 +474,9 @@ fn test_is_shared_git_ref() {
     // Other .git internals — NOT shared
     assert!(!is_shared_git_ref(Path::new("/repo/.git/refs/tags/v1")));
     assert!(!is_shared_git_ref(Path::new(
+        "/repo/.git/refs/remotes/origin/main"
+    )));
+    assert!(!is_shared_git_ref_or_ancestor(Path::new(
         "/repo/.git/refs/remotes/origin/main"
     )));
     assert!(!is_shared_git_ref(Path::new("/repo/.git/config")));
