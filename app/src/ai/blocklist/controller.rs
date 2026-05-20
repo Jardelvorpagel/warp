@@ -2013,10 +2013,22 @@ impl BlocklistAIController {
                     ));
             };
             let task_id = conversation.get_root_task_id().clone();
+            let server_conversation_token = conversation.server_conversation_token().cloned();
+            // When the server already knows this conversation (indicated by a
+            // server_conversation_token), skip sending the full task history.
+            // Passive suggestion requests don't need it — the server can look
+            // up prior context via the token — and serializing large multi-agent
+            // task trees with tool-result payloads can spike memory into the
+            // multi-GB range (see APP-4525).
+            let tasks = if server_conversation_token.is_some() {
+                vec![]
+            } else {
+                conversation.compute_active_tasks()
+            };
             let conversation_data = api::ConversationData {
                 id: conversation_id,
-                tasks: conversation.compute_active_tasks(),
-                server_conversation_token: conversation.server_conversation_token().cloned(),
+                tasks,
+                server_conversation_token,
                 forked_from_conversation_token: conversation
                     .forked_from_server_conversation_token()
                     .cloned(),
