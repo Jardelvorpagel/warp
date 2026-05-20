@@ -16,6 +16,7 @@ use warp_editor::content::buffer::{Buffer, ToBufferCharOffset};
 use warp_editor::content::diff::{text_diff, TextDiff};
 use warp_editor::content::edit::PreciseDelta;
 use warp_editor::content::version::BufferVersion;
+use warp_files::MAX_EDITOR_FILE_SIZE;
 use warp_util::content_version::ContentVersion;
 use warp_util::file::{FileId, FileLoadError, FileSaveError};
 use warp_util::host_id::HostId;
@@ -491,6 +492,30 @@ impl GlobalBufferModel {
         is_initial_load: bool,
         ctx: &mut ModelContext<Self>,
     ) {
+        // Safety-net: reject content that exceeds the editor file size limit.
+        // The primary guard lives in FileModel (which checks file size before
+        // reading), but this catches content that arrives via other paths
+        // (e.g. remote buffers, auto-reload race) (APP-4519).
+        if content.len() as u64 > MAX_EDITOR_FILE_SIZE {
+            safe_error!(
+                safe: ("Refusing to populate buffer: content exceeds size limit"),
+                full: ("Refusing to populate buffer: content is {} bytes, limit is {} bytes",
+                    content.len(), MAX_EDITOR_FILE_SIZE)
+            );
+            ctx.emit(GlobalBufferModelEvent::FailedToLoad {
+                file_id,
+                error: Rc::new(FileLoadError::FileTooLarge {
+                    path: self
+                        .file_path(file_id)
+                        .map(Path::to_path_buf)
+                        .unwrap_or_default(),
+                    size: content.len() as u64,
+                    limit: MAX_EDITOR_FILE_SIZE,
+                }),
+            });
+            return;
+        }
+
         let Some(state) = self.buffers.get_mut(&file_id) else {
             return;
         };
@@ -1829,6 +1854,23 @@ impl GlobalBufferModel {
                     content.len(),
                     server_version,
                 );
+                // Reject oversized remote buffer content (APP-4519).
+                if content.len() as u64 > MAX_EDITOR_FILE_SIZE {
+                    safe_error!(
+                        safe: ("[remote-buffer] Content exceeds size limit"),
+                        full: ("[remote-buffer] Content is {} bytes, limit is {} bytes",
+                            content.len(), MAX_EDITOR_FILE_SIZE)
+                    );
+                    ctx.emit(GlobalBufferModelEvent::FailedToLoad {
+                        file_id,
+                        error: Rc::new(FileLoadError::FileTooLarge {
+                            path: std::path::PathBuf::new(),
+                            size: content.len() as u64,
+                            limit: MAX_EDITOR_FILE_SIZE,
+                        }),
+                    });
+                    return;
+                }
                 let Some(state) = self.buffers.get_mut(&file_id) else {
                     safe_error!(
                         safe: ("[remote-buffer] Buffer state missing after OpenBuffer response"),
