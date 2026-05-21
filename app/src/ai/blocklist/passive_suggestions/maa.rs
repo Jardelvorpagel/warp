@@ -9,7 +9,7 @@ use warpui::r#async::SpawnedFutureHandle;
 use warpui::{Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
 
 use super::super::controller::{BlocklistAIController, BlocklistAIControllerEvent};
-use crate::ai::agent::api::generate_multi_agent_output;
+use crate::ai::agent::api::{build_multi_agent_request, generate_multi_agent_output_from_request};
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{
     AIIdentifiers, FileContext, PassiveCodeDiffEntry, PassiveSuggestionTrigger,
@@ -31,6 +31,8 @@ use crate::terminal::model::terminal_model::TerminalModel;
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
 use crate::terminal::view::ambient_agent::AmbientAgentViewModel;
 use crate::workspaces::user_workspaces::UserWorkspaces;
+
+use super::budget::{passive_request_budget_exceeded, passive_suggestion_trigger_name};
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
@@ -175,13 +177,34 @@ impl PassiveSuggestionsModel {
             return;
         };
 
+        let trigger_name = passive_suggestion_trigger_name(&trigger);
+        let request = match build_multi_agent_request(request_params) {
+            Ok(request) => request,
+            Err(err) => {
+                log::warn!(
+                    "Failed to build passive suggestion request for trigger {trigger_name}: {err:?}"
+                );
+                return;
+            }
+        };
+        if let Some(rejection) = passive_request_budget_exceeded(&request) {
+            log::warn!(
+                "Skipping passive suggestion request for trigger {trigger_name}: encoded request \
+                 size {} bytes exceeds budget {} bytes",
+                rejection.encoded_len,
+                rejection.max_encoded_len,
+            );
+            return;
+        }
+
         let server_api = ServerApiProvider::as_ref(ctx).get();
         let (cancellation_tx, cancellation_rx) = futures::channel::oneshot::channel();
 
         let stream_handle = ctx.spawn(
             async move {
                 let stream_result =
-                    generate_multi_agent_output(server_api, request_params, cancellation_rx).await;
+                    generate_multi_agent_output_from_request(server_api, request, cancellation_rx)
+                        .await;
                 extract_suggestion_from_stream(stream_result).await
             },
             move |me, result, ctx| {

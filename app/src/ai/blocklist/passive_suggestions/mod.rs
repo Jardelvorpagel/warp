@@ -1,3 +1,4 @@
+pub(crate) mod budget;
 mod legacy;
 mod maa;
 mod static_prompt_suggestions;

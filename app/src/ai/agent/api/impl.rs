@@ -13,9 +13,16 @@ use crate::terminal::model::session::SessionType;
 
 pub async fn generate_multi_agent_output(
     server_api: Arc<ServerApi>,
-    mut params: RequestParams,
+    params: RequestParams,
     cancellation_rx: futures::channel::oneshot::Receiver<()>,
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
+    let request = build_multi_agent_request(params)?;
+    generate_multi_agent_output_from_request(server_api, request, cancellation_rx).await
+}
+
+pub(crate) fn build_multi_agent_request(
+    mut params: RequestParams,
+) -> Result<api::Request, ConvertToAPITypeError> {
     let supported_tools = params
         .supported_tools_override
         .take()
@@ -58,7 +65,7 @@ pub async fn generate_multi_agent_output(
         params.allow_use_of_warp_credits,
     );
 
-    let request = api::Request {
+    Ok(api::Request {
         task_context: Some(api::request::TaskContext {
             tasks: params.tasks,
         }),
@@ -138,8 +145,14 @@ pub async fn generate_multi_agent_output(
             .existing_suggestions
             .map(|suggestions| suggestions.into()),
         mcp_context: params.mcp_context.map(Into::into),
-    };
+    })
+}
 
+pub async fn generate_multi_agent_output_from_request(
+    server_api: Arc<ServerApi>,
+    request: api::Request,
+    cancellation_rx: futures::channel::oneshot::Receiver<()>,
+) -> Result<ResponseStream, ConvertToAPITypeError> {
     let response_stream = server_api.generate_multi_agent_output(&request).await;
     match response_stream {
         Ok(stream) => {
