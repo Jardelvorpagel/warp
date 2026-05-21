@@ -42,6 +42,8 @@ pub mod headers {
     pub(crate) const WARP_CLIENT_ID: &str = "X-Warp-Client-ID";
 }
 
+#[cfg(test)]
+mod lib_tests;
 /// The environment variable containing extra HTTP headers to attach to requests.
 /// Only read when the channel is `Channel::Integration`. The value is a newline-separated
 /// list of `Name:Value` pairs, where each pair is split on the first colon.
@@ -391,7 +393,6 @@ impl<'a> RequestBuilder<'a> {
 
     pub fn proto<T: prost::Message>(self, proto: &T) -> RequestBuilder<'a> {
         let bytes = proto.encode_to_vec();
-        let serialized = String::from_utf8(bytes.clone());
 
         Self {
             wrapped: self
@@ -401,7 +402,7 @@ impl<'a> RequestBuilder<'a> {
                     HeaderValue::from_static("application/x-protobuf"),
                 )
                 .body(bytes),
-            serialized_payload: serialized.ok(),
+            serialized_payload: None,
             ..self
         }
     }
