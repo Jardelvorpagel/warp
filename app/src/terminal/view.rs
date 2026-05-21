@@ -4656,6 +4656,7 @@ impl TerminalView {
                         });
                     }
                     RemoteServerManagerEvent::SessionConnecting { .. }
+                    | RemoteServerManagerEvent::SessionReconnecting { .. }
                     | RemoteServerManagerEvent::HostConnected { .. }
                     | RemoteServerManagerEvent::RepoMetadataSnapshot { .. }
                     | RemoteServerManagerEvent::RepoMetadataUpdated { .. }

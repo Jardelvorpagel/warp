@@ -9,6 +9,7 @@ use crate::code_review::diff_state::{
     DiffStateModelEvent, DiffStats, FileDiff, FileDiffAndContent, GitDiffData,
     GitDiffWithBaseContent, GitFileStatus, RemoteDiffStateModel,
 };
+use crate::remote_server::manager::RemoteServerManagerEvent;
 use crate::util::git::{Commit, PrInfo};
 
 use super::InternalRemoteDiffState;
@@ -650,6 +651,60 @@ fn apply_file_delta_none_removes_file() {
             };
             assert!(diffs.files.is_empty());
         });
+    });
+}
+
+#[test]
+fn session_reconnecting_marks_model_disconnected() {
+    warpui::App::test((), |mut app| async move {
+        let handle = app.add_model(|_ctx| {
+            RemoteDiffStateModel::new_for_test(
+                DiffMode::Head,
+                InternalRemoteDiffState::Loaded(GitDiffData {
+                    files: vec![],
+                    total_additions: 0,
+                    total_deletions: 0,
+                    files_changed: 0,
+                }),
+                None,
+            )
+        });
+        let events = Arc::new(Mutex::new(Vec::new()));
+        {
+            let events = events.clone();
+            app.update(|ctx| {
+                ctx.subscribe_to_model(&handle, move |_, event, _| {
+                    if matches!(event, DiffStateModelEvent::ConnectionLost) {
+                        events
+                            .lock()
+                            .expect("event mutex should not be poisoned")
+                            .push(());
+                    }
+                });
+            });
+        }
+
+        handle.update(&mut app, |model, ctx| {
+            model.handle_manager_event(
+                &RemoteServerManagerEvent::SessionReconnecting {
+                    session_id: SessionId::default(),
+                    host_id: remote_server::HostId::new("test-host".to_string()),
+                    exit_status: None,
+                },
+                ctx,
+            );
+        });
+
+        handle.read(&app, |model, _| {
+            assert!(matches!(model.get(), DiffState::Disconnected));
+        });
+        assert_eq!(
+            events
+                .lock()
+                .expect("event mutex should not be poisoned")
+                .len(),
+            1
+        );
     });
 }
 

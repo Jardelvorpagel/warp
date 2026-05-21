@@ -138,10 +138,10 @@ impl Sessions {
         ctx: &mut ModelContext<Self>,
     ) -> Self {
         // Track the connected host_id on the `Session` type so downstream
-        // code can distinguish hosts. The `RemoteServerCommandExecutor`
-        // client itself is baked in at session construction time
-        // (see `new_command_executor_for_local_tty_session`) so we no
-        // longer need to wire it here on connect/disconnect.
+        // code can distinguish hosts. A `RemoteServerCommandExecutor` is
+        // only constructed after startup has a live connected client, but
+        // reconnecting/disconnected events clear that client slot here and
+        // reconnects reattach the replacement client below.
         #[cfg(feature = "local_tty")]
         if FeatureFlag::SshRemoteServer.is_enabled() {
             let mgr = RemoteServerManager::handle(ctx);
@@ -154,10 +154,38 @@ impl Sessions {
                         session.set_remote_host_id(Some(host_id.clone()));
                     }
                 }
+                RemoteServerManagerEvent::SessionReconnecting {
+                    session_id: sid, ..
+                } => {
+                    if let Some(session) = sessions.sessions.get(sid) {
+                        let executor = session.command_executor.read().clone();
+                        if let Some(remote_executor) = executor
+                            .as_ref()
+                            .as_any()
+                            .downcast_ref::<RemoteServerCommandExecutor>()
+                        {
+                            remote_executor.clear_client();
+                            log::info!(
+                                "Cleared remote server command executor client for reconnecting session {sid:?}"
+                            );
+                        }
+                    }
+                }
                 RemoteServerManagerEvent::SessionDisconnected {
                     session_id: sid, ..
                 } => {
                     if let Some(session) = sessions.sessions.get(sid) {
+                        let executor = session.command_executor.read().clone();
+                        if let Some(remote_executor) = executor
+                            .as_ref()
+                            .as_any()
+                            .downcast_ref::<RemoteServerCommandExecutor>()
+                        {
+                            remote_executor.clear_client();
+                            log::info!(
+                                "Cleared remote server command executor client for disconnected session {sid:?}"
+                            );
+                        }
                         session.set_remote_host_id(None);
                     }
                 }
@@ -195,10 +223,24 @@ impl Sessions {
                     ..
                 } => {
                     if let Some(session) = sessions.sessions.get(sid) {
-                        let new_executor =
-                            Arc::new(RemoteServerCommandExecutor::new(*sid, client.clone()));
-                        session.set_command_executor(new_executor);
-                        log::info!("Swapped command executor for session {sid:?} after reconnect");
+                        let executor = session.command_executor.read().clone();
+                        if let Some(remote_executor) = executor
+                            .as_ref()
+                            .as_any()
+                            .downcast_ref::<RemoteServerCommandExecutor>()
+                        {
+                            remote_executor.set_client(client.clone());
+                            log::info!(
+                                "Reattached remote server command executor client for session {sid:?} after reconnect"
+                            );
+                        } else {
+                            let new_executor =
+                                Arc::new(RemoteServerCommandExecutor::new(*sid, client.clone()));
+                            session.set_command_executor(new_executor);
+                            log::warn!(
+                                "Session {sid:?} reconnected without a remote server command executor; installed a replacement"
+                            );
+                        }
                     }
                 }
             });
@@ -359,9 +401,10 @@ impl Sessions {
 
         // For warpified-remote sessions, pick up the current host_id from
         // the manager so session.remote_host_id() is populated without
-        // waiting for the next SessionConnected event. The
-        // RemoteServerCommandExecutor already has its client baked in, so
-        // nothing else needs to be wired here.
+        // waiting for the next SessionConnected event.
+        // The initial RemoteServerCommandExecutor already starts with its connected
+        // client; later disconnect/reconnect client changes are handled by
+        // the manager subscription in `Sessions::new`.
         #[cfg(feature = "local_tty")]
         if FeatureFlag::SshRemoteServer.is_enabled()
             && matches!(
@@ -1071,9 +1114,10 @@ impl Session {
         &self.info.subshell_info
     }
 
-    /// Replaces the command executor for this session. Used after a remote
-    /// server reconnect to swap in a new `RemoteServerCommandExecutor`
-    /// backed by the reconnected client.
+    /// Replaces the command executor for this session. Remote-server
+    /// reconnects normally reattach a client to the existing executor, but
+    /// this remains as a defensive fallback if a reconnect event reaches a
+    /// session whose executor no longer matches its remote-server state.
     pub fn set_command_executor(&self, executor: Arc<dyn CommandExecutor>) {
         *self.command_executor.write() = executor;
     }

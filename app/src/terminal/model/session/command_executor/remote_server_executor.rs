@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::remote_server::client::RemoteServerClient;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use parking_lot::RwLock;
 use warp_completer::completer::{CommandExitStatus, CommandOutput};
 use warp_core::command::ExitCode;
 use warp_core::SessionId;
@@ -21,8 +22,11 @@ use crate::terminal::shell::Shell;
 /// after the session reached the `Connected` state. The manager owns the
 /// authoritative per-session client; this executor holds a cloned `Arc` to
 /// the same underlying channels and transitively keeps them alive as long
-/// as the `Session` is alive.
+/// as the `Session` is alive. If that connection later disconnects, the
+/// client slot is cleared until the manager reconnects the session and
+/// supplies a replacement client.
 ///
+/// Commands issued while the client is disconnected will fail locally.
 /// If the underlying SSH connection is torn down mid-session,
 /// [`RemoteServerClient::run_command`] will fail naturally and
 /// [`execute_command`] surfaces that as an `Err`. We deliberately do *not*
@@ -32,7 +36,7 @@ use crate::terminal::shell::Shell;
 /// produce incorrect results.
 pub struct RemoteServerCommandExecutor {
     session_id: SessionId,
-    client: Arc<RemoteServerClient>,
+    client: RwLock<Option<Arc<RemoteServerClient>>>,
 }
 
 impl std::fmt::Debug for RemoteServerCommandExecutor {
@@ -47,7 +51,22 @@ impl RemoteServerCommandExecutor {
     /// Creates a new executor backed by an already-connected
     /// [`RemoteServerClient`].
     pub fn new(session_id: SessionId, client: Arc<RemoteServerClient>) -> Self {
-        Self { session_id, client }
+        Self {
+            session_id,
+            client: RwLock::new(Some(client)),
+        }
+    }
+
+    /// Reattaches this executor to the client created by a successful
+    /// remote-server reconnect.
+    pub(crate) fn set_client(&self, client: Arc<RemoteServerClient>) {
+        *self.client.write() = Some(client);
+    }
+
+    /// Prevents new commands from being sent after the manager has observed
+    /// that this session's remote-server connection is gone.
+    pub(crate) fn clear_client(&self) {
+        *self.client.write() = None;
     }
 }
 
@@ -61,8 +80,14 @@ impl CommandExecutor for RemoteServerCommandExecutor {
         environment_variables: Option<HashMap<String, String>>,
         _execute_command_options: ExecuteCommandOptions,
     ) -> Result<CommandOutput> {
-        let response = self
-            .client
+        let Some(client) = self.client.read().clone() else {
+            return Err(anyhow!(
+                "Remote command skipped because the remote server client is not connected (session={:?})",
+                self.session_id,
+            ));
+        };
+
+        let response = client
             .run_command(
                 self.session_id,
                 command.to_owned(),
@@ -123,3 +148,7 @@ impl CommandExecutor for RemoteServerCommandExecutor {
         true
     }
 }
+
+#[cfg(test)]
+#[path = "remote_server_executor_tests.rs"]
+mod tests;

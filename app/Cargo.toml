@@ -413,6 +413,7 @@ repo_metadata = { workspace = true, features = ["test-util"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
+tokio-util = { workspace = true, features = ["compat"] }
 
 [build-dependencies]
 anyhow = "1.0"

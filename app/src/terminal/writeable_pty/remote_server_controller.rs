@@ -135,6 +135,7 @@ impl<T: EventLoopSender> RemoteServerController<T> {
                 me.on_session_connection_failed(*session_id, ctx);
             }
             RemoteServerManagerEvent::SessionConnecting { .. }
+            | RemoteServerManagerEvent::SessionReconnecting { .. }
             | RemoteServerManagerEvent::SessionDisconnected { .. }
             | RemoteServerManagerEvent::SessionReconnected { .. }
             | RemoteServerManagerEvent::SessionDeregistered { .. }

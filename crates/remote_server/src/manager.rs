@@ -388,19 +388,16 @@ pub enum RemoteServerManagerEvent {
         /// banners) should skip when this is `true`.
         is_cancelled: bool,
     },
-    /// This session's connection dropped. Carries `host_id` so consumers
-    /// don't need to look it up from the already-transitioned state.
-    /// This session's underlying connection is no longer usable: the
-    /// stream closed (EOF/error), the initialize handshake failed, or the
-    /// session was explicitly deregistered while `Connected`. Signals to
-    /// subscribers that they should drop any `Arc<RemoteServerClient>` they
-    /// hold for this session. Carries `host_id` so consumers don't need to
-    /// look it up from the already-transitioned state.
+    /// This session has reached a disconnected lifecycle state. Carries
+    /// `host_id` so consumers don't need to look it up from the
+    /// already-transitioned state.
     ///
-    /// Note this is about *transport* state, not manager tracking: after
-    /// this event fires the session may still be present in the manager
-    /// in the `Disconnected` state (e.g. when the stream dropped on its
-    /// own). Use `SessionDeregistered` to observe removal from the manager.
+    /// For reconnectable stream drops, `SessionReconnecting` is emitted
+    /// instead until reconnect attempts are exhausted. This event remains
+    /// reserved for the existing disconnect telemetry/UI lifecycle:
+    /// non-reconnectable drops, exhausted reconnect attempts, and explicit
+    /// connected-session deregistration. Use `SessionDeregistered` to observe
+    /// removal from the manager.
     SessionDisconnected {
         session_id: SessionId,
         host_id: HostId,
@@ -413,6 +410,17 @@ pub enum RemoteServerManagerEvent {
         /// deregistrations. Used by the view layer to distinguish
         /// reconnect-exhausted telemetry from regular disconnections.
         was_reconnect_attempt: bool,
+    },
+    /// The connected stream dropped, but the manager is keeping the session
+    /// alive while it attempts to reconnect. Subscribers holding cloned
+    /// `Arc<RemoteServerClient>` references should drop or detach them when
+    /// this fires; `SessionReconnected` will carry the replacement client if a
+    /// reconnect succeeds.
+    SessionReconnecting {
+        session_id: SessionId,
+        host_id: HostId,
+        /// Exit status of the remote server subprocess, if available.
+        exit_status: Option<RemoteServerExitStatus>,
     },
     /// A reconnection attempt succeeded. Downstream owners (e.g.
     /// `RemoteServerCommandExecutor`) should swap their client reference
@@ -428,9 +436,8 @@ pub enum RemoteServerManagerEvent {
     /// exactly once per session, and only on explicit teardown (never as
     /// a result of a spontaneous connection drop).
     ///
-    /// If the session was `Connected` at the point of deregistration, a
-    /// `SessionDisconnected` event is emitted first so transport-level
-    /// subscribers can release their client references.
+    /// If the session had an associated host at the point of deregistration,
+    /// `SessionDisconnected` is emitted before this event.
     SessionDeregistered { session_id: SessionId },
 
     // --- Host-scoped events ---
@@ -591,6 +598,7 @@ impl RemoteServerManagerEvent {
             RemoteServerManagerEvent::SessionConnecting { session_id }
             | RemoteServerManagerEvent::SessionConnected { session_id, .. }
             | RemoteServerManagerEvent::SessionConnectionFailed { session_id, .. }
+            | RemoteServerManagerEvent::SessionReconnecting { session_id, .. }
             | RemoteServerManagerEvent::SessionDisconnected { session_id, .. }
             | RemoteServerManagerEvent::SessionReconnected { session_id, .. }
             | RemoteServerManagerEvent::SessionDeregistered { session_id }
@@ -1327,12 +1335,12 @@ impl RemoteServerManager {
     ///
     /// Two separate events can fire here, and they mean different things:
     ///
-    /// * `SessionDisconnected` -- the *transport* went away. Emitted only
-    ///   when the session was `Connected` at the time of deregistration.
-    ///   Subscribers can use this to drop their
-    ///   `Arc<RemoteServerClient>` references and cancel in-flight
-    ///   requests. The same event also fires independently from
-    ///   `mark_session_disconnected` when the stream drops on its own.
+    /// * `SessionDisconnected` -- the user-facing disconnected lifecycle
+    ///   signal for connected-session teardown. Subscribers should drop their
+    ///   `Arc<RemoteServerClient>` references and cancel in-flight requests
+    ///   when this fires. It also fires from `mark_session_disconnected` for
+    ///   non-reconnectable disconnects or after reconnect retries are
+    ///   exhausted.
     /// * `SessionDeregistered` -- the manager is no longer *tracking* this
     ///   session. Always emitted, regardless of which state the session
     ///   was in, because the entry is being removed from `sessions`
@@ -2479,6 +2487,13 @@ impl RemoteServerManager {
                 control_path: control_path.clone(),
             },
         );
+        if attempt == 1 {
+            ctx.emit(RemoteServerManagerEvent::SessionReconnecting {
+                session_id,
+                host_id: host_id.clone(),
+                exit_status: exit_status.clone(),
+            });
+        }
 
         let spawner = self.spawner.clone();
         let executor = ctx.background_executor().clone();

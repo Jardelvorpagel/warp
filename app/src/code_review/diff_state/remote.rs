@@ -170,6 +170,13 @@ impl RemoteDiffStateModel {
             } if *session_id == self.session_id && host_id == &self.remote_path.host_id => {
                 self.mark_disconnected(ctx);
             }
+            RemoteServerManagerEvent::SessionReconnecting {
+                session_id,
+                host_id,
+                ..
+            } if *session_id == self.session_id && host_id == &self.remote_path.host_id => {
+                self.mark_disconnected(ctx);
+            }
             RemoteServerManagerEvent::SessionReconnected {
                 session_id,
                 host_id,

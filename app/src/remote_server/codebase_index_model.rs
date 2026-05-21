@@ -369,6 +369,7 @@ impl RemoteCodebaseIndexModel {
             }
             RemoteServerManagerEvent::SessionConnecting { .. }
             | RemoteServerManagerEvent::SessionConnectionFailed { .. }
+            | RemoteServerManagerEvent::SessionReconnecting { .. }
             | RemoteServerManagerEvent::HostConnected { .. }
             | RemoteServerManagerEvent::RepoMetadataSnapshot { .. }
             | RemoteServerManagerEvent::RepoMetadataUpdated { .. }
