@@ -677,6 +677,7 @@ impl BackingView for TerminalView {
             if !is_ambient_agent {
                 items.push(
                     MenuItemFields::new("Copy link")
+                        .with_icon(icons::Icon::Link)
                         .with_on_select_action(TerminalAction::CopySharedSessionLink { source })
                         .into_item(),
                 );
@@ -685,6 +686,7 @@ impl BackingView for TerminalView {
             if shared_session_status.is_sharer() {
                 items.push(
                     MenuItemFields::new("Stop sharing session")
+                        .with_icon(icons::Icon::Stop)
                         .with_on_select_action(TerminalAction::StopSharingCurrentSession { source })
                         .into_item(),
                 );
@@ -697,6 +699,7 @@ impl BackingView for TerminalView {
             {
                 items.push(
                     MenuItemFields::new("Open on Desktop")
+                        .with_icon(icons::Icon::Laptop)
                         .with_on_select_action(TerminalAction::OpenSharedSessionOnDesktop {
                             source,
                         })
@@ -708,6 +711,7 @@ impl BackingView for TerminalView {
         {
             items.push(
                 MenuItemFields::new("Share session")
+                    .with_icon(icons::Icon::Share)
                     .with_on_select_action(TerminalAction::OpenShareSessionModal { source })
                     .into_item(),
             );
