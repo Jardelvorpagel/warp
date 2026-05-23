@@ -871,6 +871,8 @@ pub enum FeatureFlag {
 
     /// Gates the v2 billing and usage page redesign.
     BillingAndUsagePageV2,
+    /// Gates the local Warp Control CLI (`warpctrl`) settings, discovery, bridge, and endpoints.
+    WarpControlCli,
 
     /// Replaces the raw harness CLI command with a styled header showing CLI name + status icon.
     HarnessSessionHeader,

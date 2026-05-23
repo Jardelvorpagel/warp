@@ -6,6 +6,7 @@ use super::{
     SettingsSection, ToggleState,
 };
 use crate::appearance::Appearance;
+use crate::features::FeatureFlag;
 use crate::report_if_error;
 use crate::settings::{
     AllowInsideWarpControl, AllowInsideWarpReadOnly, AllowInsideWarpReadWrite,
@@ -235,7 +236,7 @@ impl SettingsPageMeta for ScriptingSettingsPageView {
     }
 
     fn should_render(&self, _ctx: &AppContext) -> bool {
-        cfg!(not(target_family = "wasm"))
+        cfg!(not(target_family = "wasm")) && FeatureFlag::WarpControlCli.is_enabled()
     }
 
     fn update_filter(&mut self, query: &str, ctx: &mut ViewContext<Self>) -> MatchData {

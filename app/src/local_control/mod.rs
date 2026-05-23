@@ -2,11 +2,14 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+use crate::features::FeatureFlag;
 use crate::settings::{
     LocalControlInvocationContext, LocalControlPermissionCategory, LocalControlSettings,
 };
 use ::local_control::auth::{CredentialGrant, CredentialRequest, ScopedCredential};
-use ::local_control::protocol::{PaneTarget, TabTarget, TargetSelector, WindowTarget};
+use ::local_control::protocol::{
+    PaneTarget, TabTarget, TargetSelector, WindowSelector, WindowTarget,
+};
 use ::local_control::{
     ActionKind, AuthToken, ControlEndpoint, ControlError, ControlResponse, ErrorCode,
     ErrorResponseEnvelope, InstanceId, InstanceRecord, RegisteredInstance, RequestEnvelope,
@@ -46,6 +49,12 @@ impl SingletonEntity for LocalControlServer {}
 
 impl LocalControlServer {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
+        if !FeatureFlag::WarpControlCli.is_enabled() {
+            return Self {
+                _runtime: None,
+                _registered_instance: None,
+            };
+        }
         match Self::start(ctx) {
             Ok(server) => server,
             Err(error) => {
@@ -59,6 +68,12 @@ impl LocalControlServer {
     }
 
     fn start(ctx: &mut ModelContext<Self>) -> Result<Self, ControlError> {
+        if !FeatureFlag::WarpControlCli.is_enabled() {
+            return Ok(Self {
+                _runtime: None,
+                _registered_instance: None,
+            });
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_io()
@@ -125,6 +140,18 @@ impl LocalControlServer {
 
 pub struct LocalControlBridge {
     instance_id: Option<InstanceId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResolvedSelector {
+    Active,
+    Id,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ResolvedWindowTarget {
+    window_id: warpui::WindowId,
+    selector: ResolvedSelector,
 }
 
 impl Entity for LocalControlBridge {
@@ -202,8 +229,8 @@ impl LocalControlBridge {
         target: &TargetSelector,
         ctx: &mut ModelContext<Self>,
     ) -> Result<serde_json::Value, ControlError> {
-        validate_tab_create_target(target)?;
-        let window_id = target_window_id(ctx)?;
+        let resolved_window = resolve_tab_create_target(target, ctx)?;
+        let window_id = resolved_window.window_id;
         let workspace = ctx
             .views_of_type::<Workspace>(window_id)
             .and_then(|workspaces| workspaces.into_iter().next())
@@ -233,7 +260,7 @@ impl LocalControlBridge {
             "created": true,
             "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
             "window": {
-                "selector": "active",
+                "selector": resolved_window.selector.as_str(),
                 "id": window_id.to_string(),
             },
             "tab": {
@@ -249,6 +276,16 @@ async fn handle_credential_request(
     State(state): State<ControlServerState>,
     payload: Result<Json<CredentialRequest>, JsonRejection>,
 ) -> Response {
+    if !FeatureFlag::WarpControlCli.is_enabled() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::LocalControlDisabled,
+                "local control is disabled by feature flag",
+            ))),
+        )
+            .into_response();
+    }
     let request = match payload {
         Ok(Json(request)) => request,
         Err(err) => {
@@ -364,6 +401,16 @@ async fn handle_control_request(
     headers: HeaderMap,
     payload: Result<Json<RequestEnvelope>, JsonRejection>,
 ) -> Response {
+    if !FeatureFlag::WarpControlCli.is_enabled() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::LocalControlDisabled,
+                "local control is disabled by feature flag",
+            ))),
+        )
+            .into_response();
+    }
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
@@ -437,10 +484,13 @@ async fn handle_control_request(
 }
 
 fn validate_tab_create_target(target: &TargetSelector) -> Result<(), ControlError> {
-    if !matches!(target.window.as_ref(), None | Some(WindowTarget::Active)) {
+    if !matches!(
+        target.window.as_ref(),
+        None | Some(WindowTarget::Active) | Some(WindowTarget::Id { .. })
+    ) {
         return Err(ControlError::new(
             ErrorCode::InvalidSelector,
-            "tab.create only supports the active window selector",
+            "tab.create only supports active or explicit window-id selectors",
         ));
     }
     if !matches!(target.tab.as_ref(), None | Some(TabTarget::Active)) {
@@ -458,26 +508,78 @@ fn validate_tab_create_target(target: &TargetSelector) -> Result<(), ControlErro
     Ok(())
 }
 
-fn target_window_id(
+fn resolve_tab_create_target(
+    target: &TargetSelector,
     ctx: &mut ModelContext<LocalControlBridge>,
-) -> Result<warpui::WindowId, ControlError> {
-    preferred_window_id(
+) -> Result<ResolvedWindowTarget, ControlError> {
+    validate_tab_create_target(target)?;
+    let open_windows = ctx.window_ids().collect::<Vec<_>>();
+    resolve_window_target(
+        target.window.as_ref(),
+        &open_windows,
         ctx.windows().active_window(),
-        ctx.windows().frontmost_window_id(),
     )
-    .ok_or_else(|| {
-        ControlError::new(
-            ErrorCode::MissingTarget,
-            "tab.create requires an active or previously active Warp window",
-        )
-    })
 }
 
-fn preferred_window_id(
+fn resolve_window_target(
+    target: Option<&WindowTarget>,
+    open_windows: &[warpui::WindowId],
     active_window: Option<warpui::WindowId>,
-    frontmost_window: Option<warpui::WindowId>,
-) -> Option<warpui::WindowId> {
-    active_window.or(frontmost_window)
+) -> Result<ResolvedWindowTarget, ControlError> {
+    match target {
+        None | Some(WindowTarget::Active) => active_window
+            .filter(|window_id| open_windows.contains(window_id))
+            .map(|window_id| ResolvedWindowTarget {
+                window_id,
+                selector: ResolvedSelector::Active,
+            })
+            .ok_or_else(|| {
+                ControlError::new(
+                    ErrorCode::MissingTarget,
+                    "tab.create requires an active Warp window",
+                )
+            }),
+        Some(WindowTarget::Id { id }) => {
+            let window_id = parse_window_selector(id)?;
+            if open_windows.contains(&window_id) {
+                return Ok(ResolvedWindowTarget {
+                    window_id,
+                    selector: ResolvedSelector::Id,
+                });
+            }
+            Err(ControlError::new(
+                ErrorCode::StaleTarget,
+                format!("window selector {} no longer resolves", id.0),
+            ))
+        }
+        Some(WindowTarget::Index { .. } | WindowTarget::Title { .. }) => Err(ControlError::new(
+            ErrorCode::InvalidSelector,
+            "tab.create only supports active or explicit window-id selectors",
+        )),
+    }
+}
+
+fn parse_window_selector(id: &WindowSelector) -> Result<warpui::WindowId, ControlError> {
+    id.0.parse::<usize>()
+        .map(warpui::WindowId::from_usize)
+        .map_err(|_| {
+            ControlError::new(
+                ErrorCode::InvalidSelector,
+                format!(
+                    "window selector {} is not a valid local-control window id",
+                    id.0
+                ),
+            )
+        })
+}
+
+impl ResolvedSelector {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Id => "id",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -497,8 +599,14 @@ fn local_invocation_context(context: InvocationContext) -> LocalControlInvocatio
 
 fn local_permission(permission: LocalControlPermission) -> LocalControlPermissionCategory {
     match permission {
-        LocalControlPermission::ReadOnly => LocalControlPermissionCategory::ReadOnly,
-        LocalControlPermission::ReadWrite => LocalControlPermissionCategory::ReadWrite,
+        LocalControlPermission::MetadataRead | LocalControlPermission::UnderlyingDataRead => {
+            LocalControlPermissionCategory::ReadOnly
+        }
+        LocalControlPermission::AppStateMutation
+        | LocalControlPermission::MetadataConfigurationMutation
+        | LocalControlPermission::UnderlyingDataMutation => {
+            LocalControlPermissionCategory::ReadWrite
+        }
     }
 }
 
