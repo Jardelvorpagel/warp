@@ -314,7 +314,11 @@ impl ActionKind {
             | Self::TabList
             | Self::TabCreate
             | Self::PaneList
-            | Self::SessionList => ActionImplementationStatus::Implemented,
+            | Self::SessionList
+            | Self::ThemeList
+            | Self::AppearanceGet
+            | Self::SettingGet
+            | Self::SettingList => ActionImplementationStatus::Implemented,
             _ => ActionImplementationStatus::Stub,
         };
         let requires_authenticated_user =

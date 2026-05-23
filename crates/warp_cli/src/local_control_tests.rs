@@ -44,6 +44,43 @@ fn parses_instance_list() {
 }
 
 #[test]
+fn parses_settings_and_appearance_metadata_commands() {
+    assert!(matches!(
+        ControlArgs::try_parse_from(["warpctrl", "theme", "list"])
+            .expect("theme list parses")
+            .command,
+        ControlCommand::Theme(ThemeCommand::List(_))
+    ));
+    assert!(matches!(
+        ControlArgs::try_parse_from(["warpctrl", "appearance", "get"])
+            .expect("appearance get parses")
+            .command,
+        ControlCommand::Appearance(AppearanceCommand::Get(_))
+    ));
+    assert!(matches!(
+        ControlArgs::try_parse_from(["warpctrl", "setting", "list"])
+            .expect("setting list parses")
+            .command,
+        ControlCommand::Setting(SettingCommand::List(_))
+    ));
+
+    let args = ControlArgs::try_parse_from([
+        "warpctrl",
+        "setting",
+        "get",
+        "--instance",
+        "inst_123",
+        "appearance.themes.theme",
+    ])
+    .expect("setting get parses");
+    let ControlCommand::Setting(SettingCommand::Get(setting)) = args.command else {
+        panic!("expected setting get command");
+    };
+    assert_eq!(setting.target.instance.as_deref(), Some("inst_123"));
+    assert_eq!(setting.key, "appearance.themes.theme");
+}
+
+#[test]
 fn parses_app_metadata_commands() {
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "ping"]).is_ok());
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "version"]).is_ok());
@@ -118,7 +155,6 @@ fn parses_completion_generation_command() {
 
 #[test]
 fn rejects_non_metadata_and_future_catalog_commands_not_in_this_shard() {
-    assert!(ControlArgs::try_parse_from(["warpctrl", "setting", "list"]).is_err());
     assert!(ControlArgs::try_parse_from(["warpctrl", "input", "get"]).is_err());
     assert!(ControlArgs::try_parse_from(["warpctrl", "history", "list"]).is_err());
     assert!(ControlArgs::try_parse_from(["warpctrl", "block", "list"]).is_err());
@@ -136,6 +172,9 @@ fn generated_bash_completions_include_metadata_commands() {
     assert!(completions.contains("tab"));
     assert!(completions.contains("pane"));
     assert!(completions.contains("session"));
+    assert!(completions.contains("theme"));
+    assert!(completions.contains("appearance"));
+    assert!(completions.contains("setting"));
     assert!(completions.contains("completions"));
 }
 

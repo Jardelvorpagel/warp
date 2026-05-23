@@ -9,6 +9,24 @@ fn request_envelope_serializes_stable_action_names() {
 }
 
 #[test]
+fn setting_get_params_roundtrip() {
+    let action = Action::with_params(
+        ActionKind::SettingGet,
+        SettingGetParams {
+            key: "appearance.themes.theme".to_owned(),
+        },
+    )
+    .expect("params serialize");
+    assert_eq!(action.kind, ActionKind::SettingGet);
+    assert_eq!(action.params["key"], "appearance.themes.theme");
+
+    let params = action
+        .params_as::<SettingGetParams>()
+        .expect("params deserialize");
+    assert_eq!(params.key, "appearance.themes.theme");
+}
+
+#[test]
 fn response_error_serializes_machine_code() {
     let response = ResponseEnvelope::error(
         Uuid::nil(),
@@ -81,6 +99,10 @@ fn structural_metadata_actions_are_logged_out_safe_read_metadata() {
         ActionKind::TabList,
         ActionKind::PaneList,
         ActionKind::SessionList,
+        ActionKind::ThemeList,
+        ActionKind::AppearanceGet,
+        ActionKind::SettingGet,
+        ActionKind::SettingList,
     ] {
         let metadata = action.metadata();
         assert_eq!(
@@ -143,6 +165,22 @@ fn structural_metadata_actions_have_expected_target_scopes() {
     assert_eq!(
         ActionKind::SessionList.metadata().target_scope,
         TargetScope::Session
+    );
+    assert_eq!(
+        ActionKind::ThemeList.metadata().target_scope,
+        TargetScope::Appearance
+    );
+    assert_eq!(
+        ActionKind::AppearanceGet.metadata().target_scope,
+        TargetScope::Appearance
+    );
+    assert_eq!(
+        ActionKind::SettingList.metadata().target_scope,
+        TargetScope::Settings
+    );
+    assert_eq!(
+        ActionKind::SettingGet.metadata().target_scope,
+        TargetScope::Settings
     );
 }
 

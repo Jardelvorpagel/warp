@@ -10,8 +10,8 @@ use crate::agent::OutputFormat;
 use crate::local_control::output::{write_json, write_json_line};
 use crate::local_control::selectors::instance_selector;
 use crate::local_control::{
-    ActionCommand, AppCommand, InstanceCommand, PaneCommand, SessionCommand, TabCommand,
-    TargetArgs, WindowCommand,
+    ActionCommand, AppCommand, AppearanceCommand, InstanceCommand, PaneCommand, SessionCommand,
+    SettingCommand, TabCommand, TargetArgs, ThemeCommand, WindowCommand,
 };
 
 #[derive(Serialize)]
@@ -169,6 +169,51 @@ pub(super) fn run_session_command(
         SessionCommand::List(args) => {
             run_action_with_params(args, ActionKind::SessionList, EmptyParams {}, output_format)
         }
+    }
+}
+
+pub(super) fn run_theme_command(
+    command: ThemeCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        ThemeCommand::List(args) => {
+            run_action_with_params(args, ActionKind::ThemeList, EmptyParams {}, output_format)
+        }
+    }
+}
+
+pub(super) fn run_appearance_command(
+    command: AppearanceCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        AppearanceCommand::Get(args) => run_action_with_params(
+            args,
+            ActionKind::AppearanceGet,
+            EmptyParams {},
+            output_format,
+        ),
+    }
+}
+
+pub(super) fn run_setting_command(
+    command: SettingCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        SettingCommand::List(args) => run_action_with_params(
+            args,
+            ActionKind::SettingList,
+            local_control::SettingListParams::default(),
+            output_format,
+        ),
+        SettingCommand::Get(args) => run_action_with_params(
+            args.target,
+            ActionKind::SettingGet,
+            local_control::SettingGetParams { key: args.key },
+            output_format,
+        ),
     }
 }
 

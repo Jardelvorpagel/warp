@@ -13,9 +13,10 @@ use warp_core::features::FeatureFlag;
 use warpui::App;
 
 use super::{
-    action_metadata_for_name, capabilities, ensure_feature_enabled, ensure_settings_allow_action,
-    outside_warp_action_enabled_for_settings, require_active_window_id, validate_action_params,
-    validate_tab_create_target, LocalControlBridge,
+    action_metadata_for_name, appearance_state_result, capabilities, ensure_feature_enabled,
+    ensure_settings_allow_action, outside_warp_action_enabled_for_settings, rejected_setting_key,
+    require_active_window_id, setting_get_result, setting_list_result, theme_list_result,
+    validate_action_params, validate_tab_create_target, LocalControlBridge,
 };
 use crate::settings::{
     AllowInsideWarpAppStateMutations, AllowInsideWarpControl,
@@ -192,6 +193,10 @@ fn capabilities_advertises_core_and_metadata_slice_actions() {
             ActionKind::TabCreate,
             ActionKind::PaneList,
             ActionKind::SessionList,
+            ActionKind::ThemeList,
+            ActionKind::AppearanceGet,
+            ActionKind::SettingGet,
+            ActionKind::SettingList,
         ]
     );
 }
@@ -403,6 +408,10 @@ fn metadata_actions_require_metadata_permission_not_app_state_mutation_permissio
         ActionKind::TabList,
         ActionKind::PaneList,
         ActionKind::SessionList,
+        ActionKind::ThemeList,
+        ActionKind::AppearanceGet,
+        ActionKind::SettingGet,
+        ActionKind::SettingList,
     ] {
         assert_eq!(
             action.metadata().permission_category,
@@ -467,6 +476,9 @@ fn app_target_metadata_reads_reject_malformed_params() {
         ActionKind::TabList,
         ActionKind::PaneList,
         ActionKind::SessionList,
+        ActionKind::ThemeList,
+        ActionKind::AppearanceGet,
+        ActionKind::SettingList,
     ] {
         let err = validate_action_params(&Action {
             kind: action,
@@ -481,4 +493,127 @@ fn app_target_metadata_reads_reject_malformed_params() {
         })
         .expect("empty app target metadata read params are accepted");
     }
+
+    validate_action_params(&Action {
+        kind: ActionKind::SettingGet,
+        params: serde_json::json!({ "key": "appearance.themes.theme" }),
+    })
+    .expect("setting.get accepts a key parameter");
+}
+
+#[test]
+fn settings_and_appearance_handlers_return_allowlisted_metadata() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_settings_for_tests(&mut app);
+        let bridge = app.add_model(LocalControlBridge::new);
+
+        bridge.update(&mut app, |_, ctx| {
+            let themes = theme_list_result(ctx).expect("themes are listed");
+            assert!(themes.themes.iter().any(|theme| theme.name == "Dark"));
+
+            let appearance = appearance_state_result(ctx).expect("appearance is readable");
+            assert_eq!(appearance.theme.as_deref(), Some("Dark"));
+            assert_eq!(appearance.light_theme.as_deref(), Some("Light"));
+            assert_eq!(appearance.dark_theme.as_deref(), Some("Dark"));
+            assert_eq!(appearance.ui_zoom_percent, Some(100));
+
+            let settings = setting_list_result(ctx).expect("settings are listed");
+            assert!(settings
+                .settings
+                .iter()
+                .any(|setting| setting.key == "appearance.themes.system_theme"));
+
+            let setting = setting_get_result("appearance.themes.system_theme", ctx)
+                .expect("allowlisted setting is readable");
+            assert_eq!(setting.setting.value, serde_json::json!(false));
+            assert_eq!(setting.setting.value_type, "bool");
+        });
+    });
+}
+
+#[test]
+fn setting_get_rejects_unknown_and_private_settings() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_settings_for_tests(&mut app);
+        let bridge = app.add_model(LocalControlBridge::new);
+
+        bridge.update(&mut app, |_, ctx| {
+            let err = setting_get_result("appearance.secrets.token", ctx)
+                .expect_err("unknown settings are rejected");
+            assert_eq!(err.code, ErrorCode::NotAllowlisted);
+
+            let err = setting_get_result("local_control.allow_outside_warp_control", ctx)
+                .expect_err("private settings are rejected");
+            assert_eq!(err.code, ErrorCode::NotAllowlisted);
+            assert!(err.message.contains("private or sensitive"));
+        });
+    });
+}
+
+#[test]
+fn rejected_setting_key_distinguishes_private_settings() {
+    let private_err = rejected_setting_key("terminal.input.inline_menu_custom_content_heights");
+    assert_eq!(private_err.code, ErrorCode::NotAllowlisted);
+    assert!(private_err.message.contains("private or sensitive"));
+
+    let unknown_err = rejected_setting_key("terminal.input.not_real");
+    assert_eq!(unknown_err.code, ErrorCode::NotAllowlisted);
+    assert!(unknown_err.message.contains("not an allowlisted"));
+}
+
+#[test]
+fn settings_and_appearance_bridge_handlers_return_success() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_settings_for_tests(&mut app);
+        let bridge = app.add_model(LocalControlBridge::new);
+
+        for action in [
+            ActionKind::ThemeList,
+            ActionKind::AppearanceGet,
+            ActionKind::SettingList,
+        ] {
+            let response = bridge.update(&mut app, |bridge, ctx| {
+                bridge.handle_request(
+                    RequestEnvelope::new(Action::new(action)),
+                    grant_for(action),
+                    ctx,
+                )
+            });
+            match response.response {
+                ControlResponse::Ok { data } => assert!(data.is_object()),
+                ControlResponse::Error { error } => {
+                    panic!("{} returned {error}", action.as_str());
+                }
+            }
+        }
+
+        let action = Action::with_params(
+            ActionKind::SettingGet,
+            ::local_control::SettingGetParams {
+                key: "appearance.themes.system_theme".to_owned(),
+            },
+        )
+        .expect("setting.get params serialize");
+        let response = bridge.update(&mut app, |bridge, ctx| {
+            bridge.handle_request(
+                RequestEnvelope::new(action),
+                grant_for(ActionKind::SettingGet),
+                ctx,
+            )
+        });
+        match response.response {
+            ControlResponse::Ok { data } => {
+                assert_eq!(data["setting"]["key"], "appearance.themes.system_theme");
+            }
+            ControlResponse::Error { error } => {
+                panic!("setting.get returned {error}");
+            }
+        }
+    });
 }

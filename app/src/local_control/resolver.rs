@@ -1,6 +1,7 @@
 use crate::local_control::handlers::metadata::action_metadata_for_name;
 use ::local_control::protocol::{
-    ActionGetParams, PaneTarget, SessionTarget, TabTarget, TargetSelector, WindowTarget,
+    ActionGetParams, PaneTarget, SessionTarget, SettingGetParams, TabTarget, TargetSelector,
+    WindowTarget,
 };
 use ::local_control::{ActionKind, ControlError, ErrorCode};
 use warpui::ModelContext;
@@ -66,6 +67,7 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
             action_metadata_for_name(&params.action)?;
             Ok(())
         }
+        ActionKind::SettingGet => action.params_as::<SettingGetParams>().map(|_| ()),
         ActionKind::AppPing
         | ActionKind::AppInspect
         | ActionKind::AppVersion
@@ -75,7 +77,10 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         | ActionKind::TabList
         | ActionKind::TabCreate
         | ActionKind::PaneList
-        | ActionKind::SessionList => validate_empty_action_params(action),
+        | ActionKind::SessionList
+        | ActionKind::ThemeList
+        | ActionKind::AppearanceGet
+        | ActionKind::SettingList => validate_empty_action_params(action),
         _ => Ok(()),
     }
 }
