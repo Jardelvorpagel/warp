@@ -26,6 +26,7 @@ use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewCon
 
 /// Toggle rows shown on the Settings > Scripting page for outside-Warp local-control gates.
 #[derive(Clone, Copy, Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum ScriptingToggle {
     OutsideWarpControl,
     OutsideWarpMetadataReads,

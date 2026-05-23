@@ -73,6 +73,7 @@ pub enum TargetScope {
     Settings,
     Appearance,
     Surface,
+    Action,
 }
 
 /// Whether an action has an app-side implementation in this stack layer.
@@ -103,6 +104,8 @@ pub struct ActionMetadata {
 pub enum ActionKind {
     #[serde(rename = "instance.list")]
     InstanceList,
+    #[serde(rename = "instance.inspect")]
+    InstanceInspect,
     #[serde(rename = "app.ping")]
     AppPing,
     #[serde(rename = "app.inspect")]
@@ -111,6 +114,14 @@ pub enum ActionKind {
     AppVersion,
     #[serde(rename = "app.active")]
     AppActive,
+    #[serde(rename = "action.list")]
+    ActionList,
+    #[serde(rename = "action.get")]
+    ActionGet,
+    #[serde(rename = "capability.list")]
+    CapabilityList,
+    #[serde(rename = "capability.inspect")]
+    CapabilityInspect,
     #[serde(rename = "app.focus")]
     AppFocus,
     #[serde(rename = "app.settings.open")]
@@ -133,6 +144,8 @@ pub enum ActionKind {
     AppVerticalTabsToggle,
     #[serde(rename = "window.list")]
     WindowList,
+    #[serde(rename = "window.inspect")]
+    WindowInspect,
     #[serde(rename = "window.create")]
     WindowCreate,
     #[serde(rename = "window.focus")]
@@ -141,6 +154,8 @@ pub enum ActionKind {
     WindowClose,
     #[serde(rename = "tab.list")]
     TabList,
+    #[serde(rename = "tab.inspect")]
+    TabInspect,
     #[serde(rename = "tab.create")]
     TabCreate,
     #[serde(rename = "tab.activate")]
@@ -153,6 +168,8 @@ pub enum ActionKind {
     TabClose,
     #[serde(rename = "pane.list")]
     PaneList,
+    #[serde(rename = "pane.inspect")]
+    PaneInspect,
     #[serde(rename = "pane.split")]
     PaneSplit,
     #[serde(rename = "pane.focus")]
@@ -171,6 +188,8 @@ pub enum ActionKind {
     PaneSessionNext,
     #[serde(rename = "session.list")]
     SessionList,
+    #[serde(rename = "session.inspect")]
+    SessionInspect,
     #[serde(rename = "input.insert")]
     InputInsert,
     #[serde(rename = "input.replace")]
@@ -204,10 +223,15 @@ pub enum ActionKind {
 impl ActionKind {
     pub const ALL: &[Self] = &[
         Self::InstanceList,
+        Self::InstanceInspect,
         Self::AppPing,
         Self::AppInspect,
         Self::AppVersion,
         Self::AppActive,
+        Self::ActionList,
+        Self::ActionGet,
+        Self::CapabilityList,
+        Self::CapabilityInspect,
         Self::AppFocus,
         Self::AppSettingsOpen,
         Self::AppCommandPaletteOpen,
@@ -219,16 +243,19 @@ impl ActionKind {
         Self::AppCodeReviewToggle,
         Self::AppVerticalTabsToggle,
         Self::WindowList,
+        Self::WindowInspect,
         Self::WindowCreate,
         Self::WindowFocus,
         Self::WindowClose,
         Self::TabList,
+        Self::TabInspect,
         Self::TabCreate,
         Self::TabActivate,
         Self::TabMove,
         Self::TabRename,
         Self::TabClose,
         Self::PaneList,
+        Self::PaneInspect,
         Self::PaneSplit,
         Self::PaneFocus,
         Self::PaneNavigate,
@@ -238,6 +265,7 @@ impl ActionKind {
         Self::PaneSessionPrevious,
         Self::PaneSessionNext,
         Self::SessionList,
+        Self::SessionInspect,
         Self::InputInsert,
         Self::InputReplace,
         Self::InputClear,
@@ -256,10 +284,15 @@ impl ActionKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InstanceList => "instance.list",
+            Self::InstanceInspect => "instance.inspect",
             Self::AppPing => "app.ping",
             Self::AppInspect => "app.inspect",
             Self::AppVersion => "app.version",
             Self::AppActive => "app.active",
+            Self::ActionList => "action.list",
+            Self::ActionGet => "action.get",
+            Self::CapabilityList => "capability.list",
+            Self::CapabilityInspect => "capability.inspect",
             Self::AppFocus => "app.focus",
             Self::AppSettingsOpen => "app.settings.open",
             Self::AppCommandPaletteOpen => "app.command_palette.open",
@@ -271,16 +304,19 @@ impl ActionKind {
             Self::AppCodeReviewToggle => "app.code_review.toggle",
             Self::AppVerticalTabsToggle => "app.vertical_tabs.toggle",
             Self::WindowList => "window.list",
+            Self::WindowInspect => "window.inspect",
             Self::WindowCreate => "window.create",
             Self::WindowFocus => "window.focus",
             Self::WindowClose => "window.close",
             Self::TabList => "tab.list",
+            Self::TabInspect => "tab.inspect",
             Self::TabCreate => "tab.create",
             Self::TabActivate => "tab.activate",
             Self::TabMove => "tab.move",
             Self::TabRename => "tab.rename",
             Self::TabClose => "tab.close",
             Self::PaneList => "pane.list",
+            Self::PaneInspect => "pane.inspect",
             Self::PaneSplit => "pane.split",
             Self::PaneFocus => "pane.focus",
             Self::PaneNavigate => "pane.navigate",
@@ -290,6 +326,7 @@ impl ActionKind {
             Self::PaneSessionPrevious => "pane.session.previous",
             Self::PaneSessionNext => "pane.session.next",
             Self::SessionList => "session.list",
+            Self::SessionInspect => "session.inspect",
             Self::InputInsert => "input.insert",
             Self::InputReplace => "input.replace",
             Self::InputClear => "input.clear",
@@ -308,14 +345,35 @@ impl ActionKind {
     }
 
     pub fn metadata(self) -> ActionMetadata {
-        let (implementation_status, requires_authenticated_user, allowed_invocation_contexts) =
-            match self {
-                Self::InstanceList | Self::AppPing | Self::AppVersion | Self::TabCreate => (
-                    ActionImplementationStatus::Implemented,
-                    false,
-                    vec![InvocationContext::OutsideWarp],
-                ),
-                _ => (ActionImplementationStatus::Stub, true, Vec::new()),
+        let implementation_status = match self {
+            Self::InstanceList
+            | Self::InstanceInspect
+            | Self::AppPing
+            | Self::AppInspect
+            | Self::AppVersion
+            | Self::AppActive
+            | Self::ActionList
+            | Self::ActionGet
+            | Self::CapabilityList
+            | Self::CapabilityInspect
+            | Self::WindowList
+            | Self::WindowInspect
+            | Self::TabList
+            | Self::TabInspect
+            | Self::TabCreate
+            | Self::PaneList
+            | Self::PaneInspect
+            | Self::SessionList
+            | Self::SessionInspect => ActionImplementationStatus::Implemented,
+            _ => ActionImplementationStatus::Stub,
+        };
+        let requires_authenticated_user =
+            implementation_status != ActionImplementationStatus::Implemented;
+        let allowed_invocation_contexts =
+            if implementation_status == ActionImplementationStatus::Implemented {
+                vec![InvocationContext::OutsideWarp]
+            } else {
+                Vec::new()
             };
         ActionMetadata {
             kind: self,
@@ -351,14 +409,23 @@ impl ActionKind {
     fn default_risk_tier(self) -> RiskTier {
         match self {
             Self::InstanceList
+            | Self::InstanceInspect
             | Self::AppPing
             | Self::AppInspect
             | Self::AppVersion
             | Self::AppActive
+            | Self::ActionList
+            | Self::ActionGet
+            | Self::CapabilityList
+            | Self::CapabilityInspect
             | Self::WindowList
+            | Self::WindowInspect
             | Self::TabList
+            | Self::TabInspect
             | Self::PaneList
+            | Self::PaneInspect
             | Self::SessionList
+            | Self::SessionInspect
             | Self::ThemeList
             | Self::AppearanceGet
             | Self::SettingGet
@@ -405,14 +472,23 @@ impl ActionKind {
     fn default_state_data_category(self) -> StateDataCategory {
         match self {
             Self::InstanceList
+            | Self::InstanceInspect
             | Self::AppPing
             | Self::AppInspect
             | Self::AppVersion
             | Self::AppActive
+            | Self::ActionList
+            | Self::ActionGet
+            | Self::CapabilityList
+            | Self::CapabilityInspect
             | Self::WindowList
+            | Self::WindowInspect
             | Self::TabList
+            | Self::TabInspect
             | Self::PaneList
+            | Self::PaneInspect
             | Self::SessionList
+            | Self::SessionInspect
             | Self::ThemeList
             | Self::AppearanceGet
             | Self::SettingGet
@@ -468,16 +544,20 @@ impl ActionKind {
     }
     fn default_target_scope(self) -> TargetScope {
         match self {
-            Self::WindowList | Self::WindowCreate | Self::WindowFocus | Self::WindowClose => {
-                TargetScope::Window
-            }
+            Self::WindowList
+            | Self::WindowInspect
+            | Self::WindowCreate
+            | Self::WindowFocus
+            | Self::WindowClose => TargetScope::Window,
             Self::TabList
+            | Self::TabInspect
             | Self::TabCreate
             | Self::TabActivate
             | Self::TabMove
             | Self::TabRename
             | Self::TabClose => TargetScope::Tab,
             Self::PaneList
+            | Self::PaneInspect
             | Self::PaneSplit
             | Self::PaneFocus
             | Self::PaneNavigate
@@ -487,6 +567,7 @@ impl ActionKind {
             | Self::PaneSessionPrevious
             | Self::PaneSessionNext => TargetScope::Pane,
             Self::SessionList
+            | Self::SessionInspect
             | Self::InputInsert
             | Self::InputReplace
             | Self::InputClear
@@ -500,6 +581,9 @@ impl ActionKind {
             Self::SettingGet | Self::SettingList | Self::SettingSet | Self::SettingToggle => {
                 TargetScope::Settings
             }
+            Self::ActionList | Self::ActionGet | Self::CapabilityList | Self::CapabilityInspect => {
+                TargetScope::Action
+            }
             Self::AppSettingsOpen
             | Self::AppCommandPaletteOpen
             | Self::AppCommandSearchOpen
@@ -510,6 +594,7 @@ impl ActionKind {
             | Self::AppCodeReviewToggle
             | Self::AppVerticalTabsToggle => TargetScope::Surface,
             Self::InstanceList
+            | Self::InstanceInspect
             | Self::AppPing
             | Self::AppInspect
             | Self::AppVersion

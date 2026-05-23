@@ -1,6 +1,6 @@
 //! Implementations for user-facing `warpctrl` command groups.
 use local_control::protocol::{
-    Action, ActionKind, ActionMetadata, ControlError, ErrorCode, RequestEnvelope,
+    Action, ActionGetParams, ActionKind, ActionMetadata, ControlError, EmptyParams, RequestEnvelope,
 };
 use local_control::selection::select_instance;
 use serde::Serialize;
@@ -8,8 +8,11 @@ use serde_json::json;
 
 use crate::agent::OutputFormat;
 use crate::local_control::output::{write_json, write_json_line};
-use crate::local_control::selectors::instance_selector;
-use crate::local_control::{AppCommand, InstanceCommand, TabCommand, TargetArgs};
+use crate::local_control::selectors::{instance_selector, target_selector};
+use crate::local_control::{
+    ActionCommand, AppCommand, CapabilityCommand, InstanceCommand, PaneCommand, SessionCommand,
+    TabCommand, TargetArgs, WindowCommand,
+};
 
 /// Display-oriented projection of a discoverable Warp instance.
 #[derive(Serialize)]
@@ -23,6 +26,27 @@ struct InstanceSummary {
     endpoint: Option<local_control::discovery::ControlEndpoint>,
     outside_warp_control_enabled: bool,
     actions: Vec<ActionMetadata>,
+}
+pub(super) fn run_capability_command(
+    command: CapabilityCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        CapabilityCommand::List(args) => run_action_with_params(
+            args,
+            ActionKind::CapabilityList,
+            EmptyParams {},
+            output_format,
+        ),
+        CapabilityCommand::Inspect(args) => run_action_with_params(
+            args.target,
+            ActionKind::CapabilityInspect,
+            ActionGetParams {
+                action: args.action,
+            },
+            output_format,
+        ),
+    }
 }
 
 impl From<local_control::discovery::InstanceRecord> for InstanceSummary {
@@ -75,6 +99,12 @@ pub(super) fn run_instance_command(
                 }
             }
         }
+        InstanceCommand::Inspect(args) => run_action_with_params(
+            args,
+            ActionKind::InstanceInspect,
+            EmptyParams {},
+            output_format,
+        ),
     }
 }
 
@@ -87,6 +117,57 @@ pub(super) fn run_app_command(
         AppCommand::Version(args) => {
             run_action(args, ActionKind::AppVersion, json!({}), output_format)
         }
+        AppCommand::Active(args) => run_action_with_params(
+            args,
+            ActionKind::AppActive,
+            local_control::AppActiveParams::default(),
+            output_format,
+        ),
+        AppCommand::Inspect(args) => run_action_with_params(
+            args,
+            ActionKind::AppInspect,
+            local_control::AppInspectParams::default(),
+            output_format,
+        ),
+    }
+}
+
+pub(super) fn run_action_command(
+    command: ActionCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        ActionCommand::List(args) => run_action_with_params(
+            args,
+            ActionKind::ActionList,
+            local_control::ActionListParams::default(),
+            output_format,
+        ),
+        ActionCommand::Get(args) => run_action_with_params(
+            args.target,
+            ActionKind::ActionGet,
+            ActionGetParams {
+                action: args.action,
+            },
+            output_format,
+        ),
+    }
+}
+
+pub(super) fn run_window_command(
+    command: WindowCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        WindowCommand::List(args) => {
+            run_action_with_params(args, ActionKind::WindowList, EmptyParams {}, output_format)
+        }
+        WindowCommand::Inspect(args) => run_action_with_params(
+            args,
+            ActionKind::WindowInspect,
+            EmptyParams {},
+            output_format,
+        ),
     }
 }
 pub(super) fn run_tab_command(
@@ -94,9 +175,46 @@ pub(super) fn run_tab_command(
     output_format: OutputFormat,
 ) -> Result<(), ControlError> {
     match command {
+        TabCommand::List(args) => {
+            run_action_with_params(args, ActionKind::TabList, EmptyParams {}, output_format)
+        }
+        TabCommand::Inspect(args) => {
+            run_action_with_params(args, ActionKind::TabInspect, EmptyParams {}, output_format)
+        }
         TabCommand::Create(args) => {
             run_action(args, ActionKind::TabCreate, json!({}), output_format)
         }
+    }
+}
+
+pub(super) fn run_pane_command(
+    command: PaneCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        PaneCommand::List(args) => {
+            run_action_with_params(args, ActionKind::PaneList, EmptyParams {}, output_format)
+        }
+        PaneCommand::Inspect(args) => {
+            run_action_with_params(args, ActionKind::PaneInspect, EmptyParams {}, output_format)
+        }
+    }
+}
+
+pub(super) fn run_session_command(
+    command: SessionCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        SessionCommand::List(args) => {
+            run_action_with_params(args, ActionKind::SessionList, EmptyParams {}, output_format)
+        }
+        SessionCommand::Inspect(args) => run_action_with_params(
+            args,
+            ActionKind::SessionInspect,
+            EmptyParams {},
+            output_format,
+        ),
     }
 }
 
@@ -107,18 +225,42 @@ fn run_action(
     output_format: OutputFormat,
 ) -> Result<(), ControlError> {
     let records = local_control::discovery::list_instances();
+    let request_target = target_selector(&args)?;
     let selector = instance_selector(args);
     let instance = select_instance(&records, &selector)?;
-    let request = RequestEnvelope::new(Action {
+    let mut request = RequestEnvelope::new(Action {
         kind: action,
         params,
     });
+    request.target = request_target;
     let response = local_control::client::send_request(&instance, &request)?;
-    let local_control::protocol::ControlResponse::Ok { data } = response.response else {
-        return Err(ControlError::new(
-            ErrorCode::Internal,
-            "local-control request failed without an error payload",
-        ));
+    let data = match response.response {
+        local_control::protocol::ControlResponse::Ok { data } => data,
+        local_control::protocol::ControlResponse::Error { error } => return Err(error),
+    };
+    match output_format {
+        OutputFormat::Json => write_json(&data),
+        OutputFormat::Ndjson => write_json_line(&data),
+        OutputFormat::Pretty | OutputFormat::Text => write_json(&data),
+    }
+}
+
+fn run_action_with_params<T: Serialize>(
+    args: TargetArgs,
+    action: ActionKind,
+    params: T,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    let records = local_control::discovery::list_instances();
+    let request_target = target_selector(&args)?;
+    let selector = instance_selector(args);
+    let instance = select_instance(&records, &selector)?;
+    let mut request = RequestEnvelope::new(Action::with_params(action, params)?);
+    request.target = request_target;
+    let response = local_control::client::send_request(&instance, &request)?;
+    let data = match response.response {
+        local_control::protocol::ControlResponse::Ok { data } => data,
+        local_control::protocol::ControlResponse::Error { error } => return Err(error),
     };
     match output_format {
         OutputFormat::Json => write_json(&data),

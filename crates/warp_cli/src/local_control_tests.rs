@@ -22,8 +22,9 @@ fn restore_discovery_dir(previous: Option<OsString>) {
         None => unsafe { std::env::remove_var(DISCOVERY_DIR_ENV) },
     }
 }
+
 #[test]
-fn parses_first_slice_tab_create() {
+fn parses_tab_create() {
     let args = ControlArgs::try_parse_from(["warpctrl", "tab", "create", "--instance", "inst_123"])
         .expect("tab create parses");
     let ControlCommand::Tab(TabCommand::Create(target)) = args.command else {
@@ -33,7 +34,7 @@ fn parses_first_slice_tab_create() {
 }
 
 #[test]
-fn parses_first_slice_instance_list() {
+fn parses_instance_list() {
     let args = ControlArgs::try_parse_from(["warpctrl", "instance", "list"])
         .expect("instance list parses");
     assert!(matches!(
@@ -43,9 +44,124 @@ fn parses_first_slice_instance_list() {
 }
 
 #[test]
-fn parses_first_slice_app_smoke_metadata_commands() {
+fn parses_instance_inspect() {
+    let args = ControlArgs::try_parse_from(["warpctrl", "instance", "inspect", "--pid", "123"])
+        .expect("instance inspect parses");
+    let ControlCommand::Instance(InstanceCommand::Inspect(target)) = args.command else {
+        panic!("expected instance inspect command");
+    };
+    assert_eq!(target.pid, Some(123));
+}
+
+#[test]
+fn parses_app_metadata_commands() {
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "ping"]).is_ok());
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "version"]).is_ok());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "app", "active"]).is_ok());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "app", "inspect"]).is_ok());
+}
+
+#[test]
+fn parses_action_metadata_commands() {
+    let args = ControlArgs::try_parse_from(["warpctrl", "action", "list", "--pid", "123"])
+        .expect("action list parses");
+    let ControlCommand::Action(ActionCommand::List(target)) = args.command else {
+        panic!("expected action list command");
+    };
+    assert_eq!(target.pid, Some(123));
+
+    let args = ControlArgs::try_parse_from([
+        "warpctrl",
+        "action",
+        "get",
+        "--instance",
+        "inst_123",
+        "window.list",
+    ])
+    .expect("action get parses");
+    let ControlCommand::Action(ActionCommand::Get(action)) = args.command else {
+        panic!("expected action get command");
+    };
+    assert_eq!(action.target.instance.as_deref(), Some("inst_123"));
+    assert_eq!(action.action, "window.list");
+}
+
+#[test]
+fn parses_capability_metadata_commands() {
+    let args = ControlArgs::try_parse_from(["warpctrl", "capability", "list", "--instance", "i"])
+        .expect("capability list parses");
+    let ControlCommand::Capability(CapabilityCommand::List(target)) = args.command else {
+        panic!("expected capability list command");
+    };
+    assert_eq!(target.instance.as_deref(), Some("i"));
+
+    let args = ControlArgs::try_parse_from(["warpctrl", "capability", "inspect", "tab.list"])
+        .expect("capability inspect parses");
+    let ControlCommand::Capability(CapabilityCommand::Inspect(action)) = args.command else {
+        panic!("expected capability inspect command");
+    };
+    assert_eq!(action.action, "tab.list");
+}
+
+#[test]
+fn parses_structural_metadata_list_commands() {
+    assert!(matches!(
+        ControlArgs::try_parse_from(["warpctrl", "window", "list"])
+            .expect("window list parses")
+            .command,
+        ControlCommand::Window(WindowCommand::List(_))
+    ));
+    assert!(matches!(
+        ControlArgs::try_parse_from(["warpctrl", "tab", "list"])
+            .expect("tab list parses")
+            .command,
+        ControlCommand::Tab(TabCommand::List(_))
+    ));
+    assert!(matches!(
+        ControlArgs::try_parse_from(["warpctrl", "pane", "list"])
+            .expect("pane list parses")
+            .command,
+        ControlCommand::Pane(PaneCommand::List(_))
+    ));
+    assert!(matches!(
+        ControlArgs::try_parse_from(["warpctrl", "session", "list"])
+            .expect("session list parses")
+            .command,
+        ControlCommand::Session(SessionCommand::List(_))
+    ));
+}
+
+#[test]
+fn parses_structural_metadata_inspect_commands_and_selectors() {
+    let args =
+        ControlArgs::try_parse_from(["warpctrl", "window", "inspect", "--window-id", "window-1"])
+            .expect("window inspect parses");
+    let ControlCommand::Window(WindowCommand::Inspect(target)) = args.command else {
+        panic!("expected window inspect command");
+    };
+    assert_eq!(target.window_id.as_deref(), Some("window-1"));
+
+    let args = ControlArgs::try_parse_from(["warpctrl", "tab", "inspect", "--tab-index", "2"])
+        .expect("tab inspect parses");
+    let ControlCommand::Tab(TabCommand::Inspect(target)) = args.command else {
+        panic!("expected tab inspect command");
+    };
+    assert_eq!(target.tab_index, Some(2));
+
+    let args = ControlArgs::try_parse_from(["warpctrl", "pane", "inspect", "--pane", "active"])
+        .expect("pane inspect parses");
+    let ControlCommand::Pane(PaneCommand::Inspect(target)) = args.command else {
+        panic!("expected pane inspect command");
+    };
+    assert_eq!(target.pane.as_deref(), Some("active"));
+
+    let args =
+        ControlArgs::try_parse_from(["warpctrl", "session", "inspect", "--session-id", "s1"])
+            .expect("session inspect parses");
+    let ControlCommand::Session(SessionCommand::Inspect(target)) = args.command else {
+        panic!("expected session inspect command");
+    };
+    assert_eq!(target.session_id.as_deref(), Some("s1"));
 }
 
 #[test]
@@ -61,18 +177,26 @@ fn parses_completion_generation_command() {
 }
 
 #[test]
-fn rejects_future_catalog_commands_not_in_first_slice() {
-    assert!(ControlArgs::try_parse_from(["warpctrl", "window", "list"]).is_err());
-    assert!(ControlArgs::try_parse_from(["warpctrl", "tab", "list"]).is_err());
+fn rejects_non_metadata_and_future_catalog_commands_not_in_this_shard() {
     assert!(ControlArgs::try_parse_from(["warpctrl", "setting", "list"]).is_err());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "input", "get"]).is_err());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "history", "list"]).is_err());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "block", "list"]).is_err());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "drive", "list"]).is_err());
 }
 
 #[test]
-fn generated_bash_completions_include_first_slice_commands() {
+fn generated_bash_completions_include_metadata_commands() {
     let completions =
         generate_completion_string(Shell::Bash).expect("bash completions render to UTF-8");
     assert!(completions.contains("instance"));
+    assert!(completions.contains("app"));
+    assert!(completions.contains("action"));
+    assert!(completions.contains("capability"));
+    assert!(completions.contains("window"));
     assert!(completions.contains("tab"));
+    assert!(completions.contains("pane"));
+    assert!(completions.contains("session"));
     assert!(completions.contains("completions"));
 }
 
