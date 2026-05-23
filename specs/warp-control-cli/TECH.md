@@ -409,6 +409,20 @@ Map tests directly to `PRODUCT.md` behavior.
   - `--artifact cli`-style bundle smoke tests or script-level checks for each supported platform path touched by the first slice.
   - Startup-path tests or focused checks confirming `warpctrl` dispatches commands without entering GUI-app launch code.
   - Shell completions/help output checks once final command naming is selected.
+### Computer-use CLI verification
+Before any stacked PR is considered ready for review, run an end-to-end computer-use verification pass against a Claude-built validation artifact from that branch. The validation artifact is a Warp app build and standalone `warpctrl` binary built by the validation agent from the exact commit under review, with `warp_control_cli` compiled in and `FeatureFlag::WarpControlCli` enabled at runtime.
+The verifier must launch the built Warp app, enable the Scripting settings needed for the command category under test, and capture screenshots or screen recordings that prove the user-visible result of each basic command family. Screenshots should be saved as durable artifacts and named by branch, invocation context, command family, and command name.
+The verifier must exercise both invocation contexts:
+- **Inside Warp terminal:** run `warpctrl` from a terminal session inside the feature-flag-enabled Warp app. This path must prove the app-issued Warp-terminal execution-context proof is accepted and that inside-Warp settings gate the command categories.
+- **Outside Warp terminal:** run the same `warpctrl` binary from an external terminal or automation shell outside the built Warp app. This path must prove outside-Warp control is default-off, then works only after enabling outside-Warp scripting and the required granular permissions in Settings > Scripting.
+The verification matrix should cover every implemented command in `PRODUCT.md` at least once in JSON output mode and, where there is a visible UI effect, with a screenshot after the command runs. At minimum:
+- read-only metadata commands show successful CLI output and, for active/focus/list commands, a visible target that matches the output;
+- underlying data read commands show successful CLI output only when the underlying-data-read permission is enabled and a denial screenshot/output when it is disabled;
+- app-state mutation commands show before/after screenshots proving the visible Warp UI changed;
+- metadata/configuration mutation commands show before/after screenshots proving the persisted setting or label changed;
+- underlying data mutation commands run only in a disposable test workspace/session with test files and test Warp Drive objects, show denial without the underlying-data-mutation permission, then show success with the permission enabled;
+- authenticated-user commands show both the logged-out or missing-grant denial path and the enabled authenticated path when a test account/environment is available.
+The verifier should produce a verification manifest checked into or attached to the PR artifacts. The manifest should list each command, branch under test, invocation context, required permission category, expected result, actual result, screenshot artifact path, and any skipped case with a reason. Missing screenshots for visible commands block review readiness.
 ## Parallelization
 The first slice on `zach/warp-cli` should stay mostly sequential because protocol envelope, discovery, authentication, feature-flag gating, selector resolution, and `tab.create` are tightly coupled and need one coherent architecture.
 The read-only and read-write follow-up branches are strong fits for Oz cloud-agent fan-out, but the fan-out should happen inside the stacked branch strategy from `## Implementation Plan`, not as unrelated sibling feature branches.
