@@ -6,10 +6,15 @@ use super::{
     SettingsSection, ToggleState,
 };
 use crate::appearance::Appearance;
+use crate::features::FeatureFlag;
 use crate::report_if_error;
 use crate::settings::{
-    AllowInsideWarpControl, AllowInsideWarpReadOnly, AllowInsideWarpReadWrite,
-    AllowOutsideWarpControl, AllowOutsideWarpReadOnly, AllowOutsideWarpReadWrite,
+    AllowInsideWarpAppStateMutations, AllowInsideWarpControl,
+    AllowInsideWarpMetadataConfigurationMutations, AllowInsideWarpMetadataReads,
+    AllowInsideWarpUnderlyingDataMutations, AllowInsideWarpUnderlyingDataReads,
+    AllowOutsideWarpAppStateMutations, AllowOutsideWarpControl,
+    AllowOutsideWarpMetadataConfigurationMutations, AllowOutsideWarpMetadataReads,
+    AllowOutsideWarpUnderlyingDataMutations, AllowOutsideWarpUnderlyingDataReads,
     LocalControlInvocationContext, LocalControlSettings,
 };
 use settings::{Setting as _, ToggleableSetting as _};
@@ -24,11 +29,17 @@ use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewCon
 #[derive(Clone, Copy, Debug)]
 pub enum ScriptingToggle {
     InsideWarpControl,
-    InsideWarpReadOnly,
-    InsideWarpReadWrite,
+    InsideWarpMetadataReads,
+    InsideWarpUnderlyingDataReads,
+    InsideWarpAppStateMutations,
+    InsideWarpMetadataConfigurationMutations,
+    InsideWarpUnderlyingDataMutations,
     OutsideWarpControl,
-    OutsideWarpReadOnly,
-    OutsideWarpReadWrite,
+    OutsideWarpMetadataReads,
+    OutsideWarpUnderlyingDataReads,
+    OutsideWarpAppStateMutations,
+    OutsideWarpMetadataConfigurationMutations,
+    OutsideWarpUnderlyingDataMutations,
 }
 
 impl ScriptingToggle {
@@ -36,8 +47,22 @@ impl ScriptingToggle {
         match self {
             Self::InsideWarpControl => "Warp control within Warp",
             Self::OutsideWarpControl => "Warp control outside Warp",
-            Self::InsideWarpReadOnly | Self::OutsideWarpReadOnly => "Allow read-only control",
-            Self::InsideWarpReadWrite | Self::OutsideWarpReadWrite => "Allow read-write control",
+            Self::InsideWarpMetadataReads | Self::OutsideWarpMetadataReads => {
+                "Allow metadata reads"
+            }
+            Self::InsideWarpUnderlyingDataReads | Self::OutsideWarpUnderlyingDataReads => {
+                "Allow underlying data reads"
+            }
+            Self::InsideWarpAppStateMutations | Self::OutsideWarpAppStateMutations => {
+                "Allow app-state mutations"
+            }
+            Self::InsideWarpMetadataConfigurationMutations
+            | Self::OutsideWarpMetadataConfigurationMutations => {
+                "Allow metadata/configuration mutations"
+            }
+            Self::InsideWarpUnderlyingDataMutations | Self::OutsideWarpUnderlyingDataMutations => {
+                "Allow underlying data mutations"
+            }
         }
     }
 
@@ -49,17 +74,35 @@ impl ScriptingToggle {
             Self::OutsideWarpControl => {
                 "Allows other local apps, terminals, IDEs, launch agents, and scripts to request Warp control."
             }
-            Self::InsideWarpReadOnly => {
-                "Allows commands inside Warp to query app information such as instances, windows, tabs, and protocol version."
+            Self::InsideWarpMetadataReads => {
+                "Allows commands inside Warp to inspect non-sensitive app structure and configuration metadata."
             }
-            Self::OutsideWarpReadOnly => {
-                "Allows external local clients to query app information after outside-Warp control is enabled."
+            Self::OutsideWarpMetadataReads => {
+                "Allows external local clients to inspect non-sensitive app structure and configuration metadata after outside-Warp control is enabled."
             }
-            Self::InsideWarpReadWrite => {
-                "Allows commands inside Warp to change Warp app state, such as creating a tab."
+            Self::InsideWarpUnderlyingDataReads => {
+                "Allows commands inside Warp to read content-bearing local state such as terminal output or command history."
             }
-            Self::OutsideWarpReadWrite => {
-                "Allows external local clients to change Warp app state after outside-Warp control is enabled."
+            Self::OutsideWarpUnderlyingDataReads => {
+                "Allows external local clients to read content-bearing local state after outside-Warp control is enabled."
+            }
+            Self::InsideWarpAppStateMutations => {
+                "Allows commands inside Warp to change local UI and layout state, such as creating a tab."
+            }
+            Self::OutsideWarpAppStateMutations => {
+                "Allows external local clients to change local UI and layout state after outside-Warp control is enabled."
+            }
+            Self::InsideWarpMetadataConfigurationMutations => {
+                "Allows commands inside Warp to change persistent metadata or configuration."
+            }
+            Self::OutsideWarpMetadataConfigurationMutations => {
+                "Allows external local clients to change persistent metadata or configuration after outside-Warp control is enabled."
+            }
+            Self::InsideWarpUnderlyingDataMutations => {
+                "Allows commands inside Warp to execute or change underlying data."
+            }
+            Self::OutsideWarpUnderlyingDataMutations => {
+                "Allows external local clients to execute or change underlying data after outside-Warp control is enabled."
             }
         }
     }
@@ -70,12 +113,32 @@ impl ScriptingToggle {
             Self::OutsideWarpControl => {
                 "outside warp control external scripts automation local cli"
             }
-            Self::InsideWarpReadOnly => "inside warp read only query windows tabs panes instances",
-            Self::OutsideWarpReadOnly => {
-                "outside warp read only query windows tabs panes instances"
+            Self::InsideWarpMetadataReads => {
+                "inside warp metadata reads query windows tabs panes instances"
             }
-            Self::InsideWarpReadWrite => "inside warp read write mutate change tab create",
-            Self::OutsideWarpReadWrite => "outside warp read write mutate change tab create",
+            Self::OutsideWarpMetadataReads => {
+                "outside warp metadata reads query windows tabs panes instances"
+            }
+            Self::InsideWarpUnderlyingDataReads => {
+                "inside warp underlying data reads terminal output history contents"
+            }
+            Self::OutsideWarpUnderlyingDataReads => {
+                "outside warp underlying data reads terminal output history contents"
+            }
+            Self::InsideWarpAppStateMutations => "inside warp app state mutations tab create",
+            Self::OutsideWarpAppStateMutations => "outside warp app state mutations tab create",
+            Self::InsideWarpMetadataConfigurationMutations => {
+                "inside warp metadata configuration mutations settings theme rename"
+            }
+            Self::OutsideWarpMetadataConfigurationMutations => {
+                "outside warp metadata configuration mutations settings theme rename"
+            }
+            Self::InsideWarpUnderlyingDataMutations => {
+                "inside warp underlying data mutations command execution file write"
+            }
+            Self::OutsideWarpUnderlyingDataMutations => {
+                "outside warp underlying data mutations command execution file write"
+            }
         }
     }
 
@@ -83,10 +146,28 @@ impl ScriptingToggle {
         match self {
             Self::InsideWarpControl => *settings.allow_inside_warp_control,
             Self::OutsideWarpControl => *settings.allow_outside_warp_control,
-            Self::InsideWarpReadOnly => *settings.allow_inside_warp_read_only,
-            Self::OutsideWarpReadOnly => *settings.allow_outside_warp_read_only,
-            Self::InsideWarpReadWrite => *settings.allow_inside_warp_read_write,
-            Self::OutsideWarpReadWrite => *settings.allow_outside_warp_read_write,
+            Self::InsideWarpMetadataReads => *settings.allow_inside_warp_metadata_reads,
+            Self::OutsideWarpMetadataReads => *settings.allow_outside_warp_metadata_reads,
+            Self::InsideWarpUnderlyingDataReads => {
+                *settings.allow_inside_warp_underlying_data_reads
+            }
+            Self::OutsideWarpUnderlyingDataReads => {
+                *settings.allow_outside_warp_underlying_data_reads
+            }
+            Self::InsideWarpAppStateMutations => *settings.allow_inside_warp_app_state_mutations,
+            Self::OutsideWarpAppStateMutations => *settings.allow_outside_warp_app_state_mutations,
+            Self::InsideWarpMetadataConfigurationMutations => {
+                *settings.allow_inside_warp_metadata_configuration_mutations
+            }
+            Self::OutsideWarpMetadataConfigurationMutations => {
+                *settings.allow_outside_warp_metadata_configuration_mutations
+            }
+            Self::InsideWarpUnderlyingDataMutations => {
+                *settings.allow_inside_warp_underlying_data_mutations
+            }
+            Self::OutsideWarpUnderlyingDataMutations => {
+                *settings.allow_outside_warp_underlying_data_mutations
+            }
         }
     }
 
@@ -94,10 +175,28 @@ impl ScriptingToggle {
         match self {
             Self::InsideWarpControl => AllowInsideWarpControl::storage_key(),
             Self::OutsideWarpControl => AllowOutsideWarpControl::storage_key(),
-            Self::InsideWarpReadOnly => AllowInsideWarpReadOnly::storage_key(),
-            Self::OutsideWarpReadOnly => AllowOutsideWarpReadOnly::storage_key(),
-            Self::InsideWarpReadWrite => AllowInsideWarpReadWrite::storage_key(),
-            Self::OutsideWarpReadWrite => AllowOutsideWarpReadWrite::storage_key(),
+            Self::InsideWarpMetadataReads => AllowInsideWarpMetadataReads::storage_key(),
+            Self::OutsideWarpMetadataReads => AllowOutsideWarpMetadataReads::storage_key(),
+            Self::InsideWarpUnderlyingDataReads => {
+                AllowInsideWarpUnderlyingDataReads::storage_key()
+            }
+            Self::OutsideWarpUnderlyingDataReads => {
+                AllowOutsideWarpUnderlyingDataReads::storage_key()
+            }
+            Self::InsideWarpAppStateMutations => AllowInsideWarpAppStateMutations::storage_key(),
+            Self::OutsideWarpAppStateMutations => AllowOutsideWarpAppStateMutations::storage_key(),
+            Self::InsideWarpMetadataConfigurationMutations => {
+                AllowInsideWarpMetadataConfigurationMutations::storage_key()
+            }
+            Self::OutsideWarpMetadataConfigurationMutations => {
+                AllowOutsideWarpMetadataConfigurationMutations::storage_key()
+            }
+            Self::InsideWarpUnderlyingDataMutations => {
+                AllowInsideWarpUnderlyingDataMutations::storage_key()
+            }
+            Self::OutsideWarpUnderlyingDataMutations => {
+                AllowOutsideWarpUnderlyingDataMutations::storage_key()
+            }
         }
     }
 
@@ -105,19 +204,47 @@ impl ScriptingToggle {
         match self {
             Self::InsideWarpControl => AllowInsideWarpControl::sync_to_cloud(),
             Self::OutsideWarpControl => AllowOutsideWarpControl::sync_to_cloud(),
-            Self::InsideWarpReadOnly => AllowInsideWarpReadOnly::sync_to_cloud(),
-            Self::OutsideWarpReadOnly => AllowOutsideWarpReadOnly::sync_to_cloud(),
-            Self::InsideWarpReadWrite => AllowInsideWarpReadWrite::sync_to_cloud(),
-            Self::OutsideWarpReadWrite => AllowOutsideWarpReadWrite::sync_to_cloud(),
+            Self::InsideWarpMetadataReads => AllowInsideWarpMetadataReads::sync_to_cloud(),
+            Self::OutsideWarpMetadataReads => AllowOutsideWarpMetadataReads::sync_to_cloud(),
+            Self::InsideWarpUnderlyingDataReads => {
+                AllowInsideWarpUnderlyingDataReads::sync_to_cloud()
+            }
+            Self::OutsideWarpUnderlyingDataReads => {
+                AllowOutsideWarpUnderlyingDataReads::sync_to_cloud()
+            }
+            Self::InsideWarpAppStateMutations => AllowInsideWarpAppStateMutations::sync_to_cloud(),
+            Self::OutsideWarpAppStateMutations => {
+                AllowOutsideWarpAppStateMutations::sync_to_cloud()
+            }
+            Self::InsideWarpMetadataConfigurationMutations => {
+                AllowInsideWarpMetadataConfigurationMutations::sync_to_cloud()
+            }
+            Self::OutsideWarpMetadataConfigurationMutations => {
+                AllowOutsideWarpMetadataConfigurationMutations::sync_to_cloud()
+            }
+            Self::InsideWarpUnderlyingDataMutations => {
+                AllowInsideWarpUnderlyingDataMutations::sync_to_cloud()
+            }
+            Self::OutsideWarpUnderlyingDataMutations => {
+                AllowOutsideWarpUnderlyingDataMutations::sync_to_cloud()
+            }
         }
     }
 
     fn parent_context(self) -> Option<LocalControlInvocationContext> {
         match self {
-            Self::InsideWarpReadOnly | Self::InsideWarpReadWrite => {
+            Self::InsideWarpMetadataReads
+            | Self::InsideWarpUnderlyingDataReads
+            | Self::InsideWarpAppStateMutations
+            | Self::InsideWarpMetadataConfigurationMutations
+            | Self::InsideWarpUnderlyingDataMutations => {
                 Some(LocalControlInvocationContext::InsideWarp)
             }
-            Self::OutsideWarpReadOnly | Self::OutsideWarpReadWrite => {
+            Self::OutsideWarpMetadataReads
+            | Self::OutsideWarpUnderlyingDataReads
+            | Self::OutsideWarpAppStateMutations
+            | Self::OutsideWarpMetadataConfigurationMutations
+            | Self::OutsideWarpUnderlyingDataMutations => {
                 Some(LocalControlInvocationContext::OutsideWarp)
             }
             Self::InsideWarpControl | Self::OutsideWarpControl => None,
@@ -149,19 +276,37 @@ impl ScriptingSettingsPageView {
                         ScriptingToggle::InsideWarpControl,
                     )),
                     Box::new(ScriptingToggleWidget::new(
-                        ScriptingToggle::InsideWarpReadOnly,
+                        ScriptingToggle::InsideWarpMetadataReads,
                     )),
                     Box::new(ScriptingToggleWidget::new(
-                        ScriptingToggle::InsideWarpReadWrite,
+                        ScriptingToggle::InsideWarpUnderlyingDataReads,
+                    )),
+                    Box::new(ScriptingToggleWidget::new(
+                        ScriptingToggle::InsideWarpAppStateMutations,
+                    )),
+                    Box::new(ScriptingToggleWidget::new(
+                        ScriptingToggle::InsideWarpMetadataConfigurationMutations,
+                    )),
+                    Box::new(ScriptingToggleWidget::new(
+                        ScriptingToggle::InsideWarpUnderlyingDataMutations,
                     )),
                     Box::new(ScriptingToggleWidget::new(
                         ScriptingToggle::OutsideWarpControl,
                     )),
                     Box::new(ScriptingToggleWidget::new(
-                        ScriptingToggle::OutsideWarpReadOnly,
+                        ScriptingToggle::OutsideWarpMetadataReads,
                     )),
                     Box::new(ScriptingToggleWidget::new(
-                        ScriptingToggle::OutsideWarpReadWrite,
+                        ScriptingToggle::OutsideWarpUnderlyingDataReads,
+                    )),
+                    Box::new(ScriptingToggleWidget::new(
+                        ScriptingToggle::OutsideWarpAppStateMutations,
+                    )),
+                    Box::new(ScriptingToggleWidget::new(
+                        ScriptingToggle::OutsideWarpMetadataConfigurationMutations,
+                    )),
+                    Box::new(ScriptingToggleWidget::new(
+                        ScriptingToggle::OutsideWarpUnderlyingDataMutations,
                     )),
                 ],
                 Some("Scripting"),
@@ -192,24 +337,54 @@ impl TypedActionView for ScriptingSettingsPageView {
                             .allow_outside_warp_control
                             .toggle_and_save_value(ctx));
                     }
-                    ScriptingToggle::InsideWarpReadOnly => {
+                    ScriptingToggle::InsideWarpMetadataReads => {
                         report_if_error!(settings
-                            .allow_inside_warp_read_only
+                            .allow_inside_warp_metadata_reads
                             .toggle_and_save_value(ctx));
                     }
-                    ScriptingToggle::OutsideWarpReadOnly => {
+                    ScriptingToggle::OutsideWarpMetadataReads => {
                         report_if_error!(settings
-                            .allow_outside_warp_read_only
+                            .allow_outside_warp_metadata_reads
                             .toggle_and_save_value(ctx));
                     }
-                    ScriptingToggle::InsideWarpReadWrite => {
+                    ScriptingToggle::InsideWarpUnderlyingDataReads => {
                         report_if_error!(settings
-                            .allow_inside_warp_read_write
+                            .allow_inside_warp_underlying_data_reads
                             .toggle_and_save_value(ctx));
                     }
-                    ScriptingToggle::OutsideWarpReadWrite => {
+                    ScriptingToggle::OutsideWarpUnderlyingDataReads => {
                         report_if_error!(settings
-                            .allow_outside_warp_read_write
+                            .allow_outside_warp_underlying_data_reads
+                            .toggle_and_save_value(ctx));
+                    }
+                    ScriptingToggle::InsideWarpAppStateMutations => {
+                        report_if_error!(settings
+                            .allow_inside_warp_app_state_mutations
+                            .toggle_and_save_value(ctx));
+                    }
+                    ScriptingToggle::OutsideWarpAppStateMutations => {
+                        report_if_error!(settings
+                            .allow_outside_warp_app_state_mutations
+                            .toggle_and_save_value(ctx));
+                    }
+                    ScriptingToggle::InsideWarpMetadataConfigurationMutations => {
+                        report_if_error!(settings
+                            .allow_inside_warp_metadata_configuration_mutations
+                            .toggle_and_save_value(ctx));
+                    }
+                    ScriptingToggle::OutsideWarpMetadataConfigurationMutations => {
+                        report_if_error!(settings
+                            .allow_outside_warp_metadata_configuration_mutations
+                            .toggle_and_save_value(ctx));
+                    }
+                    ScriptingToggle::InsideWarpUnderlyingDataMutations => {
+                        report_if_error!(settings
+                            .allow_inside_warp_underlying_data_mutations
+                            .toggle_and_save_value(ctx));
+                    }
+                    ScriptingToggle::OutsideWarpUnderlyingDataMutations => {
+                        report_if_error!(settings
+                            .allow_outside_warp_underlying_data_mutations
                             .toggle_and_save_value(ctx));
                     }
                 });
@@ -235,7 +410,7 @@ impl SettingsPageMeta for ScriptingSettingsPageView {
     }
 
     fn should_render(&self, _ctx: &AppContext) -> bool {
-        cfg!(not(target_family = "wasm"))
+        cfg!(not(target_family = "wasm")) && FeatureFlag::WarpControlCli.is_enabled()
     }
 
     fn update_filter(&mut self, query: &str, ctx: &mut ViewContext<Self>) -> MatchData {
@@ -263,7 +438,7 @@ impl SettingsWidget for ScriptingIntroWidget {
     type View = ScriptingSettingsPageView;
 
     fn search_terms(&self) -> &str {
-        "scripting warp control automation warpctrl local cli inside outside read only read write"
+        "scripting warp control automation warpctrl local cli inside outside permissions"
     }
 
     fn render(
@@ -274,7 +449,7 @@ impl SettingsWidget for ScriptingIntroWidget {
     ) -> Box<dyn Element> {
         render_settings_info_banner(
             "Warp control lets local scripts automate allowlisted actions in a running Warp app.",
-            Some("Enable Warp control within Warp for commands launched from Warp-managed terminals, or outside Warp for other local apps and scripts. Each scope can allow read-only queries and read-write app changes separately."),
+            Some("Enable Warp control within Warp for commands launched from Warp-managed terminals, or outside Warp for other local apps and scripts. Each scope has separate permission categories for metadata reads, underlying data reads, app-state mutations, metadata/configuration mutations, and underlying data mutations."),
             appearance,
         )
     }

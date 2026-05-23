@@ -72,7 +72,8 @@ struct InstanceSummary {
     app_id: String,
     app_version: Option<String>,
     started_at: String,
-    endpoint: local_control::discovery::ControlEndpoint,
+    outside_warp_control_enabled: bool,
+    endpoint: Option<local_control::discovery::ControlEndpoint>,
     actions: Vec<String>,
 }
 
@@ -85,6 +86,7 @@ impl From<local_control::discovery::InstanceRecord> for InstanceSummary {
             app_id: record.app_id,
             app_version: record.app_version,
             started_at: record.started_at.to_rfc3339(),
+            outside_warp_control_enabled: record.outside_warp_control_enabled,
             endpoint: record.endpoint,
             actions: record
                 .actions
@@ -123,14 +125,21 @@ fn run_instance_command(
                 }
                 OutputFormat::Pretty | OutputFormat::Text => {
                     for summary in summaries {
-                        println!(
-                            "{}\tpid={}\t{}\t{}:{}",
-                            summary.instance_id,
-                            summary.pid,
-                            summary.channel,
-                            summary.endpoint.host,
-                            summary.endpoint.port
-                        );
+                        if let Some(endpoint) = summary.endpoint {
+                            println!(
+                                "{}\tpid={}\t{}\t{}:{}",
+                                summary.instance_id,
+                                summary.pid,
+                                summary.channel,
+                                endpoint.host,
+                                endpoint.port
+                            );
+                        } else {
+                            println!(
+                                "{}\tpid={}\t{}\toutside_warp_control_enabled=false",
+                                summary.instance_id, summary.pid, summary.channel
+                            );
+                        }
                     }
                     Ok(())
                 }

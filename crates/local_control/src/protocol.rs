@@ -29,8 +29,11 @@ pub enum RiskTier {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalControlPermission {
-    ReadOnly,
-    ReadWrite,
+    MetadataRead,
+    UnderlyingDataRead,
+    AppStateMutation,
+    MetadataConfigurationMutation,
+    UnderlyingDataMutation,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -366,7 +369,7 @@ impl ActionKind {
                     InvocationContext::InsideWarp,
                     InvocationContext::OutsideWarp,
                 ],
-                permission: LocalControlPermission::ReadWrite,
+                permission: LocalControlPermission::AppStateMutation,
                 target_scope: TargetScope::Window,
             };
         }
@@ -451,13 +454,54 @@ impl ActionKind {
     }
 
     fn default_permission(self) -> LocalControlPermission {
-        match self.default_risk_tier() {
-            RiskTier::ReadOnlyMetadata | RiskTier::ReadOnlyTerminalData => {
-                LocalControlPermission::ReadOnly
+        match self {
+            Self::AppPing
+            | Self::AppInspect
+            | Self::AppVersion
+            | Self::AppActive
+            | Self::WindowList
+            | Self::TabList
+            | Self::PaneList
+            | Self::SessionList
+            | Self::ThemeList
+            | Self::AppearanceGet
+            | Self::SettingGet
+            | Self::SettingList => LocalControlPermission::MetadataRead,
+            Self::InputInsert | Self::InputReplace | Self::InputClear | Self::InputModeSet => {
+                LocalControlPermission::UnderlyingDataMutation
             }
-            RiskTier::MutatingNonDestructive | RiskTier::MutatingDestructiveOrExecution => {
-                LocalControlPermission::ReadWrite
-            }
+            Self::ThemeSet
+            | Self::AppearanceSet
+            | Self::AppearanceFontSize
+            | Self::AppearanceZoom
+            | Self::SettingSet
+            | Self::SettingToggle
+            | Self::TabRename => LocalControlPermission::MetadataConfigurationMutation,
+            Self::AppFocus
+            | Self::AppSettingsOpen
+            | Self::AppCommandPaletteOpen
+            | Self::AppCommandSearchOpen
+            | Self::AppWarpDriveOpen
+            | Self::AppWarpDriveToggle
+            | Self::AppResourceCenterToggle
+            | Self::AppAiAssistantToggle
+            | Self::AppCodeReviewToggle
+            | Self::AppVerticalTabsToggle
+            | Self::WindowCreate
+            | Self::WindowFocus
+            | Self::WindowClose
+            | Self::TabCreate
+            | Self::TabActivate
+            | Self::TabMove
+            | Self::TabClose
+            | Self::PaneSplit
+            | Self::PaneFocus
+            | Self::PaneNavigate
+            | Self::PaneClose
+            | Self::PaneMaximize
+            | Self::PaneResize
+            | Self::PaneSessionPrevious
+            | Self::PaneSessionNext => LocalControlPermission::AppStateMutation,
         }
     }
 
@@ -667,7 +711,10 @@ mod tests {
         );
         assert_eq!(metadata.risk_tier, RiskTier::MutatingNonDestructive);
         assert!(!metadata.requires_authenticated_user);
-        assert_eq!(metadata.permission, LocalControlPermission::ReadWrite);
+        assert_eq!(
+            metadata.permission,
+            LocalControlPermission::AppStateMutation
+        );
         assert_eq!(
             metadata.allowed_invocation_contexts,
             vec![

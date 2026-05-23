@@ -15,8 +15,9 @@ pub fn send_request(
         InvocationContext::OutsideWarp,
     )?;
     let client = reqwest::blocking::Client::new();
+    let endpoint = instance.endpoint()?;
     let response = client
-        .post(instance.endpoint.url())
+        .post(endpoint.url())
         .header("Authorization", credential.authorization_value())
         .json(request)
         .send()
@@ -58,8 +59,9 @@ pub fn request_credential(
 ) -> Result<ScopedCredential, ControlError> {
     let client = reqwest::blocking::Client::new();
     let request = CredentialRequest::new(action, invocation_context);
+    let credential_broker = instance.credential_broker()?;
     let response = client
-        .post(instance.credential_broker.endpoint.credential_url())
+        .post(credential_broker.endpoint.credential_url())
         .json(&request)
         .send()
         .map_err(|err| {

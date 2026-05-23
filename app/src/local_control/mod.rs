@@ -1,3 +1,4 @@
+use crate::features::FeatureFlag;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -9,8 +10,8 @@ use ::local_control::auth::{CredentialGrant, CredentialRequest, ScopedCredential
 use ::local_control::protocol::{PaneTarget, TabTarget, TargetSelector, WindowTarget};
 use ::local_control::{
     ActionKind, AuthToken, ControlEndpoint, ControlError, ControlResponse, ErrorCode,
-    ErrorResponseEnvelope, InstanceId, InstanceRecord, RegisteredInstance, RequestEnvelope,
-    ResponseEnvelope, PROTOCOL_VERSION,
+    ErrorResponseEnvelope, ExecutionContextProof, InstanceId, InstanceRecord, RegisteredInstance,
+    RequestEnvelope, ResponseEnvelope, PROTOCOL_VERSION,
 };
 use ::local_control::{InvocationContext, LocalControlPermission};
 use axum::extract::rejection::JsonRejection;
@@ -31,6 +32,7 @@ struct ControlServerState {
     bridge_spawner: ModelSpawner<LocalControlBridge>,
     instance_id: InstanceId,
     credentials: Arc<Mutex<HashMap<String, CredentialGrant>>>,
+    feature_enabled: bool,
 }
 
 pub struct LocalControlServer {
@@ -59,6 +61,12 @@ impl LocalControlServer {
     }
 
     fn start(ctx: &mut ModelContext<Self>) -> Result<Self, ControlError> {
+        if !FeatureFlag::WarpControlCli.is_enabled() {
+            return Ok(Self {
+                _runtime: None,
+                _registered_instance: None,
+            });
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_io()
@@ -95,6 +103,8 @@ impl LocalControlServer {
             ChannelState::app_id().to_string(),
             ChannelState::app_version().map(str::to_owned),
             ActionKind::implemented_metadata(),
+            LocalControlSettings::as_ref(ctx)
+                .is_context_enabled(LocalControlInvocationContext::OutsideWarp),
         );
         let instance_id = record.instance_id.clone();
         let bridge_spawner = LocalControlBridge::handle(ctx).update(ctx, |bridge, ctx| {
@@ -106,6 +116,7 @@ impl LocalControlServer {
             bridge_spawner,
             instance_id,
             credentials: Arc::default(),
+            feature_enabled: true,
         };
         let router = Router::new()
             .route("/v1/control", post(handle_control_request))
@@ -249,6 +260,16 @@ async fn handle_credential_request(
     State(state): State<ControlServerState>,
     payload: Result<Json<CredentialRequest>, JsonRejection>,
 ) -> Response {
+    if !state.feature_enabled {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::LocalControlDisabled,
+                "local control is disabled by feature flag",
+            ))),
+        )
+            .into_response();
+    }
     let request = match payload {
         Ok(Json(request)) => request,
         Err(err) => {
@@ -300,6 +321,13 @@ async fn handle_credential_request(
                     request.action.as_str()
                 ),
             ))),
+        )
+            .into_response();
+    }
+    if let Err(error) = verify_invocation_context_proof(&request) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponseEnvelope::new(error)),
         )
             .into_response();
     }
@@ -364,6 +392,16 @@ async fn handle_control_request(
     headers: HeaderMap,
     payload: Result<Json<RequestEnvelope>, JsonRejection>,
 ) -> Response {
+    if !state.feature_enabled {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::LocalControlDisabled,
+                "local control is disabled by feature flag",
+            ))),
+        )
+            .into_response();
+    }
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
@@ -461,23 +499,16 @@ fn validate_tab_create_target(target: &TargetSelector) -> Result<(), ControlErro
 fn target_window_id(
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<warpui::WindowId, ControlError> {
-    preferred_window_id(
-        ctx.windows().active_window(),
-        ctx.windows().frontmost_window_id(),
-    )
-    .ok_or_else(|| {
+    preferred_window_id(ctx.windows().active_window()).ok_or_else(|| {
         ControlError::new(
             ErrorCode::MissingTarget,
-            "tab.create requires an active or previously active Warp window",
+            "tab.create requires an active Warp window",
         )
     })
 }
 
-fn preferred_window_id(
-    active_window: Option<warpui::WindowId>,
-    frontmost_window: Option<warpui::WindowId>,
-) -> Option<warpui::WindowId> {
-    active_window.or(frontmost_window)
+fn preferred_window_id(active_window: Option<warpui::WindowId>) -> Option<warpui::WindowId> {
+    active_window
 }
 
 #[cfg(test)]
@@ -497,8 +528,19 @@ fn local_invocation_context(context: InvocationContext) -> LocalControlInvocatio
 
 fn local_permission(permission: LocalControlPermission) -> LocalControlPermissionCategory {
     match permission {
-        LocalControlPermission::ReadOnly => LocalControlPermissionCategory::ReadOnly,
-        LocalControlPermission::ReadWrite => LocalControlPermissionCategory::ReadWrite,
+        LocalControlPermission::MetadataRead => LocalControlPermissionCategory::MetadataReads,
+        LocalControlPermission::UnderlyingDataRead => {
+            LocalControlPermissionCategory::UnderlyingDataReads
+        }
+        LocalControlPermission::AppStateMutation => {
+            LocalControlPermissionCategory::AppStateMutations
+        }
+        LocalControlPermission::MetadataConfigurationMutation => {
+            LocalControlPermissionCategory::MetadataConfigurationMutations
+        }
+        LocalControlPermission::UnderlyingDataMutation => {
+            LocalControlPermissionCategory::UnderlyingDataMutations
+        }
     }
 }
 
@@ -508,6 +550,14 @@ fn ensure_action_allowed(
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<(), ControlError> {
     let settings = LocalControlSettings::as_ref(ctx);
+    ensure_action_allowed_by_settings(settings, context, action)
+}
+
+fn ensure_action_allowed_by_settings(
+    settings: &LocalControlSettings,
+    context: InvocationContext,
+    action: ActionKind,
+) -> Result<(), ControlError> {
     let context = local_invocation_context(context);
     if !settings.is_context_enabled(context) {
         return Err(ControlError::new(
@@ -526,6 +576,33 @@ fn ensure_action_allowed(
         ));
     }
     Ok(())
+}
+
+fn verify_invocation_context_proof(request: &CredentialRequest) -> Result<(), ControlError> {
+    match request.invocation_context {
+        InvocationContext::OutsideWarp => Ok(()),
+        InvocationContext::InsideWarp => {
+            let Some(ExecutionContextProof::VerifiedWarpTerminal { proof_id }) =
+                request.execution_context_proof.as_ref()
+            else {
+                return Err(ControlError::new(
+                    ErrorCode::ExecutionContextNotAllowed,
+                    "inside-Warp credential issuance requires a verified Warp-terminal proof",
+                ));
+            };
+            if !is_verified_warp_terminal_proof(proof_id) {
+                return Err(ControlError::new(
+                    ErrorCode::ExecutionContextNotAllowed,
+                    "inside-Warp credential proof is not verified",
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn is_verified_warp_terminal_proof(_proof_id: &str) -> bool {
+    false
 }
 
 #[cfg(test)]

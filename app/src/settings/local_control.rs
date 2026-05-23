@@ -8,8 +8,11 @@ pub enum LocalControlInvocationContext {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalControlPermissionCategory {
-    ReadOnly,
-    ReadWrite,
+    MetadataReads,
+    UnderlyingDataReads,
+    AppStateMutations,
+    MetadataConfigurationMutations,
+    UnderlyingDataMutations,
 }
 
 define_settings_group!(LocalControlSettings, settings: [
@@ -31,41 +34,95 @@ define_settings_group!(LocalControlSettings, settings: [
         storage_key: "LocalControlAllowOutsideWarp",
         description: "Whether Warp control is allowed from external local clients.",
     },
-    allow_inside_warp_read_only: AllowInsideWarpReadOnly {
+    allow_inside_warp_metadata_reads: AllowInsideWarpMetadataReads {
         type: bool,
         default: true,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Never,
         private: true,
-        storage_key: "LocalControlInsideWarpReadOnly",
-        description: "Whether verified Warp-managed terminal sessions may receive read-only local control grants.",
+        storage_key: "LocalControlInsideWarpMetadataReads",
+        description: "Whether verified Warp-managed terminal sessions may receive metadata-read local control grants.",
     },
-    allow_outside_warp_read_only: AllowOutsideWarpReadOnly {
+    allow_outside_warp_metadata_reads: AllowOutsideWarpMetadataReads {
         type: bool,
         default: false,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Never,
         private: true,
-        storage_key: "LocalControlOutsideWarpReadOnly",
-        description: "Whether external local clients may receive read-only local control grants.",
+        storage_key: "LocalControlOutsideWarpMetadataReads",
+        description: "Whether external local clients may receive metadata-read local control grants.",
     },
-    allow_inside_warp_read_write: AllowInsideWarpReadWrite {
+    allow_inside_warp_underlying_data_reads: AllowInsideWarpUnderlyingDataReads {
         type: bool,
         default: true,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Never,
         private: true,
-        storage_key: "LocalControlInsideWarpReadWrite",
-        description: "Whether verified Warp-managed terminal sessions may receive read-write local control grants.",
+        storage_key: "LocalControlInsideWarpUnderlyingDataReads",
+        description: "Whether verified Warp-managed terminal sessions may receive underlying-data-read local control grants.",
     },
-    allow_outside_warp_read_write: AllowOutsideWarpReadWrite {
+    allow_outside_warp_underlying_data_reads: AllowOutsideWarpUnderlyingDataReads {
         type: bool,
         default: false,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Never,
         private: true,
-        storage_key: "LocalControlOutsideWarpReadWrite",
-        description: "Whether external local clients may receive read-write local control grants.",
+        storage_key: "LocalControlOutsideWarpUnderlyingDataReads",
+        description: "Whether external local clients may receive underlying-data-read local control grants.",
+    },
+    allow_inside_warp_app_state_mutations: AllowInsideWarpAppStateMutations {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Never,
+        private: true,
+        storage_key: "LocalControlInsideWarpAppStateMutations",
+        description: "Whether verified Warp-managed terminal sessions may receive app-state-mutation local control grants.",
+    },
+    allow_outside_warp_app_state_mutations: AllowOutsideWarpAppStateMutations {
+        type: bool,
+        default: false,
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Never,
+        private: true,
+        storage_key: "LocalControlOutsideWarpAppStateMutations",
+        description: "Whether external local clients may receive app-state-mutation local control grants.",
+    },
+    allow_inside_warp_metadata_configuration_mutations: AllowInsideWarpMetadataConfigurationMutations {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Never,
+        private: true,
+        storage_key: "LocalControlInsideWarpMetadataConfigurationMutations",
+        description: "Whether verified Warp-managed terminal sessions may receive metadata/configuration-mutation local control grants.",
+    },
+    allow_outside_warp_metadata_configuration_mutations: AllowOutsideWarpMetadataConfigurationMutations {
+        type: bool,
+        default: false,
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Never,
+        private: true,
+        storage_key: "LocalControlOutsideWarpMetadataConfigurationMutations",
+        description: "Whether external local clients may receive metadata/configuration-mutation local control grants.",
+    },
+    allow_inside_warp_underlying_data_mutations: AllowInsideWarpUnderlyingDataMutations {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Never,
+        private: true,
+        storage_key: "LocalControlInsideWarpUnderlyingDataMutations",
+        description: "Whether verified Warp-managed terminal sessions may receive underlying-data-mutation local control grants.",
+    },
+    allow_outside_warp_underlying_data_mutations: AllowOutsideWarpUnderlyingDataMutations {
+        type: bool,
+        default: false,
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Never,
+        private: true,
+        storage_key: "LocalControlOutsideWarpUnderlyingDataMutations",
+        description: "Whether external local clients may receive underlying-data-mutation local control grants.",
     },
 ]);
 
@@ -85,20 +142,44 @@ impl LocalControlSettings {
         match (context, permission) {
             (
                 LocalControlInvocationContext::InsideWarp,
-                LocalControlPermissionCategory::ReadOnly,
-            ) => *self.allow_inside_warp_read_only,
+                LocalControlPermissionCategory::MetadataReads,
+            ) => *self.allow_inside_warp_metadata_reads,
             (
                 LocalControlInvocationContext::OutsideWarp,
-                LocalControlPermissionCategory::ReadOnly,
-            ) => *self.allow_outside_warp_read_only,
+                LocalControlPermissionCategory::MetadataReads,
+            ) => *self.allow_outside_warp_metadata_reads,
             (
                 LocalControlInvocationContext::InsideWarp,
-                LocalControlPermissionCategory::ReadWrite,
-            ) => *self.allow_inside_warp_read_write,
+                LocalControlPermissionCategory::UnderlyingDataReads,
+            ) => *self.allow_inside_warp_underlying_data_reads,
             (
                 LocalControlInvocationContext::OutsideWarp,
-                LocalControlPermissionCategory::ReadWrite,
-            ) => *self.allow_outside_warp_read_write,
+                LocalControlPermissionCategory::UnderlyingDataReads,
+            ) => *self.allow_outside_warp_underlying_data_reads,
+            (
+                LocalControlInvocationContext::InsideWarp,
+                LocalControlPermissionCategory::AppStateMutations,
+            ) => *self.allow_inside_warp_app_state_mutations,
+            (
+                LocalControlInvocationContext::OutsideWarp,
+                LocalControlPermissionCategory::AppStateMutations,
+            ) => *self.allow_outside_warp_app_state_mutations,
+            (
+                LocalControlInvocationContext::InsideWarp,
+                LocalControlPermissionCategory::MetadataConfigurationMutations,
+            ) => *self.allow_inside_warp_metadata_configuration_mutations,
+            (
+                LocalControlInvocationContext::OutsideWarp,
+                LocalControlPermissionCategory::MetadataConfigurationMutations,
+            ) => *self.allow_outside_warp_metadata_configuration_mutations,
+            (
+                LocalControlInvocationContext::InsideWarp,
+                LocalControlPermissionCategory::UnderlyingDataMutations,
+            ) => *self.allow_inside_warp_underlying_data_mutations,
+            (
+                LocalControlInvocationContext::OutsideWarp,
+                LocalControlPermissionCategory::UnderlyingDataMutations,
+            ) => *self.allow_outside_warp_underlying_data_mutations,
         }
     }
 
