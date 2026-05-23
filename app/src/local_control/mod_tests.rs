@@ -1,12 +1,14 @@
 use ::local_control::auth::CredentialGrant;
 use ::local_control::protocol::ActionKind;
 use ::local_control::protocol::{
-    Action, BlockGetParams, BlockListParams, ControlResponse, DriveGetParams, DriveGetResult,
-    DriveListParams, DriveListResult, DriveObjectType, FileTarget, PaneSelector, PaneTarget,
-    SessionSelector, SessionTarget, TabSelector, TabTarget, TargetSelector, WindowSelector,
-    WindowTarget,
+    Action, BlockGetParams, BlockListParams, BlockTarget, ControlResponse, DriveGetParams,
+    DriveGetResult, DriveListParams, DriveListResult, DriveObjectType, FileTarget, PaneSelector,
+    PaneTarget, SessionSelector, SessionTarget, TabSelector, TabTarget, TargetSelector,
+    WindowSelector, WindowTarget,
 };
-use ::local_control::{ErrorCode, InstanceId, InvocationContext, RequestEnvelope};
+use ::local_control::{
+    ErrorCode, InstanceId, InvocationContext, PermissionCategory, RequestEnvelope,
+};
 use chrono::Duration;
 use settings::Setting as _;
 use warp_core::features::FeatureFlag;
@@ -69,6 +71,36 @@ fn settings_with_outside_warp_read_only(
     outside_read_only: bool,
 ) -> LocalControlSettings {
     settings_with_values(true, outside_control, true, outside_read_only, true, false)
+}
+
+fn settings_with_outside_warp_permissions(
+    outside_control: bool,
+    outside_read_only: bool,
+    outside_read_write: bool,
+) -> LocalControlSettings {
+    settings_with_values(
+        true,
+        outside_control,
+        true,
+        outside_read_only,
+        true,
+        outside_read_write,
+    )
+}
+
+fn grant_for(action: ActionKind) -> CredentialGrant {
+    CredentialGrant::new(
+        InstanceId("test-instance".to_owned()),
+        action,
+        InvocationContext::InsideWarp,
+        Duration::minutes(5),
+    )
+}
+
+fn request_with_target(action: ActionKind, target: TargetSelector) -> RequestEnvelope {
+    let mut request = RequestEnvelope::new(Action::new(action));
+    request.target = target;
+    request
 }
 
 fn initialize_drive_app(app: &mut App, logged_in: bool) {
@@ -266,9 +298,14 @@ fn capabilities_advertises_only_first_slice_core_actions() {
             ActionKind::AppPing,
             ActionKind::AppInspect,
             ActionKind::AppVersion,
+            ActionKind::AppActive,
             ActionKind::ActionList,
             ActionKind::ActionGet,
+            ActionKind::WindowList,
+            ActionKind::TabList,
             ActionKind::TabCreate,
+            ActionKind::PaneList,
+            ActionKind::SessionList,
             ActionKind::BlockList,
             ActionKind::BlockGet,
             ActionKind::InputGet,
@@ -284,6 +321,118 @@ fn capabilities_advertises_only_first_slice_core_actions() {
             ActionKind::DriveGet,
         ]
     );
+}
+
+#[test]
+fn metadata_handlers_return_successful_empty_metadata_without_windows() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_settings_for_tests(&mut app);
+        let bridge = app.add_model(LocalControlBridge::new);
+
+        for action in [
+            ActionKind::AppActive,
+            ActionKind::AppInspect,
+            ActionKind::AppVersion,
+            ActionKind::WindowList,
+            ActionKind::TabList,
+            ActionKind::PaneList,
+            ActionKind::SessionList,
+        ] {
+            let response = bridge.update(&mut app, |bridge, ctx| {
+                bridge.handle_request(
+                    RequestEnvelope::new(Action::new(action)),
+                    grant_for(action),
+                    ctx,
+                )
+            });
+            match response.response {
+                ControlResponse::Ok { data } => {
+                    assert_eq!(data["action"], action.as_str());
+                }
+                ControlResponse::Error { error } => {
+                    panic!("{} returned {error}", action.as_str());
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn metadata_list_handlers_reject_stale_and_unsupported_selectors() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_settings_for_tests(&mut app);
+        let bridge = app.add_model(LocalControlBridge::new);
+
+        let cases = [
+            (
+                ActionKind::WindowList,
+                TargetSelector {
+                    tab: Some(TabTarget::Active),
+                    ..TargetSelector::default()
+                },
+                ErrorCode::InvalidSelector,
+            ),
+            (
+                ActionKind::WindowList,
+                TargetSelector {
+                    window: Some(WindowTarget::Id {
+                        id: WindowSelector("stale-window".to_owned()),
+                    }),
+                    ..TargetSelector::default()
+                },
+                ErrorCode::StaleTarget,
+            ),
+            (
+                ActionKind::TabList,
+                TargetSelector {
+                    tab: Some(TabTarget::Title {
+                        title: "unsupported".to_owned(),
+                    }),
+                    ..TargetSelector::default()
+                },
+                ErrorCode::InvalidSelector,
+            ),
+            (
+                ActionKind::PaneList,
+                TargetSelector {
+                    pane: Some(PaneTarget::Id {
+                        id: PaneSelector("stale-pane".to_owned()),
+                    }),
+                    ..TargetSelector::default()
+                },
+                ErrorCode::StaleTarget,
+            ),
+            (
+                ActionKind::SessionList,
+                TargetSelector {
+                    session: Some(SessionTarget::Id {
+                        id: SessionSelector("stale-session".to_owned()),
+                    }),
+                    ..TargetSelector::default()
+                },
+                ErrorCode::StaleTarget,
+            ),
+            (
+                ActionKind::SessionList,
+                TargetSelector {
+                    block: Some(BlockTarget::Active),
+                    ..TargetSelector::default()
+                },
+                ErrorCode::InvalidSelector,
+            ),
+        ];
+
+        for (action, target, code) in cases {
+            let response = bridge.update(&mut app, |bridge, ctx| {
+                bridge.handle_request(request_with_target(action, target), grant_for(action), ctx)
+            });
+            assert_eq!(response_error_code(response), code);
+        }
+    });
 }
 
 #[test]
@@ -412,6 +561,14 @@ fn outside_warp_discovery_requires_context_and_action_permission() {
         &settings_with_outside_warp(true, true),
         ActionKind::TabCreate
     ));
+    assert!(!outside_warp_action_enabled_for_settings(
+        &settings_with_outside_warp_permissions(true, false, true),
+        ActionKind::WindowList
+    ));
+    assert!(outside_warp_action_enabled_for_settings(
+        &settings_with_outside_warp_permissions(true, true, false),
+        ActionKind::WindowList
+    ));
 }
 
 #[test]
@@ -479,6 +636,10 @@ fn metadata_read_actions_require_read_permission() {
 
     for action in [
         ActionKind::ActionList,
+        ActionKind::WindowList,
+        ActionKind::TabList,
+        ActionKind::PaneList,
+        ActionKind::SessionList,
         ActionKind::ThemeList,
         ActionKind::AppearanceGet,
         ActionKind::SettingGet,
@@ -498,7 +659,13 @@ fn metadata_read_actions_require_read_permission() {
 fn underlying_data_read_actions_require_read_permission() {
     let settings = settings_with_values(true, true, false, true, true, true);
 
-    for action in [ActionKind::InputGet, ActionKind::HistoryList] {
+    for action in [
+        ActionKind::BlockList,
+        ActionKind::BlockGet,
+        ActionKind::InputGet,
+        ActionKind::HistoryList,
+        ActionKind::DriveGet,
+    ] {
         let err = ensure_settings_allow_action(&settings, InvocationContext::InsideWarp, action)
             .expect_err("read permission is disabled");
         assert_eq!(err.code, ErrorCode::InsufficientPermissions);
@@ -519,6 +686,76 @@ fn metadata_scoped_credential_cannot_invoke_input_or_history_reads() {
             .verify_for_action(action)
             .expect_err("metadata-scoped credential cannot read underlying data");
         assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+    }
+}
+
+#[test]
+fn metadata_actions_require_metadata_permission_not_app_state_mutation_permission() {
+    let metadata_without_mutation = settings_with_values(true, true, true, true, false, false);
+    let mutation_without_metadata = settings_with_values(true, true, false, false, true, true);
+
+    for action in [
+        ActionKind::InstanceList,
+        ActionKind::AppPing,
+        ActionKind::AppInspect,
+        ActionKind::AppVersion,
+        ActionKind::AppActive,
+        ActionKind::ActionList,
+        ActionKind::ActionGet,
+        ActionKind::WindowList,
+        ActionKind::TabList,
+        ActionKind::PaneList,
+        ActionKind::SessionList,
+        ActionKind::ThemeList,
+        ActionKind::AppearanceGet,
+        ActionKind::SettingGet,
+        ActionKind::SettingList,
+        ActionKind::FileList,
+        ActionKind::ProjectActive,
+        ActionKind::ProjectList,
+        ActionKind::DriveList,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::ReadMetadata
+        );
+        ensure_settings_allow_action(
+            &metadata_without_mutation,
+            InvocationContext::InsideWarp,
+            action,
+        )
+        .expect("metadata read permission allows metadata action");
+        let err = ensure_settings_allow_action(
+            &mutation_without_metadata,
+            InvocationContext::InsideWarp,
+            action,
+        )
+        .expect_err("metadata action is denied without metadata read permission");
+        assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+    }
+
+    assert_eq!(
+        ActionKind::TabCreate.metadata().permission_category,
+        PermissionCategory::MutateAppState
+    );
+    ensure_settings_allow_action(
+        &mutation_without_metadata,
+        InvocationContext::InsideWarp,
+        ActionKind::TabCreate,
+    )
+    .expect("app-state mutation permission allows tab.create");
+
+    for action in [
+        ActionKind::BlockList,
+        ActionKind::BlockGet,
+        ActionKind::InputGet,
+        ActionKind::HistoryList,
+        ActionKind::DriveGet,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::ReadUnderlyingData
+        );
     }
 }
 
@@ -553,9 +790,9 @@ fn tab_create_rejects_malformed_params() {
 
 #[test]
 fn action_metadata_lookup_reports_stub_status_for_allowlisted_future_actions() {
-    let metadata = action_metadata_for_name("window.list").expect("allowlisted action");
+    let metadata = action_metadata_for_name("window.create").expect("allowlisted action");
 
-    assert_eq!(metadata.kind, ActionKind::WindowList);
+    assert_eq!(metadata.kind, ActionKind::WindowCreate);
     assert_eq!(
         metadata.implementation_status,
         ::local_control::ActionImplementationStatus::Stub
@@ -580,6 +817,32 @@ fn action_list_rejects_malformed_params() {
     })
     .expect_err("action.list params must be empty");
     assert_eq!(err.code, ErrorCode::InvalidParams);
+}
+
+#[test]
+fn app_target_metadata_reads_reject_malformed_params() {
+    for action in [
+        ActionKind::AppVersion,
+        ActionKind::AppActive,
+        ActionKind::AppInspect,
+        ActionKind::WindowList,
+        ActionKind::TabList,
+        ActionKind::PaneList,
+        ActionKind::SessionList,
+    ] {
+        let err = validate_action_params(&Action {
+            kind: action,
+            params: serde_json::json!({ "unexpected": true }),
+        })
+        .expect_err("app target metadata read params must be empty");
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+
+        validate_action_params(&Action {
+            kind: action,
+            params: serde_json::json!({}),
+        })
+        .expect("empty app target metadata read params are accepted");
+    }
 }
 
 #[test]

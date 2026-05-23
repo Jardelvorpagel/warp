@@ -804,9 +804,14 @@ impl ActionKind {
             | Self::AppPing
             | Self::AppInspect
             | Self::AppVersion
+            | Self::AppActive
             | Self::ActionList
             | Self::ActionGet
+            | Self::WindowList
+            | Self::TabList
             | Self::TabCreate
+            | Self::PaneList
+            | Self::SessionList
             | Self::BlockList
             | Self::BlockGet
             | Self::InputGet
