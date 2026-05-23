@@ -1190,7 +1190,16 @@ impl ActionKind {
             | Self::WindowList
             | Self::TabList
             | Self::TabCreate
+            | Self::TabActivate
+            | Self::TabMove
+            | Self::TabClose
             | Self::PaneList
+            | Self::PaneSplit
+            | Self::PaneFocus
+            | Self::PaneNavigate
+            | Self::PaneClose
+            | Self::PaneMaximize
+            | Self::PaneResize
             | Self::SessionList
             | Self::BlockList
             | Self::BlockGet
@@ -1459,8 +1468,19 @@ impl ActionKind {
         if matches!(
             self.default_risk_tier(),
             RiskTier::ReadOnlyMetadata | RiskTier::ReadOnlyTerminalData
-        ) || self == Self::TabCreate
-        {
+        ) || matches!(
+            self,
+            Self::TabCreate
+                | Self::TabActivate
+                | Self::TabMove
+                | Self::TabClose
+                | Self::PaneSplit
+                | Self::PaneFocus
+                | Self::PaneNavigate
+                | Self::PaneClose
+                | Self::PaneMaximize
+                | Self::PaneResize
+        ) {
             return vec![
                 InvocationContext::InsideWarp,
                 InvocationContext::OutsideWarp,
