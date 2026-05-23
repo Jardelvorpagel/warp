@@ -39,6 +39,17 @@ fn read_only_metadata_actions_are_logged_out_safe_metadata_reads() {
 }
 
 #[test]
+fn file_open_remains_an_allowlisted_stub_until_a_handler_is_integrated() {
+    let metadata = ActionKind::FileOpen.metadata();
+    assert_eq!(
+        metadata.implementation_status,
+        ActionImplementationStatus::Stub
+    );
+    assert!(metadata.requires_authenticated_user);
+    assert!(metadata.allowed_invocation_contexts.is_empty());
+}
+
+#[test]
 fn settings_and_appearance_metadata_reads_are_implemented_logged_out_safe_reads() {
     for action in [
         ActionKind::ThemeList,
@@ -420,7 +431,7 @@ fn default_permissions_preserve_security_categories() {
 }
 
 #[test]
-fn mutating_contract_actions_are_allowlisted_stubs_except_implemented_mutations() {
+fn session_and_input_mutations_are_implemented_with_current_invocation_scopes() {
     for action in [
         ActionKind::PaneSessionPrevious,
         ActionKind::PaneSessionNext,
@@ -428,15 +439,17 @@ fn mutating_contract_actions_are_allowlisted_stubs_except_implemented_mutations(
         ActionKind::InputReplace,
         ActionKind::InputClear,
         ActionKind::InputModeSet,
-        ActionKind::FileOpen,
     ] {
         let metadata = action.metadata();
         assert_eq!(
             metadata.implementation_status,
-            ActionImplementationStatus::Stub
+            ActionImplementationStatus::Implemented
         );
         assert!(metadata.requires_authenticated_user);
-        assert!(metadata.allowed_invocation_contexts.is_empty());
+        assert_eq!(
+            metadata.allowed_invocation_contexts,
+            vec![InvocationContext::InsideWarp]
+        );
     }
 }
 
