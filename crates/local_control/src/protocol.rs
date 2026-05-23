@@ -769,9 +769,13 @@ impl ActionKind {
 
     pub fn metadata(self) -> ActionMetadata {
         let implementation_status = match self {
-            Self::InstanceList | Self::AppPing | Self::AppVersion | Self::TabCreate => {
-                ActionImplementationStatus::Implemented
-            }
+            Self::InstanceList
+            | Self::AppPing
+            | Self::AppInspect
+            | Self::AppVersion
+            | Self::ActionList
+            | Self::ActionGet
+            | Self::TabCreate => ActionImplementationStatus::Implemented,
             _ => ActionImplementationStatus::Stub,
         };
         let requires_authenticated_user = self.default_requires_authenticated_user();

@@ -7,7 +7,9 @@ use crate::settings::{
     LocalControlInvocationContext, LocalControlPermissionCategory, LocalControlSettings,
 };
 use ::local_control::auth::{CredentialGrant, CredentialRequest, ScopedCredential};
-use ::local_control::protocol::{PaneTarget, TabTarget, TargetSelector, WindowTarget};
+use ::local_control::protocol::{
+    ActionGetParams, PaneTarget, TabTarget, TargetSelector, WindowTarget,
+};
 use ::local_control::{
     ActionKind, AuthToken, ControlEndpoint, ControlError, ControlResponse, ErrorCode,
     ErrorResponseEnvelope, InstanceId, InstanceRecord, RegisteredInstance, RequestEnvelope,
@@ -221,6 +223,33 @@ impl LocalControlBridge {
                 }
                 ResponseEnvelope::ok(request.request_id, self.version_metadata())
             }
+            ActionKind::AppInspect => {
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                ResponseEnvelope::ok(request.request_id, self.inspect_metadata())
+            }
+            ActionKind::ActionList => {
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                ResponseEnvelope::ok(request.request_id, self.action_list_metadata())
+            }
+            ActionKind::ActionGet => {
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                match self.action_get_metadata(&request.action) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
             ActionKind::TabCreate => {
                 if let Err(error) =
                     ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
@@ -323,6 +352,43 @@ impl LocalControlBridge {
             "app_id": ChannelState::app_id().to_string(),
             "app_version": ChannelState::app_version(),
         })
+    }
+
+    fn inspect_metadata(&self) -> serde_json::Value {
+        json!({
+            "action": ActionKind::AppInspect.as_str(),
+            "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
+            "version": {
+                "protocol_version": PROTOCOL_VERSION,
+                "channel": ChannelState::channel().to_string(),
+                "app_id": ChannelState::app_id().to_string(),
+                "app_version": ChannelState::app_version(),
+            },
+            "active": {
+                "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
+            },
+            "actions": ActionKind::implemented_metadata(),
+        })
+    }
+
+    fn action_list_metadata(&self) -> serde_json::Value {
+        json!({
+            "action": ActionKind::ActionList.as_str(),
+            "actions": ActionKind::implemented_metadata(),
+        })
+    }
+
+    fn action_get_metadata(
+        &self,
+        action: &::local_control::Action,
+    ) -> Result<serde_json::Value, ControlError> {
+        let params = action.params_as::<ActionGetParams>()?;
+        let metadata = action_metadata_for_name(&params.action)?;
+        Ok(json!({
+            "action": ActionKind::ActionGet.as_str(),
+            "requested_action": params.action,
+            "metadata": metadata,
+        }))
     }
 }
 
@@ -588,8 +654,27 @@ fn validate_tab_create_target(target: &TargetSelector) -> Result<(), ControlErro
     Ok(())
 }
 fn validate_action_params(action: &::local_control::Action) -> Result<(), ControlError> {
-    if action.kind != ActionKind::TabCreate {
-        return Ok(());
+    match action.kind {
+        ActionKind::AppInspect | ActionKind::ActionList => {
+            if action
+                .params
+                .as_object()
+                .is_some_and(serde_json::Map::is_empty)
+            {
+                return Ok(());
+            }
+            return Err(ControlError::new(
+                ErrorCode::InvalidParams,
+                format!("{} does not accept parameters", action.kind.as_str()),
+            ));
+        }
+        ActionKind::ActionGet => {
+            let params = action.params_as::<ActionGetParams>()?;
+            action_metadata_for_name(&params.action)?;
+            return Ok(());
+        }
+        ActionKind::TabCreate => {}
+        _ => return Ok(()),
     }
     if action
         .params
@@ -602,6 +687,22 @@ fn validate_action_params(action: &::local_control::Action) -> Result<(), Contro
         ErrorCode::InvalidParams,
         "tab.create does not accept parameters in the first implementation slice",
     ))
+}
+
+fn action_metadata_for_name(
+    action_name: &str,
+) -> Result<::local_control::ActionMetadata, ControlError> {
+    ActionKind::ALL
+        .iter()
+        .copied()
+        .find(|kind| kind.as_str() == action_name)
+        .map(ActionKind::metadata)
+        .ok_or_else(|| {
+            ControlError::new(
+                ErrorCode::NotAllowlisted,
+                format!("{action_name} is not an allowlisted local-control action"),
+            )
+        })
 }
 
 fn warp_control_cli_enabled() -> bool {

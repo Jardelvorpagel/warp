@@ -8,7 +8,7 @@ use settings::Setting as _;
 use warp_core::features::FeatureFlag;
 
 use super::{
-    capabilities, ensure_feature_enabled, ensure_settings_allow_action,
+    action_metadata_for_name, capabilities, ensure_feature_enabled, ensure_settings_allow_action,
     outside_warp_action_enabled_for_settings, require_active_window_id, validate_action_params,
     validate_tab_create_target,
 };
@@ -120,7 +120,10 @@ fn capabilities_advertises_only_first_slice_core_actions() {
         vec![
             ActionKind::InstanceList,
             ActionKind::AppPing,
+            ActionKind::AppInspect,
             ActionKind::AppVersion,
+            ActionKind::ActionList,
+            ActionKind::ActionGet,
             ActionKind::TabCreate,
         ]
     );
@@ -188,6 +191,19 @@ fn disabled_granular_permission_denies_with_insufficient_permissions() {
 }
 
 #[test]
+fn metadata_read_actions_require_read_permission() {
+    let settings = settings_with_values(true, true, false, true, true, true);
+
+    let err = ensure_settings_allow_action(
+        &settings,
+        InvocationContext::InsideWarp,
+        ActionKind::ActionList,
+    )
+    .expect_err("read permission is disabled");
+    assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+}
+
+#[test]
 fn tab_create_rejects_malformed_params() {
     let err = validate_action_params(&Action {
         kind: ActionKind::TabCreate,
@@ -201,4 +217,35 @@ fn tab_create_rejects_malformed_params() {
         params: serde_json::json!({}),
     })
     .expect("empty tab.create params are accepted");
+}
+
+#[test]
+fn action_metadata_lookup_reports_stub_status_for_allowlisted_future_actions() {
+    let metadata = action_metadata_for_name("window.list").expect("allowlisted action");
+
+    assert_eq!(metadata.kind, ActionKind::WindowList);
+    assert_eq!(
+        metadata.implementation_status,
+        ::local_control::ActionImplementationStatus::Stub
+    );
+}
+
+#[test]
+fn action_get_rejects_unallowlisted_action_names() {
+    let err = validate_action_params(&Action {
+        kind: ActionKind::ActionGet,
+        params: serde_json::json!({ "action": "input.run" }),
+    })
+    .expect_err("unallowlisted action is rejected");
+    assert_eq!(err.code, ErrorCode::NotAllowlisted);
+}
+
+#[test]
+fn action_list_rejects_malformed_params() {
+    let err = validate_action_params(&Action {
+        kind: ActionKind::ActionList,
+        params: serde_json::json!({ "all": true }),
+    })
+    .expect_err("action.list params must be empty");
+    assert_eq!(err.code, ErrorCode::InvalidParams);
 }

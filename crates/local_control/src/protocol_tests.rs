@@ -12,7 +12,6 @@ fn request_envelope_serializes_stable_action_names() {
 fn read_only_metadata_actions_are_logged_out_safe_metadata_reads() {
     for action in [
         ActionKind::AppActive,
-        ActionKind::ActionList,
         ActionKind::WindowList,
         ActionKind::TabList,
         ActionKind::PaneList,
@@ -154,7 +153,10 @@ fn core_smoke_metadata_has_explicit_read_metadata_category() {
     for action in [
         ActionKind::InstanceList,
         ActionKind::AppPing,
+        ActionKind::AppInspect,
         ActionKind::AppVersion,
+        ActionKind::ActionList,
+        ActionKind::ActionGet,
     ] {
         let metadata = action.metadata();
         assert_eq!(
@@ -171,7 +173,10 @@ fn core_smoke_metadata_has_explicit_read_metadata_category() {
             PermissionCategory::ReadMetadata
         );
         assert!(!metadata.authenticated_user.required);
-        assert_eq!(metadata.target_scope, TargetScope::Instance);
+        assert!(matches!(
+            metadata.target_scope,
+            TargetScope::Instance | TargetScope::Action
+        ));
     }
 }
 
