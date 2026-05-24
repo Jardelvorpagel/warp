@@ -1,3 +1,4 @@
+//! Binary entry point for the standalone `warpctrl` CLI.
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

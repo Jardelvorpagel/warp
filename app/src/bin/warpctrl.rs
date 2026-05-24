@@ -1,3 +1,4 @@
+//! Thin binary wrapper for the standalone `warpctrl` executable bundled with Warp.
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

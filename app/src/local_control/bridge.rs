@@ -1,3 +1,7 @@
+//! Bridge between protocol-level control requests and Warp application models.
+//!
+//! The bridge validates protocol version, selectors, credentials, and settings
+//! before routing each supported action to an app-side handler.
 use ::local_control::auth::CredentialGrant;
 use ::local_control::{
     ActionKind, ControlError, ErrorCode, InstanceId, RequestEnvelope, ResponseEnvelope,
@@ -9,6 +13,7 @@ use crate::local_control::handlers::{layout, metadata};
 use crate::local_control::permissions::{ensure_action_allowed, ensure_feature_enabled};
 use crate::local_control::resolver::validate_action_params;
 
+/// WarpUI model that executes already-authenticated local-control actions.
 pub struct LocalControlBridge {
     instance_id: Option<InstanceId>,
 }

@@ -1,3 +1,4 @@
+//! Wire protocol envelopes and error types for Warp local control.
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,6 +11,7 @@ pub use crate::selectors::{
     PaneSelector, PaneTarget, TabSelector, TabTarget, TargetSelector, WindowSelector, WindowTarget,
 };
 
+/// Top-level request sent by a local-control client to a Warp instance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequestEnvelope {
     pub protocol_version: u32,
@@ -30,6 +32,7 @@ impl RequestEnvelope {
     }
 }
 
+/// Requested action and action-specific JSON parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Action {
     pub kind: ActionKind,
@@ -46,6 +49,7 @@ impl Action {
     }
 }
 
+/// Top-level response returned by a Warp instance for a control request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResponseEnvelope {
     pub protocol_version: u32,
@@ -71,6 +75,7 @@ impl ResponseEnvelope {
     }
 }
 
+/// Success or error payload for a control response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ControlResponse {
@@ -78,6 +83,7 @@ pub enum ControlResponse {
     Error { error: ControlError },
 }
 
+/// Error envelope used when a request cannot be decoded into a full request envelope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorResponseEnvelope {
     pub protocol_version: u32,
@@ -93,6 +99,7 @@ impl ErrorResponseEnvelope {
     }
 }
 
+/// Structured error returned by local-control protocol and transport layers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[error("{code}: {message}")]
 pub struct ControlError {
@@ -124,6 +131,7 @@ impl ControlError {
     }
 }
 
+/// Stable error code surfaced to CLI clients and automation.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {

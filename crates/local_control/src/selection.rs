@@ -1,6 +1,8 @@
+//! Instance selection helpers for local-control clients.
 use crate::discovery::{InstanceId, InstanceRecord};
 use crate::protocol::{ControlError, ErrorCode};
 
+/// CLI-level selector for choosing one discovered Warp instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstanceSelector {
     Active,

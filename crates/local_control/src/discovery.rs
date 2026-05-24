@@ -1,3 +1,4 @@
+//! Filesystem discovery records for running local Warp instances.
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -8,6 +9,7 @@ use crate::protocol::{ActionMetadata, ControlError, ErrorCode, PROTOCOL_VERSION}
 
 const DISCOVERY_DIR_ENV: &str = "WARP_LOCAL_CONTROL_DISCOVERY_DIR";
 
+/// Stable identifier for one running Warp instance.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct InstanceId(pub String);
@@ -24,6 +26,7 @@ impl Default for InstanceId {
     }
 }
 
+/// Loopback HTTP endpoint for a running local-control server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControlEndpoint {
     pub host: String,
@@ -47,11 +50,13 @@ impl ControlEndpoint {
     }
 }
 
+/// Discovery reference to the endpoint that issues scoped credentials.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CredentialBrokerReference {
     pub endpoint: ControlEndpoint,
 }
 
+/// Filesystem-published metadata for a running Warp app process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstanceRecord {
     pub protocol_version: u32,
@@ -96,6 +101,7 @@ impl InstanceRecord {
     }
 }
 
+/// RAII registration that publishes and removes one discovery record.
 pub struct RegisteredInstance {
     record: InstanceRecord,
     path: PathBuf,

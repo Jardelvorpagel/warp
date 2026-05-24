@@ -1,3 +1,4 @@
+//! Settings UI for local scripting and Warp control permissions.
 use super::{
     settings_page::{
         render_body_item, render_settings_info_banner, LocalOnlyIconState, MatchData, PageType,
@@ -26,6 +27,7 @@ use warpui::ui_components::components::UiComponent;
 use warpui::ui_components::switch::SwitchStateHandle;
 use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
+/// Toggle rows shown on the Settings > Scripting page for local-control gates.
 #[derive(Clone, Copy, Debug)]
 pub enum ScriptingToggle {
     InsideWarpControl,
@@ -255,7 +257,6 @@ impl ScriptingToggle {
         }
     }
 }
-
 #[derive(Clone, Debug)]
 pub enum ScriptingSettingsPageAction {
     Toggle(ScriptingToggle),

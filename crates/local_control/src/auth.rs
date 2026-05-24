@@ -1,3 +1,4 @@
+//! Credential request, issuance, and validation types for local control.
 use base64::Engine as _;
 use chrono::{DateTime, Duration, Utc};
 use rand::RngCore as _;
@@ -10,6 +11,7 @@ use crate::protocol::{
     PermissionCategory, RiskTier, StateDataCategory,
 };
 
+/// Bearer token used to authorize a single scoped local-control credential.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthToken(String);
 
@@ -60,6 +62,7 @@ impl AuthToken {
     }
 }
 
+/// Request for a short-lived credential scoped to one action and invocation context.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CredentialRequest {
     pub protocol_version: u32,
@@ -102,6 +105,7 @@ impl CredentialRequest {
     }
 }
 
+/// Client-facing credential response containing a bearer secret and its grant metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScopedCredential {
     pub bearer_token: String,
@@ -114,6 +118,7 @@ impl ScopedCredential {
     }
 }
 
+/// Server-issued authorization grant for a single action.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CredentialGrant {
     pub credential_id: String,
@@ -127,6 +132,8 @@ pub struct CredentialGrant {
     pub issued_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
+
+/// Authenticated user context attached to a credential grant when required.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthenticatedUserGrant {
     pub required: bool,

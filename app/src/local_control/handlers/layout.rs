@@ -1,3 +1,4 @@
+//! Layout mutation handlers for local-control actions.
 use ::local_control::protocol::TargetSelector;
 use ::local_control::{ActionKind, ControlError, ErrorCode, InstanceId};
 use serde_json::json;

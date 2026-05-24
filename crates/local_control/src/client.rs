@@ -1,3 +1,4 @@
+//! Blocking client helpers used by the standalone `warpctrl` CLI.
 use crate::auth::{CredentialRequest, ScopedCredential};
 use crate::discovery::InstanceRecord;
 use crate::protocol::{

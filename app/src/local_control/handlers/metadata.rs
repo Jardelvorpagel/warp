@@ -1,3 +1,4 @@
+//! Metadata response builders for local-control introspection actions.
 use ::local_control::{ActionKind, InstanceId, PROTOCOL_VERSION};
 use serde_json::json;
 use warp_core::channel::ChannelState;

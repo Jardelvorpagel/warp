@@ -1,3 +1,4 @@
+//! Implementations for user-facing `warpctrl` command groups.
 use local_control::protocol::{
     Action, ActionKind, ActionMetadata, ControlError, ErrorCode, RequestEnvelope,
 };
@@ -10,6 +11,7 @@ use crate::local_control::output::{write_json, write_json_line};
 use crate::local_control::selectors::instance_selector;
 use crate::local_control::{AppCommand, InstanceCommand, TabCommand, TargetArgs};
 
+/// Display-oriented projection of a discoverable Warp instance.
 #[derive(Serialize)]
 struct InstanceSummary {
     instance_id: String,

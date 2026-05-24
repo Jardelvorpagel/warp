@@ -1,3 +1,4 @@
+//! Target and parameter validation for the first local-control action slice.
 use ::local_control::protocol::{PaneTarget, TabTarget, TargetSelector, WindowTarget};
 use ::local_control::{ActionKind, ControlError, ErrorCode};
 use warpui::ModelContext;

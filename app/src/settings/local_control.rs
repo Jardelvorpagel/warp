@@ -1,11 +1,14 @@
+//! Private local settings that gate Warp control by invocation context and risk category.
 use settings::{macros::define_settings_group, SupportedPlatforms, SyncToCloud};
 
+/// Source context for a local-control request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalControlInvocationContext {
     InsideWarp,
     OutsideWarp,
 }
 
+/// Coarse permission buckets used to gate groups of control actions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalControlPermissionCategory {
     MetadataReads,

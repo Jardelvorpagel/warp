@@ -1,7 +1,9 @@
+//! Action catalog and metadata used for discovery, permissions, and CLI support.
 use serde::{Deserialize, Serialize};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Runtime context from which a control request was initiated.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InvocationContext {
@@ -9,6 +11,7 @@ pub enum InvocationContext {
     OutsideWarp,
 }
 
+/// Proof that lets Warp distinguish trusted in-app terminals from external clients.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExecutionContextProof {
@@ -16,6 +19,7 @@ pub enum ExecutionContextProof {
     ExternalClient,
 }
 
+/// User-facing risk tier for an action.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RiskTier {
@@ -25,6 +29,7 @@ pub enum RiskTier {
     MutatingDestructiveOrExecution,
 }
 
+/// Category of Warp state or data an action reads or mutates.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StateDataCategory {
@@ -35,6 +40,7 @@ pub enum StateDataCategory {
     UnderlyingDataMutation,
 }
 
+/// Settings permission bucket required before an action may execute.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionCategory {
@@ -45,11 +51,13 @@ pub enum PermissionCategory {
     MutateUnderlyingData,
 }
 
+/// Whether an action requires an authenticated Warp user context.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthenticatedUserRequirement {
     pub required: bool,
 }
 
+/// Level of Warp hierarchy an action targets.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetScope {
@@ -63,6 +71,7 @@ pub enum TargetScope {
     Surface,
 }
 
+/// Whether an action has an app-side implementation in this stack layer.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionImplementationStatus {
@@ -70,6 +79,7 @@ pub enum ActionImplementationStatus {
     Stub,
 }
 
+/// Discoverable metadata describing one local-control action.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionMetadata {
     pub kind: ActionKind,
@@ -84,6 +94,7 @@ pub struct ActionMetadata {
     pub target_scope: TargetScope,
 }
 
+/// Stable protocol name for every planned `warpctrl` action.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActionKind {
     #[serde(rename = "instance.list")]

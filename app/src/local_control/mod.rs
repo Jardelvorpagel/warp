@@ -1,3 +1,7 @@
+//! Local HTTP server entry point for Warp control requests.
+//!
+//! This module owns the in-process listener, discovery registration, credential
+//! broker endpoint, and request handoff from Axum into the WarpUI model graph.
 mod bridge;
 mod handlers;
 mod permissions;
@@ -27,13 +31,14 @@ use warpui::{Entity, ModelContext, ModelSpawner, SingletonEntity};
 pub use bridge::LocalControlBridge;
 use permissions::{ensure_action_allowed, ensure_feature_enabled};
 
+/// Shared state made available to Axum handlers for one local-control server.
 #[derive(Clone)]
 struct ControlServerState {
     bridge_spawner: ModelSpawner<LocalControlBridge>,
     instance_id: InstanceId,
     credentials: Arc<Mutex<HashMap<String, CredentialGrant>>>,
 }
-
+/// Process-local server that exposes Warp control actions over localhost.
 pub struct LocalControlServer {
     _runtime: Option<tokio::runtime::Runtime>,
     control_endpoint: Option<ControlEndpoint>,

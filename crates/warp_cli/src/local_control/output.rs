@@ -1,3 +1,4 @@
+//! Output rendering helpers for `warpctrl`.
 use std::io::Write as _;
 
 use local_control::protocol::{ControlError, ErrorCode};
@@ -5,6 +6,7 @@ use serde::Serialize;
 
 use crate::agent::OutputFormat;
 
+/// JSON/NDJSON error payload emitted by `warpctrl`.
 #[derive(Serialize)]
 pub(crate) struct ErrorSummary<'a> {
     pub ok: bool,

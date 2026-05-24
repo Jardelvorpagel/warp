@@ -1,3 +1,4 @@
+//! CLI argument conversion into shared local-control selectors.
 use local_control::selection::InstanceSelector;
 
 use crate::local_control::TargetArgs;
