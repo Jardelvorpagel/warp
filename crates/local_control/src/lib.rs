@@ -24,13 +24,29 @@ pub use discovery::{
 };
 pub use protocol::{
     Action, ActionGetParams, ActionGetResult, ActionListParams, ActionListResult,
-    ActiveTargetChain, AppActiveParams, AppInspectParams, AppInspectResult, AppVersionResult,
-    AppearanceStateResult, BlockGetParams, BlockGetResult, BlockListParams, BlockListResult,
-    BlockSummary, ControlError, ControlResponse, EmptyParams, ErrorCode, ErrorResponseEnvelope,
-    ExecutionContextProof, HistoryEntrySummary, HistoryListParams, HistoryListResult,
-    InputGetParams, InputStateResult, PROTOCOL_VERSION, PaneListResult, PaneSummary,
-    RequestEnvelope, ResponseEnvelope, SessionListResult, SessionSummary, SettingGetParams,
-    SettingGetResult, SettingListParams, SettingListResult, SettingSummary, TabListResult,
-    TabSummary, ThemeListResult, ThemeSummary, WindowListResult, WindowSummary,
+    ActiveTargetChain, AppActiveParams, AppFocusParams, AppInspectParams, AppInspectResult,
+    AppSurfaceParams, AppVersionResult, AppearanceFontSizeParams, AppearanceMutationResult,
+    AppearanceSetParams, AppearanceStateResult, AppearanceZoomParams, BlockGetParams,
+    BlockGetResult, BlockListParams, BlockListResult, BlockSummary, ControlError, ControlResponse,
+    DriveCreateParams, DriveDeleteParams, DriveGetParams, DriveGetResult, DriveInsertParams,
+    DriveListParams, DriveListResult, DriveMutationResult, DriveObjectSummary, DriveRunParams,
+    DriveUpdateParams, EmptyParams, ErrorCode, ErrorResponseEnvelope, ExecutionContextProof,
+    FileDeleteParams, FileListParams, FileListResult, FileMutationResult, FileOpenParams,
+    FileSummary, FileWriteParams, HistoryEntrySummary, HistoryListParams, HistoryListResult,
+    HorizontalDirection, InputClearParams, InputGetParams, InputInsertParams, InputMode,
+    InputModeSetParams, InputReplaceParams, InputRunParams, InputStateResult, PROTOCOL_VERSION,
+    PaneCloseParams, PaneDirection, PaneFocusParams, PaneListResult, PaneMaximizeParams,
+    PaneMutationResult, PaneNavigateParams, PaneResizeParams, PaneSplitParams, PaneSummary,
+    ProjectActiveParams, ProjectActiveResult, ProjectListParams, ProjectListResult, ProjectSummary,
+    RequestEnvelope, ResponseEnvelope, SessionListResult, SessionMutationResult, SessionSummary,
+    SettingGetParams, SettingGetResult, SettingListParams, SettingListResult,
+    SettingMutationResult, SettingSetParams, SettingSummary, SettingToggleParams, SizeAdjustment,
+    TabActivateParams, TabActivationTarget, TabCloseParams, TabCloseScope, TabCreateParams,
+    TabListResult, TabMoveParams, TabMutationResult, TabRenameParams, TabSummary, ThemeListResult,
+    ThemeSetParams, ThemeSummary, WindowCloseParams, WindowCreateParams, WindowFocusParams,
+    WindowListResult, WindowMutationResult, WindowSummary,
 };
-pub use selectors::{PaneSelector, SessionSelector, TabSelector, TargetSelector, WindowSelector};
+pub use selectors::{
+    BlockSelector, BlockTarget, DriveObjectSelector, DriveObjectType, DriveTarget, FileSelector,
+    FileTarget, PaneSelector, SessionSelector, TabSelector, TargetSelector, WindowSelector,
+};

@@ -47,19 +47,13 @@ fn ambiguous_target_error_code_is_stable() {
 }
 
 #[test]
-fn input_run_is_not_in_the_allowlisted_catalog() {
-    let action = serde_json::from_value::<ActionKind>(serde_json::json!("input.run"));
-    assert!(action.is_err());
-}
-
-#[test]
 fn malformed_action_name_is_not_deserialized() {
     let action = serde_json::from_value::<ActionKind>(serde_json::json!("tab.create.extra"));
     assert!(action.is_err());
 }
 
 #[test]
-fn tab_create_metadata_is_first_slice_logged_out_safe_mutation() {
+fn tab_create_metadata_is_logged_out_safe_mutation_invocable_from_both_contexts() {
     let metadata = ActionKind::TabCreate.metadata();
     assert_eq!(
         metadata.implementation_status,
@@ -78,12 +72,15 @@ fn tab_create_metadata_is_first_slice_logged_out_safe_mutation() {
     );
     assert_eq!(
         metadata.allowed_invocation_contexts,
-        vec![InvocationContext::OutsideWarp]
+        vec![
+            InvocationContext::InsideWarp,
+            InvocationContext::OutsideWarp
+        ]
     );
 }
 
 #[test]
-fn structural_metadata_actions_are_logged_out_safe_read_metadata() {
+fn read_only_metadata_actions_are_invocable_from_both_contexts() {
     for action in [
         ActionKind::InstanceList,
         ActionKind::AppPing,
@@ -119,7 +116,10 @@ fn structural_metadata_actions_are_logged_out_safe_read_metadata() {
         assert!(!metadata.authenticated_user.required);
         assert_eq!(
             metadata.allowed_invocation_contexts,
-            vec![InvocationContext::OutsideWarp]
+            vec![
+                InvocationContext::InsideWarp,
+                InvocationContext::OutsideWarp
+            ]
         );
     }
 }
@@ -299,4 +299,217 @@ fn non_first_slice_actions_are_catalog_stubs() {
             .allowed_invocation_contexts
             .contains(&InvocationContext::OutsideWarp)
     );
+}
+
+#[test]
+fn file_project_drive_actions_are_in_catalog_all() {
+    let all_names: Vec<&str> = ActionKind::ALL.iter().map(|k| k.as_str()).collect();
+    for expected in [
+        "file.list",
+        "file.open",
+        "file.write",
+        "file.delete",
+        "project.active",
+        "project.list",
+        "drive.list",
+        "drive.get",
+        "drive.create",
+        "drive.update",
+        "drive.delete",
+        "drive.run",
+        "drive.insert",
+        "input.run",
+    ] {
+        assert!(
+            all_names.contains(&expected),
+            "ActionKind::ALL missing: {expected}"
+        );
+    }
+}
+
+#[test]
+fn drive_list_is_read_only_metadata_requiring_authenticated_user() {
+    let metadata = ActionKind::DriveList.metadata();
+    assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyMetadata);
+    assert_eq!(
+        metadata.state_data_category,
+        StateDataCategory::MetadataRead
+    );
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::ReadMetadata
+    );
+    assert!(metadata.requires_authenticated_user);
+    assert_eq!(
+        metadata.allowed_invocation_contexts,
+        vec![
+            InvocationContext::InsideWarp,
+            InvocationContext::OutsideWarp
+        ]
+    );
+    assert_eq!(metadata.target_scope, TargetScope::Drive);
+}
+
+#[test]
+fn drive_get_is_read_only_terminal_data_requiring_authenticated_user() {
+    let metadata = ActionKind::DriveGet.metadata();
+    assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyTerminalData);
+    assert_eq!(
+        metadata.state_data_category,
+        StateDataCategory::UnderlyingDataRead
+    );
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::ReadUnderlyingData
+    );
+    assert!(metadata.requires_authenticated_user);
+    assert_eq!(
+        metadata.allowed_invocation_contexts,
+        vec![
+            InvocationContext::InsideWarp,
+            InvocationContext::OutsideWarp
+        ]
+    );
+    assert_eq!(metadata.target_scope, TargetScope::Drive);
+}
+
+#[test]
+fn file_list_is_read_only_metadata_without_auth_requirement() {
+    let metadata = ActionKind::FileList.metadata();
+    assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyMetadata);
+    assert_eq!(
+        metadata.state_data_category,
+        StateDataCategory::MetadataRead
+    );
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::ReadMetadata
+    );
+    assert!(!metadata.requires_authenticated_user);
+    assert_eq!(
+        metadata.allowed_invocation_contexts,
+        vec![
+            InvocationContext::InsideWarp,
+            InvocationContext::OutsideWarp
+        ]
+    );
+    assert_eq!(metadata.target_scope, TargetScope::File);
+}
+
+#[test]
+fn project_actions_are_read_only_metadata_without_auth_requirement() {
+    for action in [ActionKind::ProjectActive, ActionKind::ProjectList] {
+        let metadata = action.metadata();
+        assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyMetadata);
+        assert_eq!(
+            metadata.state_data_category,
+            StateDataCategory::MetadataRead
+        );
+        assert!(!metadata.requires_authenticated_user);
+        assert_eq!(metadata.target_scope, TargetScope::Project);
+    }
+}
+
+#[test]
+fn mutating_drive_actions_are_stubs_with_no_invocation_contexts() {
+    for action in [
+        ActionKind::DriveCreate,
+        ActionKind::DriveUpdate,
+        ActionKind::DriveDelete,
+        ActionKind::DriveRun,
+    ] {
+        let metadata = action.metadata();
+        assert_eq!(
+            metadata.implementation_status,
+            ActionImplementationStatus::Stub
+        );
+        assert_eq!(metadata.risk_tier, RiskTier::MutatingDestructiveOrExecution);
+        assert_eq!(
+            metadata.state_data_category,
+            StateDataCategory::UnderlyingDataMutation
+        );
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::MutateUnderlyingData
+        );
+        assert!(metadata.requires_authenticated_user);
+        assert!(metadata.allowed_invocation_contexts.is_empty());
+    }
+}
+
+#[test]
+fn input_run_is_underlying_data_mutation_stub() {
+    let metadata = ActionKind::InputRun.metadata();
+    assert_eq!(
+        metadata.implementation_status,
+        ActionImplementationStatus::Stub
+    );
+    assert_eq!(metadata.risk_tier, RiskTier::MutatingDestructiveOrExecution);
+    assert_eq!(
+        metadata.state_data_category,
+        StateDataCategory::UnderlyingDataMutation
+    );
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::MutateUnderlyingData
+    );
+    assert_eq!(metadata.target_scope, TargetScope::Session);
+    assert!(metadata.allowed_invocation_contexts.is_empty());
+}
+
+#[test]
+fn drive_list_params_roundtrip() {
+    let action = Action::with_params(
+        ActionKind::DriveList,
+        DriveListParams {
+            object_type: Some(DriveObjectType::Workflow),
+        },
+    )
+    .expect("params serialize");
+    assert_eq!(action.kind, ActionKind::DriveList);
+    assert_eq!(action.params["object_type"], "workflow");
+
+    let params = action
+        .params_as::<DriveListParams>()
+        .expect("params deserialize");
+    assert_eq!(params.object_type, Some(DriveObjectType::Workflow));
+}
+
+#[test]
+fn file_write_params_roundtrip() {
+    let action = Action::with_params(
+        ActionKind::FileWrite,
+        FileWriteParams {
+            path: "/tmp/test.txt".to_owned(),
+            contents: "hello".to_owned(),
+            create: true,
+        },
+    )
+    .expect("params serialize");
+    assert_eq!(action.params["path"], "/tmp/test.txt");
+    assert_eq!(action.params["contents"], "hello");
+    assert_eq!(action.params["create"], true);
+
+    let params = action
+        .params_as::<FileWriteParams>()
+        .expect("params deserialize");
+    assert_eq!(params.path, "/tmp/test.txt");
+    assert!(params.create);
+}
+
+#[test]
+fn input_run_params_roundtrip() {
+    let action = Action::with_params(
+        ActionKind::InputRun,
+        InputRunParams {
+            command: "echo hello".to_owned(),
+        },
+    )
+    .expect("params serialize");
+    assert_eq!(action.params["command"], "echo hello");
+
+    let params = action
+        .params_as::<InputRunParams>()
+        .expect("params deserialize");
+    assert_eq!(params.command, "echo hello");
 }

@@ -77,6 +77,9 @@ pub enum TargetScope {
     Appearance,
     Surface,
     Action,
+    File,
+    Project,
+    Drive,
 }
 
 /// Whether an action has an app-side implementation in this stack layer.
@@ -215,6 +218,34 @@ pub enum ActionKind {
     SettingSet,
     #[serde(rename = "setting.toggle")]
     SettingToggle,
+    #[serde(rename = "input.run")]
+    InputRun,
+    #[serde(rename = "file.list")]
+    FileList,
+    #[serde(rename = "file.open")]
+    FileOpen,
+    #[serde(rename = "file.write")]
+    FileWrite,
+    #[serde(rename = "file.delete")]
+    FileDelete,
+    #[serde(rename = "project.active")]
+    ProjectActive,
+    #[serde(rename = "project.list")]
+    ProjectList,
+    #[serde(rename = "drive.list")]
+    DriveList,
+    #[serde(rename = "drive.get")]
+    DriveGet,
+    #[serde(rename = "drive.create")]
+    DriveCreate,
+    #[serde(rename = "drive.update")]
+    DriveUpdate,
+    #[serde(rename = "drive.delete")]
+    DriveDelete,
+    #[serde(rename = "drive.run")]
+    DriveRun,
+    #[serde(rename = "drive.insert")]
+    DriveInsert,
 }
 
 impl ActionKind {
@@ -274,6 +305,20 @@ impl ActionKind {
         Self::SettingList,
         Self::SettingSet,
         Self::SettingToggle,
+        Self::InputRun,
+        Self::FileList,
+        Self::FileOpen,
+        Self::FileWrite,
+        Self::FileDelete,
+        Self::ProjectActive,
+        Self::ProjectList,
+        Self::DriveList,
+        Self::DriveGet,
+        Self::DriveCreate,
+        Self::DriveUpdate,
+        Self::DriveDelete,
+        Self::DriveRun,
+        Self::DriveInsert,
     ];
     pub fn as_str(self) -> &'static str {
         match self {
@@ -332,6 +377,20 @@ impl ActionKind {
             Self::SettingList => "setting.list",
             Self::SettingSet => "setting.set",
             Self::SettingToggle => "setting.toggle",
+            Self::InputRun => "input.run",
+            Self::FileList => "file.list",
+            Self::FileOpen => "file.open",
+            Self::FileWrite => "file.write",
+            Self::FileDelete => "file.delete",
+            Self::ProjectActive => "project.active",
+            Self::ProjectList => "project.list",
+            Self::DriveList => "drive.list",
+            Self::DriveGet => "drive.get",
+            Self::DriveCreate => "drive.create",
+            Self::DriveUpdate => "drive.update",
+            Self::DriveDelete => "drive.delete",
+            Self::DriveRun => "drive.run",
+            Self::DriveInsert => "drive.insert",
         }
     }
 
@@ -360,12 +419,7 @@ impl ActionKind {
             _ => ActionImplementationStatus::Stub,
         };
         let requires_authenticated_user = self.default_requires_authenticated_user();
-        let allowed_invocation_contexts =
-            if implementation_status == ActionImplementationStatus::Implemented {
-                vec![InvocationContext::OutsideWarp]
-            } else {
-                Vec::new()
-            };
+        let allowed_invocation_contexts = self.default_allowed_invocation_contexts();
         ActionMetadata {
             kind: self,
             name: self.as_str().to_owned(),
@@ -397,6 +451,20 @@ impl ActionKind {
         self.metadata().implementation_status == ActionImplementationStatus::Implemented
     }
 
+    fn default_allowed_invocation_contexts(self) -> Vec<InvocationContext> {
+        if matches!(
+            self.default_risk_tier(),
+            RiskTier::ReadOnlyMetadata | RiskTier::ReadOnlyTerminalData
+        ) || self == Self::TabCreate
+        {
+            return vec![
+                InvocationContext::InsideWarp,
+                InvocationContext::OutsideWarp,
+            ];
+        }
+        Vec::new()
+    }
+
     fn default_risk_tier(self) -> RiskTier {
         match self {
             Self::InstanceList
@@ -421,9 +489,16 @@ impl ActionKind {
             | Self::InputReplace
             | Self::InputClear
             | Self::InputModeSet
+            | Self::InputRun
             | Self::WindowClose
             | Self::TabClose
-            | Self::PaneClose => RiskTier::MutatingDestructiveOrExecution,
+            | Self::PaneClose
+            | Self::FileWrite
+            | Self::FileDelete
+            | Self::DriveCreate
+            | Self::DriveUpdate
+            | Self::DriveDelete
+            | Self::DriveRun => RiskTier::MutatingDestructiveOrExecution,
             Self::AppFocus
             | Self::AppSettingsOpen
             | Self::AppCommandPaletteOpen
@@ -452,7 +527,13 @@ impl ActionKind {
             | Self::AppearanceFontSize
             | Self::AppearanceZoom
             | Self::SettingSet
-            | Self::SettingToggle => RiskTier::MutatingNonDestructive,
+            | Self::SettingToggle
+            | Self::FileOpen
+            | Self::DriveInsert => RiskTier::MutatingNonDestructive,
+            Self::FileList | Self::ProjectActive | Self::ProjectList | Self::DriveList => {
+                RiskTier::ReadOnlyMetadata
+            }
+            Self::DriveGet => RiskTier::ReadOnlyTerminalData,
         }
     }
 
@@ -482,9 +563,18 @@ impl ActionKind {
             | Self::AppearanceSet
             | Self::AppearanceFontSize
             | Self::AppearanceZoom => StateDataCategory::MetadataConfigurationMutation,
-            Self::InputInsert | Self::InputReplace | Self::InputClear | Self::InputModeSet => {
-                StateDataCategory::UnderlyingDataMutation
-            }
+            Self::InputInsert
+            | Self::InputReplace
+            | Self::InputClear
+            | Self::InputModeSet
+            | Self::InputRun
+            | Self::FileWrite
+            | Self::FileDelete
+            | Self::DriveCreate
+            | Self::DriveUpdate
+            | Self::DriveDelete
+            | Self::DriveRun => StateDataCategory::UnderlyingDataMutation,
+            Self::DriveGet => StateDataCategory::UnderlyingDataRead,
             Self::AppFocus
             | Self::AppSettingsOpen
             | Self::AppCommandPaletteOpen
@@ -510,7 +600,12 @@ impl ActionKind {
             | Self::PaneMaximize
             | Self::PaneResize
             | Self::PaneSessionPrevious
-            | Self::PaneSessionNext => StateDataCategory::AppStateMutation,
+            | Self::PaneSessionNext
+            | Self::FileOpen
+            | Self::DriveInsert => StateDataCategory::AppStateMutation,
+            Self::FileList | Self::ProjectActive | Self::ProjectList | Self::DriveList => {
+                StateDataCategory::MetadataRead
+            }
         }
     }
 
@@ -527,7 +622,12 @@ impl ActionKind {
     }
     fn default_requires_authenticated_user(self) -> bool {
         match self {
-            Self::BlockList | Self::BlockGet | Self::InputGet | Self::HistoryList => true,
+            Self::BlockList
+            | Self::BlockGet
+            | Self::InputGet
+            | Self::HistoryList
+            | Self::DriveList
+            | Self::DriveGet => true,
             Self::InstanceList
             | Self::AppPing
             | Self::AppInspect
@@ -543,7 +643,10 @@ impl ActionKind {
             | Self::ThemeList
             | Self::AppearanceGet
             | Self::SettingGet
-            | Self::SettingList => false,
+            | Self::SettingList
+            | Self::FileList
+            | Self::ProjectActive
+            | Self::ProjectList => false,
             _ => true,
         }
     }
@@ -573,7 +676,8 @@ impl ActionKind {
             | Self::InputInsert
             | Self::InputReplace
             | Self::InputClear
-            | Self::InputModeSet => TargetScope::Session,
+            | Self::InputModeSet
+            | Self::InputRun => TargetScope::Session,
             Self::BlockList | Self::BlockGet => TargetScope::Block,
             Self::HistoryList => TargetScope::History,
             Self::ThemeList
@@ -586,6 +690,17 @@ impl ActionKind {
                 TargetScope::Settings
             }
             Self::ActionList | Self::ActionGet => TargetScope::Action,
+            Self::FileList | Self::FileOpen | Self::FileWrite | Self::FileDelete => {
+                TargetScope::File
+            }
+            Self::ProjectActive | Self::ProjectList => TargetScope::Project,
+            Self::DriveList
+            | Self::DriveGet
+            | Self::DriveCreate
+            | Self::DriveUpdate
+            | Self::DriveDelete
+            | Self::DriveRun
+            | Self::DriveInsert => TargetScope::Drive,
             Self::AppSettingsOpen
             | Self::AppCommandPaletteOpen
             | Self::AppCommandSearchOpen

@@ -12,9 +12,9 @@ use clap_complete::aot::Shell;
 
 use commands::{
     run_action_command, run_app_command, run_appearance_command, run_block_command,
-    run_history_command, run_input_command, run_instance_command, run_pane_command,
-    run_session_command, run_setting_command, run_tab_command, run_theme_command,
-    run_window_command,
+    run_drive_command, run_file_command, run_history_command, run_input_command,
+    run_instance_command, run_pane_command, run_project_command, run_session_command,
+    run_setting_command, run_tab_command, run_theme_command, run_window_command,
 };
 use completions::generate_completions_to_stdout;
 use output::write_control_error;
@@ -117,6 +117,18 @@ pub enum ControlCommand {
     #[command(subcommand)]
     Setting(SettingCommand),
 
+    /// Inspect files currently surfaced in Warp.
+    #[command(subcommand)]
+    File(FileCommand),
+
+    /// Inspect projects currently known to Warp.
+    #[command(subcommand)]
+    Project(ProjectCommand),
+
+    /// Inspect Warp Drive objects.
+    #[command(subcommand)]
+    Drive(DriveCommand),
+
     /// Generate shell completions for your shell to stdout.
     ///
     /// For bash, add the following to ~/.bashrc:
@@ -161,6 +173,36 @@ pub enum AppCommand {
 
     /// Print app and protocol metadata.
     Inspect(TargetArgs),
+
+    /// Focus the selected Warp app instance.
+    Focus(TargetArgs),
+
+    /// Open the Settings surface.
+    SettingsOpen(AppSurfaceArgs),
+
+    /// Open the Command Palette.
+    CommandPaletteOpen(AppSurfaceArgs),
+
+    /// Open command search.
+    CommandSearchOpen(AppSurfaceArgs),
+
+    /// Open Warp Drive.
+    WarpDriveOpen(AppSurfaceArgs),
+
+    /// Toggle Warp Drive.
+    WarpDriveToggle(AppSurfaceArgs),
+
+    /// Toggle the resource center.
+    ResourceCenterToggle(AppSurfaceArgs),
+
+    /// Toggle the AI assistant surface.
+    AiAssistantToggle(AppSurfaceArgs),
+
+    /// Toggle the code review surface.
+    CodeReviewToggle(AppSurfaceArgs),
+
+    /// Toggle the vertical tabs panel.
+    VerticalTabsToggle(AppSurfaceArgs),
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -176,6 +218,15 @@ pub enum ActionCommand {
 pub enum WindowCommand {
     /// List windows in the selected local Warp app.
     List(TargetArgs),
+
+    /// Create a new Warp window.
+    Create(WindowCreateArgs),
+
+    /// Focus a Warp window.
+    Focus(TargetArgs),
+
+    /// Close a Warp window.
+    Close(WindowCloseArgs),
 }
 
 /// Commands that control tabs in the selected Warp app instance.
@@ -185,6 +236,20 @@ pub enum TabCommand {
     List(TargetArgs),
     /// Create a new terminal tab in the active window.
     Create(TargetArgs),
+    /// Activate a target tab.
+    Activate(TargetArgs),
+    /// Activate the previous tab.
+    Previous(TargetArgs),
+    /// Activate the next tab.
+    Next(TargetArgs),
+    /// Activate the last tab.
+    Last(TargetArgs),
+    /// Move a target tab left or right.
+    Move(TabMoveArgs),
+    /// Rename or reset a target tab title.
+    Rename(TabRenameArgs),
+    /// Close a target tab or tab group.
+    Close(TabCloseArgs),
 }
 
 /// Commands that inspect local Warp panes.
@@ -192,6 +257,22 @@ pub enum TabCommand {
 pub enum PaneCommand {
     /// List panes in the selected local Warp app.
     List(TargetArgs),
+    /// Split a pane.
+    Split(PaneSplitArgs),
+    /// Focus a pane.
+    Focus(TargetArgs),
+    /// Navigate pane focus.
+    Navigate(PaneNavigateArgs),
+    /// Close a pane.
+    Close(PaneCloseArgs),
+    /// Toggle or set pane maximization.
+    Maximize(PaneMaximizeArgs),
+    /// Resize a pane divider.
+    Resize(PaneResizeArgs),
+    /// Switch to the previous session in a pane.
+    PreviousSession(TargetArgs),
+    /// Switch to the next session in a pane.
+    NextSession(TargetArgs),
 }
 /// Commands that inspect local Warp sessions.
 
@@ -215,20 +296,37 @@ pub enum BlockCommand {
 pub enum InputCommand {
     /// Read the current input buffer.
     Get(TargetArgs),
+    /// Insert text into the active input buffer.
+    Insert(InputInsertArgs),
+    /// Replace the active input buffer.
+    Replace(InputTextArgs),
+    /// Clear the active input buffer.
+    Clear(TargetArgs),
+    /// Set the active input mode.
+    Mode(InputModeArgs),
+    /// Run a command in the target session.
+    Run(InputRunArgs),
 }
 
 /// Commands that inspect Warp themes.
-
 #[derive(Debug, Clone, Subcommand)]
 pub enum ThemeCommand {
     /// List available themes.
     List(TargetArgs),
+    /// Set the current theme.
+    Set(ThemeSetArgs),
 }
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum AppearanceCommand {
     /// Read appearance state.
     Get(TargetArgs),
+    /// Set theme-following appearance state.
+    Set(AppearanceSetArgs),
+    /// Adjust font size.
+    FontSize(AppearanceAdjustArgs),
+    /// Adjust UI zoom.
+    Zoom(AppearanceAdjustArgs),
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -238,12 +336,56 @@ pub enum HistoryCommand {
 }
 
 #[derive(Debug, Clone, Subcommand)]
+pub enum FileCommand {
+    /// List files currently surfaced in Warp.
+    List(TargetArgs),
+    /// Open a path in Warp.
+    Open(FileOpenArgs),
+    /// Write a file through the local-control protocol.
+    Write(FileWriteArgs),
+    /// Delete a file through the local-control protocol.
+    Delete(FileDeleteArgs),
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum ProjectCommand {
+    /// Print the active project for the selected local Warp app.
+    Active(TargetArgs),
+    /// List projects currently known to Warp.
+    List(TargetArgs),
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum DriveCommand {
+    /// List Warp Drive objects.
+    List(DriveListArgs),
+    /// Read one Warp Drive object.
+    Get(DriveGetArgs),
+    /// Create a Warp Drive object.
+    Create(DriveCreateArgs),
+    /// Update a Warp Drive object.
+    Update(DriveUpdateArgs),
+    /// Delete a Warp Drive object.
+    Delete(DriveObjectMutationArgs),
+    /// Run a Warp Drive workflow.
+    Run(DriveObjectMutationArgs),
+    /// Insert a Warp Drive object into the active input.
+    Insert(DriveObjectMutationArgs),
+}
+
+#[derive(Debug, Clone, Subcommand)]
 pub enum SettingCommand {
     /// List allowlisted settings.
     List(TargetArgs),
 
     /// Read one allowlisted setting.
     Get(SettingGetArgs),
+
+    /// Set one allowlisted setting.
+    Set(SettingSetArgsCli),
+
+    /// Toggle one allowlisted boolean setting.
+    Toggle(SettingToggleArgsCli),
 }
 
 /// Common flags for selecting which running Warp instance receives a command.
@@ -295,6 +437,430 @@ pub struct SettingGetArgs {
     pub key: String,
 }
 
+#[derive(Debug, Clone, Args)]
+pub struct AppSurfaceArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "query")]
+    pub query: Option<String>,
+
+    #[arg(long = "page")]
+    pub page: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct WindowCreateArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "profile")]
+    pub profile: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct WindowCloseArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "force")]
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct TabMoveArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "direction", value_enum)]
+    pub direction: HorizontalDirectionArg,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct TabRenameArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub title: Option<String>,
+
+    #[arg(long = "reset")]
+    pub reset: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct TabCloseArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "scope", value_enum, default_value_t = TabCloseScopeArg::Target)]
+    pub scope: TabCloseScopeArg,
+
+    #[arg(long = "force")]
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct PaneSplitArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "direction", value_enum)]
+    pub direction: PaneDirectionArg,
+
+    #[arg(long = "profile")]
+    pub profile: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct PaneNavigateArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "direction", value_enum)]
+    pub direction: PaneDirectionArg,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct PaneCloseArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "force")]
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct PaneMaximizeArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "enabled")]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct PaneResizeArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "direction", value_enum)]
+    pub direction: PaneDirectionArg,
+
+    #[arg(long = "amount")]
+    pub amount: Option<u32>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct InputInsertArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub text: String,
+
+    #[arg(long = "replace")]
+    pub replace: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct InputTextArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct InputModeArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(value_enum)]
+    pub mode: InputModeArg,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct InputRunArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ThemeSetArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct AppearanceSetArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(long = "theme")]
+    pub theme: Option<String>,
+
+    #[arg(long = "follow-system-theme")]
+    pub follow_system_theme: Option<bool>,
+
+    #[arg(long = "light-theme")]
+    pub light_theme: Option<String>,
+
+    #[arg(long = "dark-theme")]
+    pub dark_theme: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct AppearanceAdjustArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[arg(value_enum)]
+    pub adjustment: SizeAdjustmentArg,
+
+    #[arg(long = "value")]
+    pub value: Option<u32>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SettingSetArgsCli {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub key: String,
+
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SettingToggleArgsCli {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct FileOpenArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub path: String,
+
+    #[arg(long = "line")]
+    pub line: Option<u32>,
+
+    #[arg(long = "new-window")]
+    pub new_window: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct FileWriteArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub path: String,
+
+    pub contents: String,
+
+    #[arg(long = "create")]
+    pub create: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct FileDeleteArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub path: String,
+
+    #[arg(long = "recursive")]
+    pub recursive: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DriveListArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Restrict results to one Drive object type.
+    #[arg(long = "type")]
+    pub object_type: Option<DriveObjectTypeArg>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DriveGetArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Warp Drive object type.
+    #[arg(long = "type")]
+    pub object_type: DriveObjectTypeArg,
+
+    /// Opaque Warp Drive object id.
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DriveCreateArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Warp Drive object type.
+    #[arg(long = "type")]
+    pub object_type: DriveObjectTypeArg,
+
+    /// Name for the new Drive object.
+    pub name: String,
+
+    /// Object content, parsed as JSON when possible and otherwise treated as a string.
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DriveUpdateArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Warp Drive object type.
+    #[arg(long = "type")]
+    pub object_type: DriveObjectTypeArg,
+
+    /// Opaque Warp Drive object id.
+    pub id: String,
+
+    /// Object content, parsed as JSON when possible and otherwise treated as a string.
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DriveObjectMutationArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Warp Drive object type.
+    #[arg(long = "type")]
+    pub object_type: DriveObjectTypeArg,
+
+    /// Opaque Warp Drive object id.
+    pub id: String,
+}
+
+use clap::ValueEnum;
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum DriveObjectTypeArg {
+    Workflow,
+    Notebook,
+    Environment,
+    Prompt,
+}
+
+impl From<DriveObjectTypeArg> for local_control::DriveObjectType {
+    fn from(value: DriveObjectTypeArg) -> Self {
+        match value {
+            DriveObjectTypeArg::Workflow => Self::Workflow,
+            DriveObjectTypeArg::Notebook => Self::Notebook,
+            DriveObjectTypeArg::Environment => Self::Environment,
+            DriveObjectTypeArg::Prompt => Self::Prompt,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum HorizontalDirectionArg {
+    Left,
+    Right,
+}
+
+impl From<HorizontalDirectionArg> for local_control::HorizontalDirection {
+    fn from(value: HorizontalDirectionArg) -> Self {
+        match value {
+            HorizontalDirectionArg::Left => Self::Left,
+            HorizontalDirectionArg::Right => Self::Right,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum TabCloseScopeArg {
+    Target,
+    Others,
+    Right,
+}
+
+impl From<TabCloseScopeArg> for local_control::TabCloseScope {
+    fn from(value: TabCloseScopeArg) -> Self {
+        match value {
+            TabCloseScopeArg::Target => Self::Target,
+            TabCloseScopeArg::Others => Self::Others,
+            TabCloseScopeArg::Right => Self::Right,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum PaneDirectionArg {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl From<PaneDirectionArg> for local_control::PaneDirection {
+    fn from(value: PaneDirectionArg) -> Self {
+        match value {
+            PaneDirectionArg::Left => Self::Left,
+            PaneDirectionArg::Right => Self::Right,
+            PaneDirectionArg::Up => Self::Up,
+            PaneDirectionArg::Down => Self::Down,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum InputModeArg {
+    Terminal,
+    Agent,
+}
+
+impl From<InputModeArg> for local_control::InputMode {
+    fn from(value: InputModeArg) -> Self {
+        match value {
+            InputModeArg::Terminal => Self::Terminal,
+            InputModeArg::Agent => Self::Agent,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum SizeAdjustmentArg {
+    Increase,
+    Decrease,
+    Reset,
+    Set,
+}
+
+impl From<SizeAdjustmentArg> for local_control::SizeAdjustment {
+    fn from(value: SizeAdjustmentArg) -> Self {
+        match value {
+            SizeAdjustmentArg::Increase => Self::Increase,
+            SizeAdjustmentArg::Decrease => Self::Decrease,
+            SizeAdjustmentArg::Reset => Self::Reset,
+            SizeAdjustmentArg::Set => Self::Set,
+        }
+    }
+}
+
+fn parse_json_value_or_string(value: String) -> serde_json::Value {
+    match serde_json::from_str(&value) {
+        Ok(value) => value,
+        Err(_) => serde_json::Value::String(value),
+    }
+}
+
 pub fn run(args: ControlArgs) -> ExitCode {
     let output_format = args.output_format;
     match run_inner(args) {
@@ -327,6 +893,9 @@ fn run_inner(args: ControlArgs) -> Result<(), local_control::protocol::ControlEr
         ControlCommand::Theme(command) => run_theme_command(command, output_format),
         ControlCommand::Appearance(command) => run_appearance_command(command, output_format),
         ControlCommand::Setting(command) => run_setting_command(command, output_format),
+        ControlCommand::File(command) => run_file_command(command, output_format),
+        ControlCommand::Project(command) => run_project_command(command, output_format),
+        ControlCommand::Drive(command) => run_drive_command(command, output_format),
         ControlCommand::Completions { shell } => generate_completions_to_stdout(shell),
     }
 }

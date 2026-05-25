@@ -13,10 +13,10 @@ use warp_core::features::FeatureFlag;
 use warpui::{App, SingletonEntity};
 
 use super::{
-    action_metadata_for_name, appearance_state_result, capabilities, ensure_feature_enabled,
-    ensure_settings_allow_action, outside_warp_action_enabled_for_settings, rejected_setting_key,
-    require_active_window_id, setting_get_result, setting_list_result, theme_list_result,
-    validate_action_params, validate_tab_create_target, LocalControlBridge,
+    LocalControlBridge, action_metadata_for_name, appearance_state_result, capabilities,
+    ensure_feature_enabled, ensure_settings_allow_action, outside_warp_action_enabled_for_settings,
+    rejected_setting_key, require_active_window_id, setting_get_result, setting_list_result,
+    theme_list_result, validate_action_params, validate_tab_create_target,
 };
 use crate::settings::{
     AllowOutsideWarpAppStateMutations, AllowOutsideWarpControl,
@@ -110,6 +110,7 @@ fn tab_create_accepts_default_and_active_targets() {
         tab: Some(TabTarget::Active),
         pane: Some(PaneTarget::Active),
         session: Some(SessionTarget::Active),
+        ..TargetSelector::default()
     })
     .expect("active target is accepted");
 }
@@ -494,7 +495,7 @@ fn data_actions_require_underlying_data_permission_not_metadata_permission() {
 fn action_get_rejects_unallowlisted_action_names() {
     let err = validate_action_params(&Action {
         kind: ActionKind::ActionGet,
-        params: serde_json::json!({ "action": "input.run" }),
+        params: serde_json::json!({ "action": "input.execute" }),
     })
     .expect_err("unallowlisted action is rejected");
     assert_eq!(err.code, ErrorCode::NotAllowlisted);
@@ -566,10 +567,12 @@ fn settings_and_appearance_handlers_return_allowlisted_metadata() {
             assert_eq!(appearance.ui_zoom_percent, Some(100));
 
             let settings = setting_list_result(ctx).expect("settings are listed");
-            assert!(settings
-                .settings
-                .iter()
-                .any(|setting| setting.key == "appearance.themes.system_theme"));
+            assert!(
+                settings
+                    .settings
+                    .iter()
+                    .any(|setting| setting.key == "appearance.themes.system_theme")
+            );
 
             let setting = setting_get_result("appearance.themes.system_theme", ctx)
                 .expect("allowlisted setting is readable");
