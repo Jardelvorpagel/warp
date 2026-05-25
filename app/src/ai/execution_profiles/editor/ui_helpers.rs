@@ -12,7 +12,7 @@ use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::{AppContext, Element, SingletonEntity, ViewHandle};
 
 use super::{ExecutionProfileEditorView, ExecutionProfileEditorViewAction};
-use crate::ai::execution_profiles::{AIExecutionProfile, ActionPermission};
+use crate::ai::execution_profiles::{AIExecutionProfile, ActionPermission, WarpControlPermission};
 use crate::editor::EditorView;
 use crate::settings::AISettings;
 use crate::ui_components::icons::Icon;
@@ -194,6 +194,25 @@ fn render_info_section(
         .with_children([alert_icon, Shrinkable::new(1.0, text).finish()])
         .finish();
     Container::new(description).with_margin_bottom(12.).finish()
+}
+
+fn render_warp_control_permission_row(
+    appearance: &Appearance,
+    icon: Icon,
+    label: &str,
+    dropdown: &ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
+    permission: WarpControlPermission,
+    tooltip_mouse_state: MouseStateHandle,
+) -> Box<dyn Element> {
+    render_permission_row(
+        appearance,
+        icon,
+        label,
+        dropdown,
+        permission.description(),
+        false,
+        tooltip_mouse_state,
+    )
 }
 
 fn render_permission_row<T: Clone + 'static + std::fmt::Debug + Send + Sync>(
@@ -554,6 +573,62 @@ pub fn render_permissions_section(
         !ai_settings.is_run_agents_permissions_editable(app),
         view.tooltip_mouse_state_handles
             .run_agents_tooltip_mouse_state
+            .clone(),
+    ));
+
+    column.add_child(create_section_header(
+        "Warp control",
+        "Control Warp product surfaces through warpctrl, within the limits of Settings > Scripting.",
+        appearance,
+    ));
+    column.add_child(render_warp_control_permission_row(
+        appearance,
+        Icon::Terminal,
+        "Metadata reads",
+        &view.warp_control_metadata_reads_dropdown,
+        profile_data.warp_control_metadata_reads,
+        view.tooltip_mouse_state_handles
+            .warp_control_metadata_reads_tooltip_mouse_state
+            .clone(),
+    ));
+    column.add_child(render_warp_control_permission_row(
+        appearance,
+        Icon::Notebook,
+        "Underlying data reads",
+        &view.warp_control_underlying_data_reads_dropdown,
+        profile_data.warp_control_underlying_data_reads,
+        view.tooltip_mouse_state_handles
+            .warp_control_underlying_data_reads_tooltip_mouse_state
+            .clone(),
+    ));
+    column.add_child(render_warp_control_permission_row(
+        appearance,
+        Icon::Workflow,
+        "App-state mutations",
+        &view.warp_control_app_state_mutations_dropdown,
+        profile_data.warp_control_app_state_mutations,
+        view.tooltip_mouse_state_handles
+            .warp_control_app_state_mutations_tooltip_mouse_state
+            .clone(),
+    ));
+    column.add_child(render_warp_control_permission_row(
+        appearance,
+        Icon::Settings,
+        "Metadata/configuration mutations",
+        &view.warp_control_metadata_configuration_mutations_dropdown,
+        profile_data.warp_control_metadata_configuration_mutations,
+        view.tooltip_mouse_state_handles
+            .warp_control_metadata_configuration_mutations_tooltip_mouse_state
+            .clone(),
+    ));
+    column.add_child(render_warp_control_permission_row(
+        appearance,
+        Icon::Dataflow,
+        "Underlying data mutations",
+        &view.warp_control_underlying_data_mutations_dropdown,
+        profile_data.warp_control_underlying_data_mutations,
+        view.tooltip_mouse_state_handles
+            .warp_control_underlying_data_mutations_tooltip_mouse_state
             .clone(),
     ));
 

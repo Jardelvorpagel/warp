@@ -16,8 +16,8 @@ use crate::cloud_object::{
 };
 use crate::server::sync_queue::QueueItem;
 use crate::settings::{
-    AISettings, AgentModeCommandExecutionPredicate, DEFAULT_COMMAND_EXECUTION_ALLOWLIST,
-    DEFAULT_COMMAND_EXECUTION_DENYLIST,
+    AISettings, AgentModeCommandExecutionPredicate, LocalControlPermissionCategory,
+    DEFAULT_COMMAND_EXECUTION_ALLOWLIST, DEFAULT_COMMAND_EXECUTION_DENYLIST,
 };
 use crate::workspaces::user_workspaces::UserWorkspaces;
 
@@ -216,6 +216,36 @@ impl RunAgentsPermission {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WarpControlPermission {
+    NeverAllow,
+    AgentDecides,
+    AlwaysAllow,
+    #[default]
+    AlwaysAsk,
+
+    #[serde(other)]
+    Unknown,
+}
+
+impl WarpControlPermission {
+    pub fn description(&self) -> &'static str {
+        match self {
+            WarpControlPermission::NeverAllow => {
+                "The Agent cannot request this Warp control permission category."
+            }
+            WarpControlPermission::AgentDecides => ActionPermission::AgentDecides.description(),
+            WarpControlPermission::AlwaysAllow => ActionPermission::AlwaysAllow.description(),
+            WarpControlPermission::AlwaysAsk => ActionPermission::AlwaysAsk.description(),
+            WarpControlPermission::Unknown => "Unknown setting.",
+        }
+    }
+
+    pub fn is_denied(&self) -> bool {
+        matches!(self, Self::NeverAllow | Self::Unknown)
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AskUserQuestionPermission {
     /// Never pause; skip questions and continue with best judgment.
     Never,
@@ -277,6 +307,12 @@ pub struct AIExecutionProfile {
     pub ask_user_question: AskUserQuestionPermission,
     pub run_agents: RunAgentsPermission,
 
+    pub warp_control_metadata_reads: WarpControlPermission,
+    pub warp_control_underlying_data_reads: WarpControlPermission,
+    pub warp_control_app_state_mutations: WarpControlPermission,
+    pub warp_control_metadata_configuration_mutations: WarpControlPermission,
+    pub warp_control_underlying_data_mutations: WarpControlPermission,
+
     /// Always ask for permission for these commands
     pub command_denylist: Vec<AgentModeCommandExecutionPredicate>,
 
@@ -317,6 +353,11 @@ impl Default for AIExecutionProfile {
             mcp_permissions: ActionPermission::AgentDecides,
             ask_user_question: AskUserQuestionPermission::AlwaysAsk,
             run_agents: RunAgentsPermission::AlwaysAsk,
+            warp_control_metadata_reads: WarpControlPermission::AlwaysAsk,
+            warp_control_underlying_data_reads: WarpControlPermission::AlwaysAsk,
+            warp_control_app_state_mutations: WarpControlPermission::AlwaysAsk,
+            warp_control_metadata_configuration_mutations: WarpControlPermission::AlwaysAsk,
+            warp_control_underlying_data_mutations: WarpControlPermission::AlwaysAsk,
             command_denylist: DEFAULT_COMMAND_EXECUTION_DENYLIST.clone(),
             command_allowlist: Vec::new(),
             directory_allowlist: Vec::new(),
@@ -370,6 +411,11 @@ impl AIExecutionProfile {
             mcp_permissions: ActionPermission::AlwaysAllow,
             ask_user_question: AskUserQuestionPermission::Never,
             run_agents: RunAgentsPermission::AlwaysAllow,
+            warp_control_metadata_reads: WarpControlPermission::AlwaysAllow,
+            warp_control_underlying_data_reads: WarpControlPermission::AlwaysAllow,
+            warp_control_app_state_mutations: WarpControlPermission::AlwaysAllow,
+            warp_control_metadata_configuration_mutations: WarpControlPermission::AlwaysAllow,
+            warp_control_underlying_data_mutations: WarpControlPermission::AlwaysAllow,
             command_denylist: Vec::new(),
             command_allowlist: Vec::new(),
             directory_allowlist: Vec::new(),
@@ -426,6 +472,11 @@ impl AIExecutionProfile {
             write_to_pty: WriteToPtyPermission::AlwaysAllow,
             ask_user_question: AskUserQuestionPermission::Never,
             run_agents: RunAgentsPermission::AlwaysAllow,
+            warp_control_metadata_reads: WarpControlPermission::AlwaysAllow,
+            warp_control_underlying_data_reads: WarpControlPermission::AlwaysAllow,
+            warp_control_app_state_mutations: WarpControlPermission::AlwaysAllow,
+            warp_control_metadata_configuration_mutations: WarpControlPermission::AlwaysAllow,
+            warp_control_underlying_data_mutations: WarpControlPermission::AlwaysAllow,
             command_denylist,
             command_allowlist: DEFAULT_COMMAND_EXECUTION_ALLOWLIST.to_vec(),
             directory_allowlist: Vec::new(),
@@ -462,6 +513,27 @@ impl AIExecutionProfile {
     pub fn context_window_display_value(&self, app: &AppContext) -> Option<u32> {
         let cw = self.configurable_context_window(app)?;
         Some(self.context_window_limit.unwrap_or(cw.default_max))
+    }
+
+    pub fn warp_control_permission_for_category(
+        &self,
+        category: LocalControlPermissionCategory,
+    ) -> WarpControlPermission {
+        match category {
+            LocalControlPermissionCategory::MetadataReads => self.warp_control_metadata_reads,
+            LocalControlPermissionCategory::UnderlyingDataReads => {
+                self.warp_control_underlying_data_reads
+            }
+            LocalControlPermissionCategory::AppStateMutations => {
+                self.warp_control_app_state_mutations
+            }
+            LocalControlPermissionCategory::MetadataConfigurationMutations => {
+                self.warp_control_metadata_configuration_mutations
+            }
+            LocalControlPermissionCategory::UnderlyingDataMutations => {
+                self.warp_control_underlying_data_mutations
+            }
+        }
     }
 }
 

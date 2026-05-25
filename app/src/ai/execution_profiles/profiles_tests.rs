@@ -192,3 +192,111 @@ fn reconciles_unsynced_default_profile_with_cloud_after_initial_load() {
         });
     })
 }
+
+#[test]
+fn warp_control_permissions_default_for_legacy_serialized_profiles() {
+    let profile: AIExecutionProfile = serde_json::from_value(serde_json::json!({
+        "name": "Legacy profile",
+        "is_default_profile": false
+    }))
+    .expect("legacy profile deserializes");
+
+    assert_eq!(
+        profile.warp_control_metadata_reads,
+        crate::ai::execution_profiles::WarpControlPermission::AlwaysAsk
+    );
+    assert_eq!(
+        profile.warp_control_underlying_data_reads,
+        crate::ai::execution_profiles::WarpControlPermission::AlwaysAsk
+    );
+    assert_eq!(
+        profile.warp_control_app_state_mutations,
+        crate::ai::execution_profiles::WarpControlPermission::AlwaysAsk
+    );
+    assert_eq!(
+        profile.warp_control_metadata_configuration_mutations,
+        crate::ai::execution_profiles::WarpControlPermission::AlwaysAsk
+    );
+    assert_eq!(
+        profile.warp_control_underlying_data_mutations,
+        crate::ai::execution_profiles::WarpControlPermission::AlwaysAsk
+    );
+}
+
+#[test]
+fn warp_control_permission_category_helper_returns_matching_field() {
+    let profile = AIExecutionProfile {
+        warp_control_metadata_reads:
+            crate::ai::execution_profiles::WarpControlPermission::AlwaysAllow,
+        warp_control_underlying_data_reads:
+            crate::ai::execution_profiles::WarpControlPermission::AgentDecides,
+        warp_control_app_state_mutations:
+            crate::ai::execution_profiles::WarpControlPermission::AlwaysAsk,
+        warp_control_metadata_configuration_mutations:
+            crate::ai::execution_profiles::WarpControlPermission::NeverAllow,
+        warp_control_underlying_data_mutations:
+            crate::ai::execution_profiles::WarpControlPermission::Unknown,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        profile.warp_control_permission_for_category(
+            crate::settings::LocalControlPermissionCategory::MetadataReads
+        ),
+        crate::ai::execution_profiles::WarpControlPermission::AlwaysAllow
+    );
+    assert_eq!(
+        profile.warp_control_permission_for_category(
+            crate::settings::LocalControlPermissionCategory::UnderlyingDataReads
+        ),
+        crate::ai::execution_profiles::WarpControlPermission::AgentDecides
+    );
+    assert_eq!(
+        profile.warp_control_permission_for_category(
+            crate::settings::LocalControlPermissionCategory::AppStateMutations
+        ),
+        crate::ai::execution_profiles::WarpControlPermission::AlwaysAsk
+    );
+    assert_eq!(
+        profile.warp_control_permission_for_category(
+            crate::settings::LocalControlPermissionCategory::MetadataConfigurationMutations
+        ),
+        crate::ai::execution_profiles::WarpControlPermission::NeverAllow
+    );
+    assert_eq!(
+        profile.warp_control_permission_for_category(
+            crate::settings::LocalControlPermissionCategory::UnderlyingDataMutations
+        ),
+        crate::ai::execution_profiles::WarpControlPermission::Unknown
+    );
+}
+
+#[test]
+fn set_warp_control_permission_persists_on_unsynced_default_profile() {
+    App::test((), |mut app| async move {
+        install_singletons(&mut app, AuthStateProvider::new_logged_out_for_test());
+        let profile_model = app.add_singleton_model(|ctx| {
+            AIExecutionProfilesModel::new(&LaunchMode::new_for_unit_test(), ctx)
+        });
+
+        let default_profile_id = profile_model.read(&app, |model, _ctx| model.default_profile_id());
+        profile_model.update(&mut app, |model, ctx| {
+            model.set_warp_control_permission(
+                default_profile_id,
+                crate::settings::LocalControlPermissionCategory::UnderlyingDataMutations,
+                crate::ai::execution_profiles::WarpControlPermission::NeverAllow,
+                ctx,
+            );
+        });
+
+        profile_model.read(&app, |model, ctx| {
+            assert_eq!(
+                model
+                    .default_profile(ctx)
+                    .data()
+                    .warp_control_underlying_data_mutations,
+                crate::ai::execution_profiles::WarpControlPermission::NeverAllow
+            );
+        });
+    })
+}

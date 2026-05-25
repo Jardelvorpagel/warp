@@ -25,7 +25,8 @@ use crate::ai::execution_profiles::profiles::{
     AIExecutionProfilesModel, AIExecutionProfilesModelEvent, ClientProfileId,
 };
 use crate::ai::execution_profiles::{
-    AIExecutionProfile, ActionPermission, RunAgentsPermission, WriteToPtyPermission,
+    AIExecutionProfile, ActionPermission, RunAgentsPermission, WarpControlPermission,
+    WriteToPtyPermission,
 };
 use crate::ai::llms::{
     DisableReason, LLMContextWindow, LLMId, LLMInfo, LLMPreferences, LLMPreferencesEvent,
@@ -37,7 +38,10 @@ use crate::editor::{
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::pane::view;
 use crate::pane_group::{BackingView, PaneConfiguration, PaneEvent};
-use crate::settings::{AISettings, AISettingsChangedEvent, AgentModeCommandExecutionPredicate};
+use crate::settings::{
+    AISettings, AISettingsChangedEvent, AgentModeCommandExecutionPredicate,
+    LocalControlPermissionCategory,
+};
 use crate::ui_components::icons::Icon;
 use crate::view_components::action_button::{ActionButton, DangerSecondaryTheme};
 use crate::view_components::{
@@ -126,6 +130,11 @@ struct TooltipMouseStateHandles {
     ask_user_question_tooltip_mouse_state: MouseStateHandle,
     run_agents_tooltip_mouse_state: MouseStateHandle,
     call_mcp_servers_tooltip_mouse_state: MouseStateHandle,
+    warp_control_metadata_reads_tooltip_mouse_state: MouseStateHandle,
+    warp_control_underlying_data_reads_tooltip_mouse_state: MouseStateHandle,
+    warp_control_app_state_mutations_tooltip_mouse_state: MouseStateHandle,
+    warp_control_metadata_configuration_mutations_tooltip_mouse_state: MouseStateHandle,
+    warp_control_underlying_data_mutations_tooltip_mouse_state: MouseStateHandle,
     // Separate mouse state handles for text input editors (for workspace override tooltips)
     command_allowlist_editor_tooltip_mouse_state: MouseStateHandle,
     directory_allowlist_editor_tooltip_mouse_state: MouseStateHandle,
@@ -137,6 +146,41 @@ pub mod manager;
 pub use manager::*;
 
 pub const HEADER_TEXT: &str = "Profile Editor";
+
+fn warp_control_dropdown_items(
+    category: LocalControlPermissionCategory,
+) -> Vec<DropdownItem<ExecutionProfileEditorViewAction>> {
+    vec![
+        DropdownItem::new(
+            "Never",
+            ExecutionProfileEditorViewAction::SetWarpControl {
+                category,
+                permission: WarpControlPermission::NeverAllow,
+            },
+        ),
+        DropdownItem::new(
+            "Agent decides",
+            ExecutionProfileEditorViewAction::SetWarpControl {
+                category,
+                permission: WarpControlPermission::AgentDecides,
+            },
+        ),
+        DropdownItem::new(
+            "Always allow",
+            ExecutionProfileEditorViewAction::SetWarpControl {
+                category,
+                permission: WarpControlPermission::AlwaysAllow,
+            },
+        ),
+        DropdownItem::new(
+            "Always ask",
+            ExecutionProfileEditorViewAction::SetWarpControl {
+                category,
+                permission: WarpControlPermission::AlwaysAsk,
+            },
+        ),
+    ]
+}
 
 #[derive(Debug, Clone)]
 pub enum ExecutionProfileEditorViewEvent {
@@ -193,6 +237,10 @@ pub enum ExecutionProfileEditorViewAction {
     },
     SetRunAgents {
         permission: RunAgentsPermission,
+    },
+    SetWarpControl {
+        category: LocalControlPermissionCategory,
+        permission: WarpControlPermission,
     },
     AddToCommandAllowlist {
         predicate: AgentModeCommandExecutionPredicate,
@@ -254,6 +302,15 @@ pub struct ExecutionProfileEditorView {
     computer_use_dropdown: ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
     ask_user_question_dropdown: ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
     run_agents_dropdown: ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
+    warp_control_metadata_reads_dropdown: ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
+    warp_control_underlying_data_reads_dropdown:
+        ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
+    warp_control_app_state_mutations_dropdown:
+        ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
+    warp_control_metadata_configuration_mutations_dropdown:
+        ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
+    warp_control_underlying_data_mutations_dropdown:
+        ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
     command_allowlist_editor: ViewHandle<SubmittableTextInput>,
     command_denylist_editor: ViewHandle<SubmittableTextInput>,
     directory_allowlist_editor: ViewHandle<SubmittableTextInput>,
@@ -501,6 +558,56 @@ impl ExecutionProfileEditorView {
             dropdown
         });
 
+        let warp_control_metadata_reads_dropdown = ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = Dropdown::new(ctx);
+            dropdown.set_items(
+                warp_control_dropdown_items(LocalControlPermissionCategory::MetadataReads),
+                ctx,
+            );
+            dropdown
+        });
+
+        let warp_control_underlying_data_reads_dropdown = ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = Dropdown::new(ctx);
+            dropdown.set_items(
+                warp_control_dropdown_items(LocalControlPermissionCategory::UnderlyingDataReads),
+                ctx,
+            );
+            dropdown
+        });
+
+        let warp_control_app_state_mutations_dropdown = ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = Dropdown::new(ctx);
+            dropdown.set_items(
+                warp_control_dropdown_items(LocalControlPermissionCategory::AppStateMutations),
+                ctx,
+            );
+            dropdown
+        });
+
+        let warp_control_metadata_configuration_mutations_dropdown =
+            ctx.add_typed_action_view(|ctx| {
+                let mut dropdown = Dropdown::new(ctx);
+                dropdown.set_items(
+                    warp_control_dropdown_items(
+                        LocalControlPermissionCategory::MetadataConfigurationMutations,
+                    ),
+                    ctx,
+                );
+                dropdown
+            });
+
+        let warp_control_underlying_data_mutations_dropdown = ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = Dropdown::new(ctx);
+            dropdown.set_items(
+                warp_control_dropdown_items(
+                    LocalControlPermissionCategory::UnderlyingDataMutations,
+                ),
+                ctx,
+            );
+            dropdown
+        });
+
         let mcp_allowlist_dropdown = ctx.add_typed_action_view(|ctx| {
             let mut dropdown = FilterableDropdown::new(ctx);
             dropdown.set_menu_header_to_static("Select MCP servers");
@@ -659,6 +766,11 @@ impl ExecutionProfileEditorView {
             computer_use_dropdown,
             ask_user_question_dropdown,
             run_agents_dropdown,
+            warp_control_metadata_reads_dropdown,
+            warp_control_underlying_data_reads_dropdown,
+            warp_control_app_state_mutations_dropdown,
+            warp_control_metadata_configuration_mutations_dropdown,
+            warp_control_underlying_data_mutations_dropdown,
             command_allowlist_editor,
             command_denylist_editor,
             directory_allowlist_editor,
@@ -1008,6 +1120,32 @@ impl ExecutionProfileEditorView {
             run_agents_disabled,
             ctx,
         );
+
+        Self::refresh_warp_control_dropdown_menu(
+            &self.warp_control_metadata_reads_dropdown,
+            current_permissions.warp_control_metadata_reads,
+            ctx,
+        );
+        Self::refresh_warp_control_dropdown_menu(
+            &self.warp_control_underlying_data_reads_dropdown,
+            current_permissions.warp_control_underlying_data_reads,
+            ctx,
+        );
+        Self::refresh_warp_control_dropdown_menu(
+            &self.warp_control_app_state_mutations_dropdown,
+            current_permissions.warp_control_app_state_mutations,
+            ctx,
+        );
+        Self::refresh_warp_control_dropdown_menu(
+            &self.warp_control_metadata_configuration_mutations_dropdown,
+            current_permissions.warp_control_metadata_configuration_mutations,
+            ctx,
+        );
+        Self::refresh_warp_control_dropdown_menu(
+            &self.warp_control_underlying_data_mutations_dropdown,
+            current_permissions.warp_control_underlying_data_mutations,
+            ctx,
+        );
         Self::refresh_mcp_dropdown(
             &self.mcp_allowlist_dropdown,
             |uuid| ExecutionProfileEditorViewAction::AddToMCPAllowlist { id: uuid },
@@ -1145,6 +1283,27 @@ impl ExecutionProfileEditorView {
                 RunAgentsPermission::NeverAllow | RunAgentsPermission::Unknown => 0,
                 RunAgentsPermission::AlwaysAllow => 1,
                 RunAgentsPermission::AlwaysAsk => 2,
+            };
+
+            menu.set_selected_by_index(active, ctx);
+            ctx.notify();
+        });
+        ctx.notify();
+    }
+
+    fn refresh_warp_control_dropdown_menu(
+        menu: &ViewHandle<Dropdown<ExecutionProfileEditorViewAction>>,
+        current_permission: WarpControlPermission,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        menu.update(ctx, |menu, ctx| {
+            menu.set_enabled(ctx);
+
+            let active = match current_permission {
+                WarpControlPermission::NeverAllow | WarpControlPermission::Unknown => 0,
+                WarpControlPermission::AgentDecides => 1,
+                WarpControlPermission::AlwaysAllow => 2,
+                WarpControlPermission::AlwaysAsk => 3,
             };
 
             menu.set_selected_by_index(active, ctx);
@@ -1660,6 +1819,20 @@ impl TypedActionView for ExecutionProfileEditorView {
             ExecutionProfileEditorViewAction::SetRunAgents { permission } => {
                 AIExecutionProfilesModel::handle(ctx).update(ctx, |profiles_model, ctx| {
                     profiles_model.set_run_agents(self.profile_id, *permission, ctx);
+                });
+                ctx.notify();
+            }
+            ExecutionProfileEditorViewAction::SetWarpControl {
+                category,
+                permission,
+            } => {
+                AIExecutionProfilesModel::handle(ctx).update(ctx, |profiles_model, ctx| {
+                    profiles_model.set_warp_control_permission(
+                        self.profile_id,
+                        *category,
+                        *permission,
+                        ctx,
+                    );
                 });
                 ctx.notify();
             }

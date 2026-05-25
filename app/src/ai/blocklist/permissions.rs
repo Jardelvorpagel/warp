@@ -195,6 +195,13 @@ impl BlocklistAIPermissions {
             computer_use: self.get_computer_use_setting_for_profile(ctx, profile_id),
             ask_user_question: self.get_ask_user_question_setting_for_profile(ctx, profile_id),
             run_agents: self.get_run_agents_setting_for_profile(ctx, profile_id),
+            warp_control_metadata_reads: profile_data.warp_control_metadata_reads,
+            warp_control_underlying_data_reads: profile_data.warp_control_underlying_data_reads,
+            warp_control_app_state_mutations: profile_data.warp_control_app_state_mutations,
+            warp_control_metadata_configuration_mutations: profile_data
+                .warp_control_metadata_configuration_mutations,
+            warp_control_underlying_data_mutations: profile_data
+                .warp_control_underlying_data_mutations,
 
             // Some fields are read directly from the profile.
             name: profile_data.name.clone(),

@@ -16,7 +16,8 @@ use crate::ai::execution_profiles::profiles::{
     AIExecutionProfilesModel, AIExecutionProfilesModelEvent, ClientProfileId,
 };
 use crate::ai::execution_profiles::{
-    ActionPermission, AskUserQuestionPermission, RunAgentsPermission, WriteToPtyPermission,
+    ActionPermission, AskUserQuestionPermission, RunAgentsPermission, WarpControlPermission,
+    WriteToPtyPermission,
 };
 use crate::ai::llms::LLMPreferences;
 use crate::appearance::Appearance;
@@ -309,6 +310,60 @@ impl View for ExecutionProfileView {
                                 Icon::Workflow,
                                 "Run agents:",
                                 &profile.run_agents,
+                                appearance,
+                                is_any_ai_enabled,
+                            ),
+                        ));
+
+                        permissions_column.add_child(with_standard_vertical_margin(
+                            render_permission_line_with_icon(
+                                Icon::Terminal,
+                                "Warp control metadata reads:",
+                                warp_control_permission_text(&profile.warp_control_metadata_reads),
+                                appearance,
+                                is_any_ai_enabled,
+                            ),
+                        ));
+                        permissions_column.add_child(with_standard_vertical_margin(
+                            render_permission_line_with_icon(
+                                Icon::Notebook,
+                                "Warp control data reads:",
+                                warp_control_permission_text(
+                                    &profile.warp_control_underlying_data_reads,
+                                ),
+                                appearance,
+                                is_any_ai_enabled,
+                            ),
+                        ));
+                        permissions_column.add_child(with_standard_vertical_margin(
+                            render_permission_line_with_icon(
+                                Icon::Workflow,
+                                "Warp control app-state mutations:",
+                                warp_control_permission_text(
+                                    &profile.warp_control_app_state_mutations,
+                                ),
+                                appearance,
+                                is_any_ai_enabled,
+                            ),
+                        ));
+                        permissions_column.add_child(with_standard_vertical_margin(
+                            render_permission_line_with_icon(
+                                Icon::Settings,
+                                "Warp control config mutations:",
+                                warp_control_permission_text(
+                                    &profile.warp_control_metadata_configuration_mutations,
+                                ),
+                                appearance,
+                                is_any_ai_enabled,
+                            ),
+                        ));
+                        permissions_column.add_child(with_standard_vertical_margin(
+                            render_permission_line_with_icon(
+                                Icon::Dataflow,
+                                "Warp control data mutations:",
+                                warp_control_permission_text(
+                                    &profile.warp_control_underlying_data_mutations,
+                                ),
                                 appearance,
                                 is_any_ai_enabled,
                             ),
@@ -701,6 +756,15 @@ fn render_action_permission_line_with_icon(
         ActionPermission::Unknown => "Unknown",
     };
     render_permission_line_with_icon(icon, label, permission_text, appearance, is_ai_enabled)
+}
+
+fn warp_control_permission_text(permission: &WarpControlPermission) -> &'static str {
+    match permission {
+        WarpControlPermission::NeverAllow | WarpControlPermission::Unknown => "Never",
+        WarpControlPermission::AgentDecides => "Agent decides",
+        WarpControlPermission::AlwaysAllow => "Always allow",
+        WarpControlPermission::AlwaysAsk => "Always ask",
+    }
 }
 
 fn render_write_to_pty_permission_line_with_icon(

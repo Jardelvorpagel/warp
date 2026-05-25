@@ -1,4 +1,5 @@
 //! Permission checks that map protocol action metadata onto local settings.
+use crate::ai::execution_profiles::{AIExecutionProfile, WarpControlPermission};
 use crate::features::FeatureFlag;
 use crate::settings::{LocalControlPermissionCategory, LocalControlSettings};
 use ::local_control::{ActionKind, ControlError, ErrorCode, InvocationContext, PermissionCategory};
@@ -58,6 +59,40 @@ fn local_permission(permission: PermissionCategory) -> LocalControlPermissionCat
             LocalControlPermissionCategory::UnderlyingDataMutations
         }
     }
+}
+
+#[allow(dead_code)]
+pub(crate) fn agent_profile_permission_for_action(
+    profile: &AIExecutionProfile,
+    action: ActionKind,
+) -> WarpControlPermission {
+    agent_profile_permission_for_category(profile, action.metadata().permission_category)
+}
+
+#[allow(dead_code)]
+pub(crate) fn agent_profile_permission_for_category(
+    profile: &AIExecutionProfile,
+    permission: PermissionCategory,
+) -> WarpControlPermission {
+    profile.warp_control_permission_for_category(local_permission(permission))
+}
+
+#[allow(dead_code)]
+pub(crate) fn ensure_agent_profile_allows_action(
+    profile: &AIExecutionProfile,
+    action: ActionKind,
+) -> Result<(), ControlError> {
+    let permission = agent_profile_permission_for_action(profile, action);
+    if permission.is_denied() {
+        return Err(ControlError::new(
+            ErrorCode::InsufficientPermissions,
+            format!(
+                "agent profile denies the Warp control permission required by {}",
+                action.as_str()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn ensure_action_allowed(

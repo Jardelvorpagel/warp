@@ -50,6 +50,8 @@ use warp_core::channel::ChannelState;
 use warpui::{Entity, ModelContext, ModelSpawner, SingletonEntity};
 
 pub use bridge::LocalControlBridge;
+#[cfg(test)]
+use permissions::ensure_agent_profile_allows_action;
 use permissions::{ensure_action_allowed, ensure_feature_enabled};
 
 /// Shared state made available to Axum handlers for one localhost server

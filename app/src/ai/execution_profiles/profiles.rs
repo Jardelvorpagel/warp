@@ -10,7 +10,8 @@ use warp_core::user_preferences::GetUserPreferences;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
 
 use super::{
-    AIExecutionProfile, ActionPermission, CloudAIExecutionProfileModel, WriteToPtyPermission,
+    AIExecutionProfile, ActionPermission, CloudAIExecutionProfileModel, WarpControlPermission,
+    WriteToPtyPermission,
 };
 use crate::ai::llms::{LLMId, LLMPreferences};
 use crate::ai::mcp::templatable_manager::TemplatableMCPServerManagerEvent;
@@ -21,7 +22,7 @@ use crate::cloud_object::{GenericStringObjectFormat, JsonObjectType};
 use crate::drive::CloudObjectTypeAndId;
 use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ClientId, SyncId};
-use crate::settings::AgentModeCommandExecutionPredicate;
+use crate::settings::{AgentModeCommandExecutionPredicate, LocalControlPermissionCategory};
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{send_telemetry_from_ctx, CloudModel, LaunchMode, TelemetryEvent};
 
@@ -874,6 +875,58 @@ impl AIExecutionProfilesModel {
             send_telemetry_from_ctx!(
                 TelemetryEvent::AIExecutionProfileSettingUpdated {
                     setting_type: "run_agents".to_string(),
+                    setting_value: format!("{permission:?}"),
+                },
+                ctx
+            );
+        }
+    }
+
+    pub fn set_warp_control_permission(
+        &mut self,
+        profile_id: ClientProfileId,
+        category: LocalControlPermissionCategory,
+        permission: WarpControlPermission,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let current_value = self
+            .get_profile_by_id(profile_id, ctx)
+            .map(|p| p.data().warp_control_permission_for_category(category));
+
+        self.edit_profile_internal(
+            profile_id,
+            |profile| {
+                let target_permission = match category {
+                    LocalControlPermissionCategory::MetadataReads => {
+                        &mut profile.warp_control_metadata_reads
+                    }
+                    LocalControlPermissionCategory::UnderlyingDataReads => {
+                        &mut profile.warp_control_underlying_data_reads
+                    }
+                    LocalControlPermissionCategory::AppStateMutations => {
+                        &mut profile.warp_control_app_state_mutations
+                    }
+                    LocalControlPermissionCategory::MetadataConfigurationMutations => {
+                        &mut profile.warp_control_metadata_configuration_mutations
+                    }
+                    LocalControlPermissionCategory::UnderlyingDataMutations => {
+                        &mut profile.warp_control_underlying_data_mutations
+                    }
+                };
+
+                if *target_permission != permission {
+                    *target_permission = permission;
+                    return true;
+                }
+                false
+            },
+            ctx,
+        );
+
+        if current_value != Some(permission) {
+            send_telemetry_from_ctx!(
+                TelemetryEvent::AIExecutionProfileSettingUpdated {
+                    setting_type: format!("warp_control_{category:?}"),
                     setting_value: format!("{permission:?}"),
                 },
                 ctx

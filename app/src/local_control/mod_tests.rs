@@ -8,10 +8,11 @@ use settings::Setting as _;
 use warp_core::features::FeatureFlag;
 
 use super::{
-    capabilities, ensure_feature_enabled, ensure_settings_allow_action,
-    outside_warp_action_enabled_for_settings, require_active_window_id, validate_action_params,
-    validate_tab_create_target,
+    capabilities, ensure_agent_profile_allows_action, ensure_feature_enabled,
+    ensure_settings_allow_action, outside_warp_action_enabled_for_settings,
+    require_active_window_id, validate_action_params, validate_tab_create_target,
 };
+use crate::ai::execution_profiles::{AIExecutionProfile, WarpControlPermission};
 use crate::settings::{
     AllowOutsideWarpAppStateMutations, AllowOutsideWarpControl,
     AllowOutsideWarpMetadataConfigurationMutations, AllowOutsideWarpMetadataReads,
@@ -215,4 +216,27 @@ fn tab_create_rejects_malformed_params() {
         params: serde_json::json!({}),
     })
     .expect("empty tab.create params are accepted");
+}
+
+#[test]
+fn agent_profile_helper_denies_disabled_warp_control_category() {
+    let profile = AIExecutionProfile {
+        warp_control_app_state_mutations: WarpControlPermission::NeverAllow,
+        ..Default::default()
+    };
+
+    let err = ensure_agent_profile_allows_action(&profile, ActionKind::TabCreate)
+        .expect_err("profile denies app-state mutations");
+    assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+}
+
+#[test]
+fn agent_profile_helper_allows_non_denied_warp_control_category() {
+    let profile = AIExecutionProfile {
+        warp_control_app_state_mutations: WarpControlPermission::AlwaysAsk,
+        ..Default::default()
+    };
+
+    ensure_agent_profile_allows_action(&profile, ActionKind::TabCreate)
+        .expect("profile permits app-state mutation requests");
 }
