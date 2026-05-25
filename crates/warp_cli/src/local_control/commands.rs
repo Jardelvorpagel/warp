@@ -1,7 +1,7 @@
 //! Implementations for user-facing `warpctrl` command groups.
 use local_control::protocol::{
-    Action, ActionGetParams, ActionKind, ActionMetadata, ControlError, EmptyParams, ErrorCode,
-    RequestEnvelope,
+    Action, ActionGetParams, ActionKind, ActionMetadata, ControlError, DriveObjectType,
+    DriveRunParams, EmptyParams, ErrorCode, InputRunParams, RequestEnvelope,
 };
 use local_control::selection::select_instance;
 use serde::Serialize;
@@ -11,9 +11,9 @@ use crate::agent::OutputFormat;
 use crate::local_control::output::{write_json, write_json_line};
 use crate::local_control::selectors::instance_selector;
 use crate::local_control::{
-    ActionCommand, AppCommand, AppearanceCommand, BlockCommand, HistoryCommand, InputCommand,
-    InstanceCommand, PaneCommand, SessionCommand, SettingCommand, TabCommand, TargetArgs,
-    ThemeCommand, WindowCommand,
+    ActionCommand, AppCommand, AppearanceCommand, BlockCommand, DriveCommand, DriveWorkflowCommand,
+    HistoryCommand, InputCommand, InstanceCommand, PaneCommand, SessionCommand, SettingCommand,
+    TabCommand, TargetArgs, ThemeCommand, WindowCommand,
 };
 
 /// Display-oriented projection of a discoverable Warp instance.
@@ -208,6 +208,14 @@ pub(super) fn run_input_command(
             local_control::InputGetParams::default(),
             output_format,
         ),
+        InputCommand::Run(args) => run_action_with_params(
+            args.target,
+            ActionKind::InputRun,
+            InputRunParams {
+                command: args.command,
+            },
+            output_format,
+        ),
     }
 }
 
@@ -245,6 +253,23 @@ pub(super) fn run_history_command(
             args.target,
             ActionKind::HistoryList,
             local_control::HistoryListParams { limit: args.limit },
+            output_format,
+        ),
+    }
+}
+
+pub(super) fn run_drive_command(
+    command: DriveCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        DriveCommand::Workflow(DriveWorkflowCommand::Run(args)) => run_action_with_params(
+            args.target,
+            ActionKind::DriveRun,
+            DriveRunParams {
+                object_type: DriveObjectType::Workflow,
+                id: args.id,
+            },
             output_format,
         ),
     }

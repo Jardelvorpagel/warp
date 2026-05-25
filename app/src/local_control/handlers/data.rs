@@ -1,8 +1,10 @@
 use ::local_control::protocol::{
     BlockGetParams, BlockGetResult, BlockListParams, BlockListResult, BlockSummary,
-    HistoryEntrySummary, HistoryListParams, HistoryListResult, InputStateResult, PaneTarget,
-    SessionTarget, TabTarget, TargetSelector, WindowTarget,
+    HistoryEntrySummary, HistoryListParams, HistoryListResult, InputRunParams, InputRunResult,
+    InputStateResult, LocalControlAuditRecord, PaneTarget, SessionTarget, TabTarget,
+    TargetSelector, WindowTarget,
 };
+use ::local_control::PermissionCategory;
 use ::local_control::{ActionKind, ControlError, ErrorCode};
 use warpui::{ModelContext, SingletonEntity, ViewHandle};
 
@@ -17,6 +19,60 @@ use crate::workspace::Workspace;
 
 struct ResolvedTerminalTarget {
     terminal_view: ViewHandle<TerminalView>,
+}
+
+pub(crate) fn run_input_command(
+    target: &TargetSelector,
+    params: InputRunParams,
+    authenticated_user_subject: &str,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<serde_json::Value, ControlError> {
+    if target.file.is_some() || target.drive.is_some() {
+        return Err(ControlError::new(
+            ErrorCode::InvalidSelector,
+            "input.run does not accept file or Drive selectors",
+        ));
+    }
+    let session_id = run_command_in_target(ActionKind::InputRun, target, &params.command, ctx)?;
+    to_control_data(InputRunResult {
+        submitted: true,
+        session_id,
+        audit: execution_audit_record(ActionKind::InputRun, authenticated_user_subject),
+    })
+}
+
+pub(crate) fn run_command_in_target(
+    action: ActionKind,
+    target: &TargetSelector,
+    command: &str,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<String, ControlError> {
+    let resolved = resolve_terminal_read_target(action, target, ctx)?;
+    let session_id = resolved
+        .terminal_view
+        .read(ctx, |terminal, _| terminal.active_block_session_id())
+        .ok_or_else(|| {
+            ControlError::new(
+                ErrorCode::MissingTarget,
+                format!("{} requires a target terminal session", action.as_str()),
+            )
+        })?;
+    resolved.terminal_view.update(ctx, |terminal, ctx| {
+        terminal.execute_command_or_set_pending(command, ctx);
+    });
+    Ok(session_id.as_u64().to_string())
+}
+
+pub(crate) fn execution_audit_record(
+    action: ActionKind,
+    authenticated_user_subject: &str,
+) -> LocalControlAuditRecord {
+    LocalControlAuditRecord {
+        action: action.as_str().to_owned(),
+        target_scope: action.metadata().target_scope,
+        permission_category: PermissionCategory::MutateUnderlyingData,
+        authenticated_user_subject: authenticated_user_subject.to_owned(),
+    }
 }
 
 pub(crate) fn get_input_state(

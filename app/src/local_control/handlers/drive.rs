@@ -13,6 +13,7 @@ use crate::cloud_object::{
     CloudObject, GenericStringObjectFormat, JsonObjectType, ObjectType, Owner,
 };
 use crate::env_vars::{CloudEnvVarCollection, CloudEnvVarCollectionModel, EnvVarCollection};
+use crate::local_control::handlers::data;
 use crate::local_control::LocalControlBridge;
 use crate::notebooks::{CloudNotebook, CloudNotebookModel, NotebookId};
 use crate::server::ids::{ClientId, SyncId};
@@ -182,11 +183,13 @@ pub(crate) fn delete_drive_object(
     to_drive_data(DriveMutationResult {
         object: summary,
         execution_id: None,
+        audit: None,
     })
 }
 
 pub(crate) fn execute_drive_action_with_policy(
     request: &RequestEnvelope,
+    authenticated_user_subject: &str,
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<serde_json::Value, ControlError> {
     validate_drive_target(&request.target, request.action.kind)?;
@@ -206,15 +209,54 @@ pub(crate) fn execute_drive_action_with_policy(
                     "drive.run only supports workflow objects",
                 ));
             }
-            ensure_drive_execution_policy_approved(request.action.kind)?;
-            let cloud_model = CloudModel::as_ref(ctx);
-            let object = drive_object_for_mutation(
-                cloud_model,
-                params.object_type,
-                &params.id,
+            let (command, mut result) = {
+                let cloud_model = CloudModel::as_ref(ctx);
+                let object = drive_object_for_mutation(
+                    cloud_model,
+                    params.object_type,
+                    &params.id,
+                    request.action.kind,
+                )?;
+                let workflow =
+                    object
+                        .as_any()
+                        .downcast_ref::<CloudWorkflow>()
+                        .ok_or_else(|| {
+                            ControlError::new(
+                                ErrorCode::UnsupportedAction,
+                                "drive.run only supports workflow objects",
+                            )
+                        })?;
+                let command = workflow.model().data.command().ok_or_else(|| {
+                    ControlError::new(
+                        ErrorCode::UnsupportedAction,
+                        "drive.run only supports command workflows",
+                    )
+                })?;
+                (
+                    command.to_owned(),
+                    drive_mutation_result(object, params.object_type)?,
+                )
+            };
+            let session_id =
+                data::run_command_in_target(request.action.kind, &request.target, &command, ctx)?;
+            result["execution_id"] = serde_json::Value::String(format!(
+                "{}:{}",
+                request.action.kind.as_str(),
+                session_id
+            ));
+            result["audit"] = serde_json::to_value(data::execution_audit_record(
                 request.action.kind,
-            )?;
-            drive_mutation_result(object, params.object_type)
+                authenticated_user_subject,
+            ))
+            .map_err(|err| {
+                ControlError::with_details(
+                    ErrorCode::Internal,
+                    "failed to encode local-control Drive audit record",
+                    err.to_string(),
+                )
+            })?;
+            Ok(result)
         }
         ActionKind::DriveInsert => {
             let params = request.action.params_as::<DriveInsertParams>()?;
@@ -231,7 +273,7 @@ pub(crate) fn execute_drive_action_with_policy(
                     "drive.insert only supports notebook objects",
                 ));
             }
-            ensure_drive_execution_policy_approved(request.action.kind)?;
+            ensure_drive_insert_policy_approved(request.action.kind)?;
             let cloud_model = CloudModel::as_ref(ctx);
             let object = drive_object_for_mutation(
                 cloud_model,
@@ -484,10 +526,11 @@ pub(crate) fn drive_mutation_result(
     to_drive_data(DriveMutationResult {
         object: summary,
         execution_id: None,
+        audit: None,
     })
 }
 
-fn ensure_drive_execution_policy_approved(action: ActionKind) -> Result<(), ControlError> {
+fn ensure_drive_insert_policy_approved(action: ActionKind) -> Result<(), ControlError> {
     Err(ControlError::new(
         ErrorCode::ExecutionContextNotAllowed,
         format!(
@@ -509,10 +552,16 @@ pub(crate) fn validate_drive_target(
     target: &::local_control::protocol::TargetSelector,
     action: ActionKind,
 ) -> Result<(), ControlError> {
-    if target.window.is_some()
-        || target.tab.is_some()
-        || target.pane.is_some()
-        || target.session.is_some()
+    let drive_run_with_terminal_target = action == ActionKind::DriveRun
+        && (target.window.is_some()
+            || target.tab.is_some()
+            || target.pane.is_some()
+            || target.session.is_some());
+    if (!drive_run_with_terminal_target
+        && (target.window.is_some()
+            || target.tab.is_some()
+            || target.pane.is_some()
+            || target.session.is_some()))
         || target.file.is_some()
     {
         return Err(ControlError::new(

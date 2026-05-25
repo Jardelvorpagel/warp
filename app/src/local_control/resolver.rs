@@ -3,8 +3,8 @@ use crate::local_control::handlers::metadata::action_metadata_for_name;
 use ::local_control::protocol::{
     ActionGetParams, BlockGetParams, BlockListParams, DriveCreateParams, DriveDeleteParams,
     DriveInsertParams, DriveRunParams, DriveUpdateParams, FileDeleteParams, FileWriteParams,
-    HistoryListParams, PaneTarget, SessionTarget, SettingGetParams, TabTarget, TargetSelector,
-    WindowTarget,
+    HistoryListParams, InputRunParams, PaneTarget, SessionTarget, SettingGetParams, TabTarget,
+    TargetSelector, WindowTarget,
 };
 use ::local_control::{ActionKind, ControlError, ErrorCode};
 use warpui::ModelContext;
@@ -160,6 +160,15 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
                 return Err(ControlError::new(
                     ErrorCode::InvalidParams,
                     "drive.insert requires a non-empty Drive object id",
+                ));
+            }
+            Ok(())
+        }),
+        ActionKind::InputRun => action.params_as::<InputRunParams>().and_then(|params| {
+            if params.command.trim().is_empty() {
+                return Err(ControlError::new(
+                    ErrorCode::InvalidParams,
+                    "input.run requires a non-empty command",
                 ));
             }
             Ok(())

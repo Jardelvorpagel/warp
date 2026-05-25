@@ -210,6 +210,27 @@ pub struct InputStateResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputRunParams {
+    pub command: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalControlAuditRecord {
+    pub action: String,
+    pub target_scope: TargetScope,
+    pub permission_category: PermissionCategory,
+    pub authenticated_user_subject: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputRunResult {
+    pub submitted: bool,
+    pub session_id: String,
+    pub audit: LocalControlAuditRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryEntrySummary {
     pub entry_id: String,
     pub command: String,
@@ -472,6 +493,8 @@ pub struct DriveMutationResult {
     pub object: DriveObjectSummary,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<LocalControlAuditRecord>,
 }
 
 impl std::fmt::Display for ErrorCode {

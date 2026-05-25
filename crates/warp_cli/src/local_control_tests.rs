@@ -170,6 +170,41 @@ fn parses_underlying_data_read_commands() {
 }
 
 #[test]
+fn parses_execution_underlying_mutation_commands() {
+    let args = ControlArgs::try_parse_from([
+        "warpctrl",
+        "input",
+        "run",
+        "--instance",
+        "inst_123",
+        "cargo check",
+    ])
+    .expect("input run parses");
+    let ControlCommand::Input(InputCommand::Run(input)) = args.command else {
+        panic!("expected input run command");
+    };
+    assert_eq!(input.target.instance.as_deref(), Some("inst_123"));
+    assert_eq!(input.command, "cargo check");
+
+    let args = ControlArgs::try_parse_from([
+        "warpctrl",
+        "drive",
+        "workflow",
+        "run",
+        "--instance",
+        "inst_123",
+        "drive_123",
+    ])
+    .expect("drive workflow run parses");
+    let ControlCommand::Drive(DriveCommand::Workflow(DriveWorkflowCommand::Run(workflow))) =
+        args.command
+    else {
+        panic!("expected drive workflow run command");
+    };
+    assert_eq!(workflow.target.instance.as_deref(), Some("inst_123"));
+    assert_eq!(workflow.id, "drive_123");
+}
+#[test]
 fn parses_completion_generation_command() {
     let args = ControlArgs::try_parse_from(["warpctrl", "completions", "bash"])
         .expect("completions parses");
@@ -184,6 +219,7 @@ fn parses_completion_generation_command() {
 #[test]
 fn rejects_non_metadata_and_future_catalog_commands_not_in_this_shard() {
     assert!(ControlArgs::try_parse_from(["warpctrl", "drive", "list"]).is_err());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "drive", "prompt", "run", "p_123"]).is_err());
 }
 
 #[test]
@@ -200,6 +236,7 @@ fn generated_bash_completions_include_metadata_commands() {
     assert!(completions.contains("block"));
     assert!(completions.contains("input"));
     assert!(completions.contains("history"));
+    assert!(completions.contains("drive"));
     assert!(completions.contains("theme"));
     assert!(completions.contains("appearance"));
     assert!(completions.contains("setting"));

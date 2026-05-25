@@ -139,6 +139,34 @@ impl LocalControlBridge {
                     Err(error) => ResponseEnvelope::error(request.request_id, error),
                 }
             }
+            ActionKind::InputRun => {
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                let Some(authenticated_user_subject) = grant.authenticated_user.subject.as_deref()
+                else {
+                    return ResponseEnvelope::error(
+                        request.request_id,
+                        ControlError::new(
+                            ErrorCode::AuthenticatedUserRequired,
+                            "input.run requires an authenticated Warp user",
+                        ),
+                    );
+                };
+                match request.action.params_as().and_then(|params| {
+                    data::run_input_command(
+                        &request.target,
+                        params,
+                        authenticated_user_subject,
+                        ctx,
+                    )
+                }) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
             ActionKind::WindowList => {
                 if let Err(error) =
                     ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
@@ -355,7 +383,24 @@ impl LocalControlBridge {
                 {
                     return ResponseEnvelope::error(request.request_id, error);
                 }
-                match drive::execute_drive_action_with_policy(&request, ctx) {
+                let Some(authenticated_user_subject) = grant.authenticated_user.subject.as_deref()
+                else {
+                    return ResponseEnvelope::error(
+                        request.request_id,
+                        ControlError::new(
+                            ErrorCode::AuthenticatedUserRequired,
+                            format!(
+                                "{} requires an authenticated Warp user",
+                                request.action.kind.as_str()
+                            ),
+                        ),
+                    );
+                };
+                match drive::execute_drive_action_with_policy(
+                    &request,
+                    authenticated_user_subject,
+                    ctx,
+                ) {
                     Ok(data) => ResponseEnvelope::ok(request.request_id, data),
                     Err(error) => ResponseEnvelope::error(request.request_id, error),
                 }

@@ -7,8 +7,8 @@ use ::local_control::protocol::{
     Action, ControlResponse, DriveCreateParams, DriveDeleteParams, DriveInsertParams,
     DriveMutationResult, DriveObjectSelector, DriveObjectType, DriveRunParams, DriveTarget,
     DriveUpdateParams, FileDeleteParams, FileMutationResult, FileTarget, FileWriteParams,
-    PaneSelector, PaneTarget, SessionSelector, SessionTarget, TabSelector, TabTarget,
-    TargetSelector, WindowSelector, WindowTarget,
+    InputRunParams, PaneSelector, PaneTarget, SessionSelector, SessionTarget, TabSelector,
+    TabTarget, TargetSelector, WindowSelector, WindowTarget,
 };
 use ::local_control::{
     ErrorCode, InstanceId, InvocationContext, PermissionCategory, RequestEnvelope,
@@ -72,6 +72,22 @@ fn settings_with_values(
         allow_outside_warp_underlying_data_mutations: AllowOutsideWarpUnderlyingDataMutations::new(
             Some(outside_underlying_data_mutations),
         ),
+    }
+}
+#[test]
+fn execution_mutation_grant_requires_authenticated_user_subject() {
+    for action in [ActionKind::InputRun, ActionKind::DriveRun] {
+        let grant = CredentialGrant::new(
+            InstanceId("instance".to_owned()),
+            action,
+            InvocationContext::OutsideWarp,
+            Duration::minutes(5),
+        );
+
+        let err = grant
+            .verify_for_action(action)
+            .expect_err("execution mutations require authenticated user grant");
+        assert_eq!(err.code, ErrorCode::AuthenticatedUserRequired);
     }
 }
 
@@ -368,6 +384,7 @@ fn capabilities_advertises_core_and_metadata_slice_actions() {
             ActionKind::BlockList,
             ActionKind::BlockGet,
             ActionKind::InputGet,
+            ActionKind::InputRun,
             ActionKind::HistoryList,
             ActionKind::ThemeList,
             ActionKind::AppearanceGet,
@@ -679,7 +696,7 @@ fn data_actions_require_underlying_data_permission_not_metadata_permission() {
 fn action_get_rejects_unallowlisted_action_names() {
     let err = validate_action_params(&Action {
         kind: ActionKind::ActionGet,
-        params: serde_json::json!({ "action": "input.run" }),
+        params: serde_json::json!({ "action": "internal.dispatch" }),
     })
     .expect_err("unallowlisted action is rejected");
     assert_eq!(err.code, ErrorCode::NotAllowlisted);
@@ -886,6 +903,28 @@ fn data_reads_reject_malformed_params() {
 }
 
 #[test]
+fn execution_mutations_reject_malformed_params() {
+    validate_action_params(&Action {
+        kind: ActionKind::InputRun,
+        params: serde_json::json!({ "command": "cargo check" }),
+    })
+    .expect("input.run accepts a command");
+
+    let err = validate_action_params(&Action {
+        kind: ActionKind::InputRun,
+        params: serde_json::json!({ "command": "   " }),
+    })
+    .expect_err("input.run requires a non-empty command");
+    assert_eq!(err.code, ErrorCode::InvalidParams);
+
+    let err = validate_action_params(&Action {
+        kind: ActionKind::DriveRun,
+        params: serde_json::json!({ "object_type": "workflow", "id": "" }),
+    })
+    .expect_err("drive.run requires a non-empty object id");
+    assert_eq!(err.code, ErrorCode::InvalidParams);
+}
+#[test]
 fn file_and_drive_mutations_require_underlying_data_mutation_permission() {
     let settings_no_underlying_mutation =
         settings_with_values(true, true, true, true, false, false);
@@ -893,6 +932,7 @@ fn file_and_drive_mutations_require_underlying_data_mutation_permission() {
     for action in [
         ActionKind::FileWrite,
         ActionKind::FileDelete,
+        ActionKind::InputRun,
         ActionKind::DriveCreate,
         ActionKind::DriveUpdate,
         ActionKind::DriveDelete,
@@ -1058,6 +1098,61 @@ fn file_mutations_require_logged_in_user() {
                 response_error_code(response),
                 ErrorCode::AuthenticatedUserUnavailable
             );
+        });
+    })
+}
+
+#[test]
+fn input_run_rejects_drive_and_file_targets_before_terminal_resolution() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+    App::test((), |mut app| async move {
+        initialize_drive_app(&mut app, true);
+        enable_outside_warp_underlying_data_mutations(&mut app);
+        LocalControlBridge::handle(&app).update(&mut app, |bridge, ctx| {
+            let mut file_request = RequestEnvelope::new(
+                Action::with_params(
+                    ActionKind::InputRun,
+                    InputRunParams {
+                        command: "cargo check".to_owned(),
+                    },
+                )
+                .expect("input.run params serialize"),
+            );
+            file_request.target = TargetSelector {
+                file: Some(FileTarget::Path {
+                    path: "README.md".to_owned(),
+                }),
+                ..TargetSelector::default()
+            };
+            let response = bridge.handle_request(
+                file_request,
+                authenticated_grant(ActionKind::InputRun, ctx),
+                ctx,
+            );
+            assert_eq!(response_error_code(response), ErrorCode::InvalidSelector);
+
+            let mut drive_request = RequestEnvelope::new(
+                Action::with_params(
+                    ActionKind::InputRun,
+                    InputRunParams {
+                        command: "cargo check".to_owned(),
+                    },
+                )
+                .expect("input.run params serialize"),
+            );
+            drive_request.target = TargetSelector {
+                drive: Some(DriveTarget::Id {
+                    object_type: DriveObjectType::Workflow,
+                    id: DriveObjectSelector("workflow".to_owned()),
+                }),
+                ..TargetSelector::default()
+            };
+            let response = bridge.handle_request(
+                drive_request,
+                authenticated_grant(ActionKind::InputRun, ctx),
+                ctx,
+            );
+            assert_eq!(response_error_code(response), ErrorCode::InvalidSelector);
         });
     })
 }
@@ -1338,19 +1433,39 @@ fn drive_update_and_delete_return_safe_success() {
 }
 
 #[test]
-fn drive_run_and_insert_fail_closed_without_policy_approval() {
+fn drive_run_rejects_prompt_objects_and_insert_fails_closed_without_policy_approval() {
     let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
     App::test((), |mut app| async move {
         initialize_drive_app(&mut app, true);
         enable_outside_warp_underlying_data_mutations(&mut app);
-        let workflow_id = create_workflow(&mut app, "build", "cargo check");
+        let prompt_id = CloudModel::handle(&app).update(&mut app, |cloud_model, ctx| {
+            let client_id = ClientId::new();
+            let sync_id = SyncId::ClientId(client_id);
+            let uid = sync_id.uid();
+            cloud_model.create_object(
+                sync_id,
+                CloudWorkflow::new_local(
+                    CloudWorkflowModel::new(Workflow::AgentMode {
+                        name: "ask".to_owned(),
+                        query: "Explain the repo".to_owned(),
+                        description: None,
+                        arguments: Vec::new(),
+                    }),
+                    Owner::mock_current_user(),
+                    None,
+                    client_id,
+                ),
+                ctx,
+            );
+            uid
+        });
         let notebook_id = create_notebook(&mut app, "notes", "# Notes");
         let run_request = RequestEnvelope::new(
             Action::with_params(
                 ActionKind::DriveRun,
                 DriveRunParams {
                     object_type: DriveObjectType::Workflow,
-                    id: workflow_id,
+                    id: prompt_id,
                 },
             )
             .expect("drive.run params serialize"),
@@ -1373,7 +1488,7 @@ fn drive_run_and_insert_fail_closed_without_policy_approval() {
             );
             assert_eq!(
                 response_error_code(response),
-                ErrorCode::ExecutionContextNotAllowed
+                ErrorCode::TargetStateConflict
             );
 
             let response = bridge.handle_request(

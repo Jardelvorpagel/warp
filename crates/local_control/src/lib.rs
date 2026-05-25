@@ -30,11 +30,11 @@ pub use protocol::{
     DriveInsertParams, DriveMutationResult, DriveObjectSummary, DriveObjectType, DriveRunParams,
     DriveTarget, DriveUpdateParams, EmptyParams, ErrorCode, ErrorResponseEnvelope,
     ExecutionContextProof, FileDeleteParams, FileMutationResult, FileTarget, FileWriteParams,
-    HistoryEntrySummary, HistoryListParams, HistoryListResult, InputGetParams, InputStateResult,
-    PROTOCOL_VERSION, PaneListResult, PaneSummary, RequestEnvelope, ResponseEnvelope,
-    SessionListResult, SessionSummary, SettingGetParams, SettingGetResult, SettingListParams,
-    SettingListResult, SettingSummary, TabListResult, TabSummary, ThemeListResult, ThemeSummary,
-    WindowListResult, WindowSummary,
+    HistoryEntrySummary, HistoryListParams, HistoryListResult, InputGetParams, InputRunParams,
+    InputRunResult, InputStateResult, LocalControlAuditRecord, PROTOCOL_VERSION, PaneListResult,
+    PaneSummary, RequestEnvelope, ResponseEnvelope, SessionListResult, SessionSummary,
+    SettingGetParams, SettingGetResult, SettingListParams, SettingListResult, SettingSummary,
+    TabListResult, TabSummary, ThemeListResult, ThemeSummary, WindowListResult, WindowSummary,
 };
 pub use selectors::{
     DriveObjectSelector, FileSelector, PaneSelector, SessionSelector, TabSelector, TargetSelector,

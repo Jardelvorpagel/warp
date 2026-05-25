@@ -195,6 +195,8 @@ pub enum ActionKind {
     InputClear,
     #[serde(rename = "input.mode.set")]
     InputModeSet,
+    #[serde(rename = "input.run")]
+    InputRun,
     #[serde(rename = "history.list")]
     HistoryList,
     #[serde(rename = "theme.list")]
@@ -279,6 +281,7 @@ impl ActionKind {
         Self::InputReplace,
         Self::InputClear,
         Self::InputModeSet,
+        Self::InputRun,
         Self::HistoryList,
         Self::ThemeList,
         Self::ThemeSet,
@@ -344,6 +347,7 @@ impl ActionKind {
             Self::InputReplace => "input.replace",
             Self::InputClear => "input.clear",
             Self::InputModeSet => "input.mode.set",
+            Self::InputRun => "input.run",
             Self::HistoryList => "history.list",
             Self::ThemeList => "theme.list",
             Self::ThemeSet => "theme.set",
@@ -393,15 +397,21 @@ impl ActionKind {
             | Self::DriveUpdate
             | Self::DriveDelete
             | Self::DriveRun
-            | Self::DriveInsert => ActionImplementationStatus::Implemented,
+            | Self::DriveInsert
+            | Self::InputRun => ActionImplementationStatus::Implemented,
             _ => ActionImplementationStatus::Stub,
         };
         let requires_authenticated_user = self.default_requires_authenticated_user();
         let allowed_invocation_contexts =
-            if implementation_status == ActionImplementationStatus::Implemented {
-                vec![InvocationContext::OutsideWarp]
-            } else {
+            if implementation_status != ActionImplementationStatus::Implemented {
                 Vec::new()
+            } else if self.default_state_data_category() == StateDataCategory::UnderlyingDataRead {
+                vec![
+                    InvocationContext::InsideWarp,
+                    InvocationContext::OutsideWarp,
+                ]
+            } else {
+                vec![InvocationContext::OutsideWarp]
             };
         ActionMetadata {
             kind: self,
@@ -458,6 +468,7 @@ impl ActionKind {
             | Self::InputReplace
             | Self::InputClear
             | Self::InputModeSet
+            | Self::InputRun
             | Self::WindowClose
             | Self::TabClose
             | Self::PaneClose
@@ -530,6 +541,7 @@ impl ActionKind {
             | Self::InputReplace
             | Self::InputClear
             | Self::InputModeSet
+            | Self::InputRun
             | Self::FileWrite
             | Self::FileDelete
             | Self::DriveCreate
@@ -583,6 +595,7 @@ impl ActionKind {
             | Self::BlockGet
             | Self::InputGet
             | Self::HistoryList
+            | Self::InputRun
             | Self::FileWrite
             | Self::FileDelete
             | Self::DriveCreate
@@ -635,7 +648,8 @@ impl ActionKind {
             | Self::InputInsert
             | Self::InputReplace
             | Self::InputClear
-            | Self::InputModeSet => TargetScope::Session,
+            | Self::InputModeSet
+            | Self::InputRun => TargetScope::Session,
             Self::BlockList | Self::BlockGet => TargetScope::Block,
             Self::HistoryList => TargetScope::History,
             Self::ThemeList

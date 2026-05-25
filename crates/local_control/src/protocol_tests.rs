@@ -47,8 +47,20 @@ fn ambiguous_target_error_code_is_stable() {
 }
 
 #[test]
-fn input_run_is_not_in_the_allowlisted_catalog() {
-    let action = serde_json::from_value::<ActionKind>(serde_json::json!("input.run"));
+fn accepted_command_submission_is_not_in_the_allowlisted_catalog() {
+    let action = serde_json::from_value::<ActionKind>(serde_json::json!("accepted_command.submit"));
+    assert!(action.is_err());
+}
+
+#[test]
+fn agent_prompt_submission_is_not_in_the_allowlisted_catalog() {
+    let action = serde_json::from_value::<ActionKind>(serde_json::json!("agent_prompt.submit"));
+    assert!(action.is_err());
+}
+
+#[test]
+fn broad_internal_dispatch_is_not_in_the_allowlisted_catalog() {
+    let action = serde_json::from_value::<ActionKind>(serde_json::json!("internal.dispatch"));
     assert!(action.is_err());
 }
 
@@ -227,9 +239,39 @@ fn underlying_data_actions_have_expected_target_scopes() {
         TargetScope::Session
     );
     assert_eq!(
+        ActionKind::InputRun.metadata().target_scope,
+        TargetScope::Session
+    );
+    assert_eq!(
         ActionKind::HistoryList.metadata().target_scope,
         TargetScope::History
     );
+}
+
+#[test]
+fn execution_underlying_actions_require_mutation_permission_and_authenticated_user() {
+    for action in [ActionKind::InputRun, ActionKind::DriveRun] {
+        let metadata = action.metadata();
+        assert_eq!(
+            metadata.implementation_status,
+            ActionImplementationStatus::Implemented
+        );
+        assert_eq!(metadata.risk_tier, RiskTier::MutatingDestructiveOrExecution);
+        assert_eq!(
+            metadata.state_data_category,
+            StateDataCategory::UnderlyingDataMutation
+        );
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::MutateUnderlyingData
+        );
+        assert!(metadata.requires_authenticated_user);
+        assert!(metadata.authenticated_user.required);
+        assert_eq!(
+            metadata.allowed_invocation_contexts,
+            vec![InvocationContext::OutsideWarp]
+        );
+    }
 }
 
 #[test]
