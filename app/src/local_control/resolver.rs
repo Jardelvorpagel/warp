@@ -1,10 +1,11 @@
 //! Target and parameter validation for the first local-control action slice.
 use crate::local_control::handlers::metadata::action_metadata_for_name;
 use ::local_control::protocol::{
-    ActionGetParams, BlockListParams, BlockOutputParams, HistoryListParams, PaneMaximizeParams,
-    PaneNavigateParams, PaneResizeParams, PaneSplitParams, PaneTarget, SessionTarget,
-    SettingGetParams, TabActivateParams, TabCloseParams, TabMoveParams, TabTarget, TargetSelector,
-    WindowCloseParams, WindowCreateParams, WindowTarget,
+    ActionGetParams, BlockListParams, BlockOutputParams, HistoryListParams, InputInsertParams,
+    InputModeSetParams, InputReplaceParams, PaneMaximizeParams, PaneNavigateParams,
+    PaneResizeParams, PaneSplitParams, PaneTarget, SessionTarget, SettingGetParams,
+    SettingSetParams, SettingToggleParams, TabActivateParams, TabCloseParams, TabMoveParams,
+    TabTarget, TargetSelector, WindowCloseParams, WindowCreateParams, WindowTarget,
 };
 use ::local_control::{ActionKind, ControlError, ErrorCode};
 use warpui::ModelContext;
@@ -99,6 +100,11 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         ActionKind::BlockList => action.params_as::<BlockListParams>().map(|_| ()),
         ActionKind::BlockOutput => action.params_as::<BlockOutputParams>().map(|_| ()),
         ActionKind::HistoryList => action.params_as::<HistoryListParams>().map(|_| ()),
+        ActionKind::InputInsert => action.params_as::<InputInsertParams>().map(|_| ()),
+        ActionKind::InputReplace => action.params_as::<InputReplaceParams>().map(|_| ()),
+        ActionKind::InputModeSet => action.params_as::<InputModeSetParams>().map(|_| ()),
+        ActionKind::SettingSet => action.params_as::<SettingSetParams>().map(|_| ()),
+        ActionKind::SettingToggle => action.params_as::<SettingToggleParams>().map(|_| ()),
         ActionKind::InstanceList
         | ActionKind::InstanceInspect
         | ActionKind::AppPing
@@ -120,6 +126,10 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         | ActionKind::SessionList
         | ActionKind::SessionInspect
         | ActionKind::InputGet
+        | ActionKind::InputClear
+        | ActionKind::SessionPrevious
+        | ActionKind::SessionNext
+        | ActionKind::SessionReopenClosed
         | ActionKind::ThemeList
         | ActionKind::AppearanceGet
         | ActionKind::SettingList => validate_empty_action_params(action),

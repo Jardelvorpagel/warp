@@ -1071,7 +1071,7 @@ fn run_inner(args: ControlArgs) -> Result<(), local_control::protocol::ControlEr
         ControlCommand::File(command) => run_file_command(command, output_format),
         ControlCommand::Project(command) => run_project_command(command, output_format),
         ControlCommand::Drive(command) => run_drive_command(command, output_format),
-        ControlCommand::Surface(command) => run_surface_command(command),
+        ControlCommand::Surface(command) => run_surface_command(command, output_format),
         ControlCommand::Auth(command) => run_auth_command(command, output_format),
         ControlCommand::Completions { shell } => generate_completions_to_stdout(shell),
     }

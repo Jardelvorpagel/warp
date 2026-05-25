@@ -226,9 +226,18 @@ pub(super) fn run_session_command(
             run_action(args, ActionKind::SessionInspect, json!({}), output_format)
         }
         SessionCommand::Activate(_) => unsupported_action("session.activate"),
-        SessionCommand::Previous(_) => unsupported_action("session.previous"),
-        SessionCommand::Next(_) => unsupported_action("session.next"),
-        SessionCommand::ReopenClosed(_) => unsupported_action("session.reopen-closed"),
+        SessionCommand::Previous(args) => {
+            run_action(args, ActionKind::SessionPrevious, json!({}), output_format)
+        }
+        SessionCommand::Next(args) => {
+            run_action(args, ActionKind::SessionNext, json!({}), output_format)
+        }
+        SessionCommand::ReopenClosed(args) => run_action(
+            args,
+            ActionKind::SessionReopenClosed,
+            json!({}),
+            output_format,
+        ),
     }
 }
 
@@ -276,7 +285,14 @@ pub(super) fn run_input_command(
         InputCommand::Clear(args) => {
             run_action(args, ActionKind::InputClear, json!({}), output_format)
         }
-        InputCommand::Mode(_) => unsupported_action("input.mode.set"),
+        InputCommand::Mode(command) => match command {
+            crate::local_control::InputModeCommand::Set(args) => run_action(
+                args.target,
+                ActionKind::InputModeSet,
+                json!({ "mode": input_mode(args.mode) }),
+                output_format,
+            ),
+        },
     }
 }
 
@@ -427,18 +443,97 @@ pub(super) fn run_drive_command(
     }
 }
 
-pub(super) fn run_surface_command(command: SurfaceCommand) -> Result<(), ControlError> {
+pub(super) fn run_surface_command(
+    command: SurfaceCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
     match command {
-        SurfaceCommand::Settings(_) => unsupported_action("surface.settings.open"),
-        SurfaceCommand::CommandPalette(_) => unsupported_action("surface.command-palette.open"),
-        SurfaceCommand::CommandSearch(_) => unsupported_action("surface.command-search.open"),
-        SurfaceCommand::WarpDrive(_) => unsupported_action("surface.warp-drive"),
-        SurfaceCommand::ResourceCenter(_) => unsupported_action("surface.resource-center.toggle"),
-        SurfaceCommand::AiAssistant(_) => unsupported_action("surface.ai-assistant.toggle"),
-        SurfaceCommand::CodeReview(_) => unsupported_action("surface.code-review.toggle"),
-        SurfaceCommand::LeftPanel(_) => unsupported_action("surface.left-panel.toggle"),
-        SurfaceCommand::RightPanel(_) => unsupported_action("surface.right-panel.toggle"),
-        SurfaceCommand::VerticalTabs(_) => unsupported_action("surface.vertical-tabs.toggle"),
+        SurfaceCommand::Settings(command) => match command {
+            crate::local_control::SurfaceSettingsCommand::Open(args) => run_action(
+                args.target,
+                ActionKind::SurfaceSettingsOpen,
+                json!({ "page": args.page, "query": args.query }),
+                output_format,
+            ),
+        },
+        SurfaceCommand::CommandPalette(command) => match command {
+            crate::local_control::SurfaceQueryOpenCommand::Open(args) => run_action(
+                args.target,
+                ActionKind::SurfaceCommandPaletteOpen,
+                json!({ "query": args.query }),
+                output_format,
+            ),
+        },
+        SurfaceCommand::CommandSearch(command) => match command {
+            crate::local_control::SurfaceQueryOpenCommand::Open(args) => run_action(
+                args.target,
+                ActionKind::SurfaceCommandSearchOpen,
+                json!({ "query": args.query }),
+                output_format,
+            ),
+        },
+        SurfaceCommand::WarpDrive(command) => match command {
+            crate::local_control::SurfaceOpenToggleCommand::Open(args) => run_action(
+                args,
+                ActionKind::SurfaceWarpDriveOpen,
+                json!({}),
+                output_format,
+            ),
+            crate::local_control::SurfaceOpenToggleCommand::Toggle(args) => run_action(
+                args,
+                ActionKind::SurfaceWarpDriveToggle,
+                json!({}),
+                output_format,
+            ),
+        },
+        SurfaceCommand::ResourceCenter(command) => match command {
+            crate::local_control::SurfaceToggleCommand::Toggle(args) => run_action(
+                args,
+                ActionKind::SurfaceResourceCenterToggle,
+                json!({}),
+                output_format,
+            ),
+        },
+        SurfaceCommand::AiAssistant(command) => match command {
+            crate::local_control::SurfaceToggleCommand::Toggle(args) => run_action(
+                args,
+                ActionKind::SurfaceAiAssistantToggle,
+                json!({}),
+                output_format,
+            ),
+        },
+        SurfaceCommand::CodeReview(command) => match command {
+            crate::local_control::SurfaceToggleCommand::Toggle(args) => run_action(
+                args,
+                ActionKind::SurfaceCodeReviewToggle,
+                json!({}),
+                output_format,
+            ),
+        },
+        SurfaceCommand::LeftPanel(command) => match command {
+            crate::local_control::SurfaceToggleCommand::Toggle(args) => run_action(
+                args,
+                ActionKind::SurfaceLeftPanelToggle,
+                json!({}),
+                output_format,
+            ),
+        },
+        SurfaceCommand::RightPanel(command) => match command {
+            crate::local_control::SurfaceToggleCommand::Toggle(args) => run_action(
+                args,
+                ActionKind::SurfaceRightPanelToggle,
+                json!({}),
+                output_format,
+            ),
+        },
+        SurfaceCommand::VerticalTabs(command) => match command {
+            crate::local_control::SurfaceToggleCommand::Toggle(args) => run_action(
+                args,
+                ActionKind::SurfaceVerticalTabsToggle,
+                json!({}),
+                output_format,
+            ),
+        },
     }
 }
 
@@ -488,6 +583,13 @@ fn navigation_direction(direction: crate::local_control::NavigationDirection) ->
         crate::local_control::NavigationDirection::Down => "down",
         crate::local_control::NavigationDirection::Previous => "left",
         crate::local_control::NavigationDirection::Next => "right",
+    }
+}
+
+fn input_mode(mode: crate::local_control::InputMode) -> &'static str {
+    match mode {
+        crate::local_control::InputMode::Terminal => "terminal",
+        crate::local_control::InputMode::Agent => "agent",
     }
 }
 

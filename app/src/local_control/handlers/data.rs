@@ -15,8 +15,8 @@ use crate::terminal::view::TerminalView;
 use crate::terminal::History;
 use crate::workspace::Workspace;
 
-struct ResolvedTerminalTarget {
-    terminal_view: ViewHandle<TerminalView>,
+pub(super) struct ResolvedTerminalTarget {
+    pub(super) terminal_view: ViewHandle<TerminalView>,
 }
 
 pub(crate) fn get_input_state(
@@ -215,7 +215,7 @@ fn validate_active_terminal_target(
     Ok(())
 }
 
-fn resolve_terminal_read_target(
+pub(super) fn resolve_terminal_read_target(
     action: ActionKind,
     target: &TargetSelector,
     ctx: &mut ModelContext<LocalControlBridge>,

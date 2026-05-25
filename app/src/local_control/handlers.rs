@@ -4,4 +4,6 @@ pub(super) mod drive;
 pub(super) mod layout;
 pub(super) mod metadata;
 pub(super) mod product_metadata;
+pub(super) mod session_input;
 pub(super) mod settings_surfaces;
+pub(super) mod surfaces;

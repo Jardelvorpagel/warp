@@ -600,7 +600,28 @@ impl ActionKind {
             | Self::PaneNavigate
             | Self::PaneResize
             | Self::PaneMaximize
-            | Self::PaneClose => ActionImplementationStatus::Implemented,
+            | Self::PaneClose
+            | Self::SessionPrevious
+            | Self::SessionNext
+            | Self::SessionReopenClosed
+            | Self::InputInsert
+            | Self::InputReplace
+            | Self::InputClear
+            | Self::InputModeSet
+            | Self::ThemeSet
+            | Self::SettingSet
+            | Self::SettingToggle
+            | Self::SurfaceSettingsOpen
+            | Self::SurfaceCommandPaletteOpen
+            | Self::SurfaceCommandSearchOpen
+            | Self::SurfaceWarpDriveOpen
+            | Self::SurfaceWarpDriveToggle
+            | Self::SurfaceResourceCenterToggle
+            | Self::SurfaceAiAssistantToggle
+            | Self::SurfaceCodeReviewToggle
+            | Self::SurfaceLeftPanelToggle
+            | Self::SurfaceRightPanelToggle
+            | Self::SurfaceVerticalTabsToggle => ActionImplementationStatus::Implemented,
             Self::AuthStatus
             | Self::AuthLogin
             | Self::AuthApiKeySet
@@ -614,16 +635,8 @@ impl ActionKind {
             | Self::PaneRename
             | Self::PaneResetName
             | Self::SessionActivate
-            | Self::SessionPrevious
-            | Self::SessionNext
-            | Self::SessionReopenClosed
-            | Self::InputInsert
-            | Self::InputReplace
-            | Self::InputClear
-            | Self::InputModeSet
             | Self::InputRun
             | Self::ThemeGet
-            | Self::ThemeSet
             | Self::ThemeSystemSet
             | Self::ThemeLightSet
             | Self::ThemeDarkSet
@@ -633,21 +646,8 @@ impl ActionKind {
             | Self::AppearanceZoomIncrease
             | Self::AppearanceZoomDecrease
             | Self::AppearanceZoomReset
-            | Self::SettingSet
-            | Self::SettingToggle
             | Self::KeybindingList
             | Self::KeybindingGet
-            | Self::SurfaceSettingsOpen
-            | Self::SurfaceCommandPaletteOpen
-            | Self::SurfaceCommandSearchOpen
-            | Self::SurfaceWarpDriveOpen
-            | Self::SurfaceWarpDriveToggle
-            | Self::SurfaceResourceCenterToggle
-            | Self::SurfaceAiAssistantToggle
-            | Self::SurfaceCodeReviewToggle
-            | Self::SurfaceLeftPanelToggle
-            | Self::SurfaceRightPanelToggle
-            | Self::SurfaceVerticalTabsToggle
             | Self::FileOpen
             | Self::ProjectOpen
             | Self::DriveOpen

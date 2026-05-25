@@ -485,7 +485,7 @@ pub struct SettingGetParams {
 #[serde(deny_unknown_fields)]
 pub struct SettingSetParams {
     pub key: String,
-    pub value: String,
+    pub value: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
