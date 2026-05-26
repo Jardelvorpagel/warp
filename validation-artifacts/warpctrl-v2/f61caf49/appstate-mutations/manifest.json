@@ -1,0 +1,415 @@
+{
+  "validation": {
+    "name": "appstate-mutations",
+    "validated_sha": "f61caf49400dc5c0d37d57a553d27733700e5204",
+    "short_sha": "f61caf49",
+    "validation_ref": "origin/zach/warpctrl-validation/f61caf49",
+    "artifact_branch": "zach/warpctrl-validation-artifacts/f61caf49/appstate-mutations",
+    "repository": "git@github.com:warpdotdev/warp.git",
+    "workspace": "/workspace/warpctrl-validation/appstate-mutations",
+    "artifact_root": "validation-artifacts/warpctrl-v2/f61caf49/appstate-mutations",
+    "rev_parse_head_before_validation": "f61caf49400dc5c0d37d57a553d27733700e5204",
+    "builds": [
+      {
+        "name": "standalone warpctrl",
+        "command": "cargo build -p warp --bin warpctrl --features standalone,warp_control_cli",
+        "status": "pass",
+        "binary": "target/debug/warpctrl",
+        "log_path": "logs/build_warpctrl.log"
+      },
+      {
+        "name": "Warp OSS GUI app",
+        "command": "cargo build -p warp --bin warp-oss --features gui,warp_control_cli",
+        "status": "pass",
+        "binary": "target/debug/warp-oss",
+        "log_path": "logs/build_warp_oss_gui.log"
+      }
+    ],
+    "environment": {
+      "HOME": "/tmp/warpctrl-validation/appstate-mutations-home",
+      "XDG_CONFIG_HOME": "/tmp/warpctrl-validation/appstate-mutations-home/.config",
+      "XDG_DATA_HOME": "/tmp/warpctrl-validation/appstate-mutations-home/.local/share",
+      "XDG_STATE_HOME": "/tmp/warpctrl-validation/appstate-mutations-home/.local/state",
+      "XDG_CACHE_HOME": "/tmp/warpctrl-validation/appstate-mutations-home/.cache",
+      "XDG_RUNTIME_DIR": "/tmp/warpctrl-validation/appstate-mutations-home/runtime",
+      "WARP_DATA_PROFILE": "appstate-mutations",
+      "WARP_LOCAL_CONTROL_DISCOVERY_DIR": "/tmp/warpctrl-validation/appstate-mutations-home/discovery"
+    },
+    "notes": [
+      "Outside-Warp active target resolution required focusing the Warp window with xdotool before commands using --tab active or --pane active.",
+      "Metadata/configuration mutation permission was required for tab rename/reset-name/color and pane rename/reset-name, so the Settings > Scripting metadata/configuration toggle was enabled during validation.",
+      "A stale discovery record caused ambiguous_instance during setup and was removed before final command captures.",
+      "Supplemental screenshots 101-108 were captured because the first pass screenshots did not consistently show the command/output text in xterm."
+    ]
+  },
+  "summary": {
+    "primary_scenario_count": 8,
+    "pass": 6,
+    "fail": 0,
+    "blocked": 2,
+    "skip": 0,
+    "visual_inspection_failures": [],
+    "visual_inspection_blockers": [
+      "pane rename: JSON success but no visible pane-title/header evidence in screenshot",
+      "pane reset-name: JSON success but no visible pane-title/header evidence in screenshot"
+    ],
+    "blockers": [
+      "Pane rename/reset visual proof blocked by lack of a clearly visible pane title/header in the captured Warp layout."
+    ],
+    "skipped_commands": []
+  },
+  "commands": [
+    {
+      "ordinal": "001",
+      "command": "$WARPCTRL --output-format json app focus",
+      "supplemental_ordinal": "101",
+      "context": "outside-Warp invocation from external xterm targeting a real graphical Warp app",
+      "permission_state": {
+        "settings_visible": "Settings > Scripting showed Warp control outside Warp enabled and app-state mutations enabled.",
+        "required_permission_category": "mutate_app_state",
+        "enabled_permissions": [
+          "LocalControlAllowOutsideWarp",
+          "LocalControlOutsideWarpAppStateMutations"
+        ]
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show Warp raised/focused while the external terminal transcript shows the JSON success result.",
+      "expected_result": "Warp app receives focus/raises without changing tab or pane content; JSON reports ok=true.",
+      "actual_result": "Returned ok=true with action app.focus and the Warp window was focused/visible in the staggered composition.",
+      "exit_code": 0,
+      "stdout": "{\"action\":\"app.focus\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true}",
+      "stderr": "",
+      "status": "pass",
+      "visual_inspection": {
+        "expected_visual_effect": "Warp window focused/raised relative to the external terminal.",
+        "observed_visual_effect": "Warp window and xterm were both visible; after command Warp was foreground/focused. The supplemental screenshot includes command, JSON output, and exit code.",
+        "result": "pass",
+        "unexpected_ui_changes": [],
+        "ambiguity_or_blocker": null
+      },
+      "screenshots": [
+        "screenshots/001__outside-staggered__appstate__app_focus__before_terminal_ui.png",
+        "screenshots/001__outside-staggered__appstate__app_focus__after_terminal_ui.png",
+        "screenshots/001__outside-staggered__appstate__app_focus__terminal_ui.png",
+        "screenshots/101__outside-staggered__appstate__app_focus__supplemental_terminal_ui.png"
+      ],
+      "log_paths": [
+        "logs/build_warpctrl.log",
+        "logs/build_warp_oss_gui.log",
+        "logs/app_stdout.log",
+        "logs/app_stderr.log",
+        "logs/computer_use_visual_notes.md",
+        "logs/supplemental_terminal_visible_capture.log"
+      ]
+    },
+    {
+      "ordinal": "002",
+      "command": "$WARPCTRL --output-format json tab create",
+      "supplemental_ordinal": "102",
+      "context": "outside-Warp invocation from external xterm; Warp tab strip visible",
+      "permission_state": {
+        "settings_visible": "Settings > Scripting showed Warp control outside Warp enabled and app-state mutations enabled.",
+        "required_permission_category": "mutate_app_state",
+        "enabled_permissions": [
+          "LocalControlAllowOutsideWarp",
+          "LocalControlOutsideWarpAppStateMutations"
+        ]
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show the tab strip before and after so the new tab count/label is visible, with terminal JSON showing previous_count and count.",
+      "expected_result": "A new tab appears and becomes active; JSON reports created=true and count increases by one.",
+      "actual_result": "Initial pass returned previous_count=1 count=2. Supplemental rerun returned previous_count=3 count=4 and the tab strip visibly had an added active bash tab.",
+      "exit_code": 0,
+      "stdout": "{\"action\":\"tab.create\",\"created\":true,\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"tab\":{\"active_index\":1,\"count\":2,\"previous_count\":1},\"window\":{\"id\":\"0\",\"selector\":\"active\"}}",
+      "supplemental_stdout": "{\"action\":\"tab.create\",\"created\":true,\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"tab\":{\"active_index\":2,\"count\":4,\"previous_count\":3},\"window\":{\"id\":\"0\",\"selector\":\"active\"}}",
+      "stderr": "",
+      "status": "pass",
+      "visual_inspection": {
+        "expected_visual_effect": "Tab strip gains one tab and active tab changes to the newly created tab.",
+        "observed_visual_effect": "Before/after screenshots show the Warp tab strip changing; terminal output shows count increased by one. Supplemental screenshot includes visible tab strip plus JSON counts.",
+        "result": "pass",
+        "unexpected_ui_changes": [
+          "Additional Settings tab was opened during permission setup before later commands."
+        ],
+        "ambiguity_or_blocker": null
+      },
+      "screenshots": [
+        "screenshots/002__outside-staggered__appstate__tab_create__before_terminal_ui.png",
+        "screenshots/002__outside-staggered__appstate__tab_create__after_terminal_ui.png",
+        "screenshots/002__outside-staggered__appstate__tab_create__terminal_ui.png",
+        "screenshots/102__outside-staggered__appstate__tab_create__supplemental_terminal_ui.png"
+      ],
+      "log_paths": [
+        "logs/build_warpctrl.log",
+        "logs/build_warp_oss_gui.log",
+        "logs/app_stdout.log",
+        "logs/app_stderr.log",
+        "logs/computer_use_visual_notes.md",
+        "logs/supplemental_terminal_visible_capture.log"
+      ]
+    },
+    {
+      "ordinal": "003",
+      "command": "$WARPCTRL --output-format json tab rename --tab active \"WarpCtrl Validation Tab\"",
+      "supplemental_ordinal": "103",
+      "context": "outside-Warp invocation from external xterm; active Warp tab visible",
+      "permission_state": {
+        "settings_visible": "Settings > Scripting showed Warp control outside Warp enabled and metadata/configuration mutations enabled after discovery that this command requires that category.",
+        "required_permission_category": "mutate_metadata_configuration",
+        "enabled_permissions": [
+          "LocalControlAllowOutsideWarp",
+          "LocalControlOutsideWarpMetadataConfigurationMutations"
+        ]
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Keep the tab strip visible and show the active tab label changing to WarpCtrl Validation Tab.",
+      "expected_result": "Active tab label changes to WarpCtrl Validation Tab; JSON reports ok=true.",
+      "actual_result": "Returned ok=true. Supplemental screenshot visibly shows the active tab label as WarpCtrl Validation Tab while xterm shows the command output and exit code 0.",
+      "exit_code": 0,
+      "stdout": "{\"action\":\"tab.rename\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"tab_id\":\"2681\",\"window_id\":\"0\"}",
+      "supplemental_stdout": "{\"action\":\"tab.rename\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"tab_id\":\"2751\",\"window_id\":\"0\"}",
+      "stderr": "",
+      "status": "pass",
+      "visual_inspection": {
+        "expected_visual_effect": "Active tab label reads WarpCtrl Validation Tab.",
+        "observed_visual_effect": "Supplemental screenshot clearly shows the tab strip label WarpCtrl Validation Tab with the terminal command/output visible.",
+        "result": "pass",
+        "unexpected_ui_changes": [],
+        "ambiguity_or_blocker": null
+      },
+      "screenshots": [
+        "screenshots/003__outside-staggered__appstate__tab_rename__before_terminal_ui.png",
+        "screenshots/003__outside-staggered__appstate__tab_rename__after_terminal_ui.png",
+        "screenshots/103__outside-staggered__appstate__tab_rename__supplemental_terminal_ui.png"
+      ],
+      "log_paths": [
+        "logs/build_warpctrl.log",
+        "logs/build_warp_oss_gui.log",
+        "logs/app_stdout.log",
+        "logs/app_stderr.log",
+        "logs/computer_use_visual_notes.md",
+        "logs/supplemental_terminal_visible_capture.log"
+      ]
+    },
+    {
+      "ordinal": "004",
+      "command": "$WARPCTRL --output-format json tab reset-name --tab active",
+      "supplemental_ordinal": "104",
+      "context": "outside-Warp invocation from external xterm; active Warp tab visible",
+      "permission_state": {
+        "settings_visible": "Settings > Scripting metadata/configuration mutations enabled.",
+        "required_permission_category": "mutate_metadata_configuration",
+        "enabled_permissions": [
+          "LocalControlAllowOutsideWarp",
+          "LocalControlOutsideWarpMetadataConfigurationMutations"
+        ]
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show the tab strip with the custom label before, then show the active tab reverting to the shell/default label.",
+      "expected_result": "Active tab label reverts from custom title to default title; JSON reports ok=true.",
+      "actual_result": "Returned ok=true and the active tab label reverted to bash in the supplemental screenshot.",
+      "exit_code": 0,
+      "stdout": "{\"action\":\"tab.reset_name\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"tab_id\":\"2681\",\"window_id\":\"0\"}",
+      "supplemental_stdout": "{\"action\":\"tab.reset_name\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"tab_id\":\"2751\",\"window_id\":\"0\"}",
+      "stderr": "",
+      "status": "pass",
+      "visual_inspection": {
+        "expected_visual_effect": "Previously custom active tab label no longer reads WarpCtrl Validation Tab and returns to bash/default.",
+        "observed_visual_effect": "Supplemental screenshot after the reset shows the active tab label as bash while xterm shows command/output/exit code.",
+        "result": "pass",
+        "unexpected_ui_changes": [],
+        "ambiguity_or_blocker": null
+      },
+      "screenshots": [
+        "screenshots/004__outside-staggered__appstate__tab_reset_name__before_terminal_ui.png",
+        "screenshots/004__outside-staggered__appstate__tab_reset_name__after_terminal_ui.png",
+        "screenshots/104__outside-staggered__appstate__tab_reset_name__supplemental_terminal_ui.png"
+      ],
+      "log_paths": [
+        "logs/build_warpctrl.log",
+        "logs/build_warp_oss_gui.log",
+        "logs/app_stdout.log",
+        "logs/app_stderr.log",
+        "logs/computer_use_visual_notes.md",
+        "logs/supplemental_terminal_visible_capture.log"
+      ]
+    },
+    {
+      "ordinal": "005",
+      "command": "$WARPCTRL --output-format json tab color set --tab active \"#ff00ff\"",
+      "supplemental_ordinal": "105",
+      "context": "outside-Warp invocation from external xterm; active Warp tab visible",
+      "permission_state": {
+        "settings_visible": "Settings > Scripting metadata/configuration mutations enabled.",
+        "required_permission_category": "mutate_metadata_configuration",
+        "enabled_permissions": [
+          "LocalControlAllowOutsideWarp",
+          "LocalControlOutsideWarpMetadataConfigurationMutations"
+        ]
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show the tab strip before/after to prove either a magenta color indicator appears or, if the exact color is unsupported, that the structured error appears and no misleading tab color changed.",
+      "expected_result": "Because the prompt required exact #ff00ff, either visible magenta tab color if supported, or a structured error if unsupported and no misleading visual state change.",
+      "actual_result": "Returned ok=false invalid_params with message #ff00ff is not a supported tab color; exit code 1. No visible tab color change occurred.",
+      "exit_code": 1,
+      "stdout": "{\"ok\":false,\"error\":{\"code\":\"invalid_params\",\"message\":\"#ff00ff is not a supported tab color\"}}",
+      "stderr": "",
+      "status": "pass",
+      "visual_inspection": {
+        "expected_visual_effect": "No misleading color change when exact requested color is unsupported.",
+        "observed_visual_effect": "Supplemental screenshot shows invalid_params output and the tab strip remains without a magenta indicator.",
+        "result": "pass",
+        "unexpected_ui_changes": [],
+        "ambiguity_or_blocker": "#ff00ff is unsupported by the current parser/app palette; no substitute color was attempted per instructions."
+      },
+      "screenshots": [
+        "screenshots/005__outside-staggered__appstate__tab_color_set__before_terminal_ui.png",
+        "screenshots/005__outside-staggered__appstate__tab_color_set__after_terminal_ui.png",
+        "screenshots/105__outside-staggered__appstate__tab_color_set__supplemental_terminal_ui.png"
+      ],
+      "log_paths": [
+        "logs/build_warpctrl.log",
+        "logs/build_warp_oss_gui.log",
+        "logs/app_stdout.log",
+        "logs/app_stderr.log",
+        "logs/computer_use_visual_notes.md",
+        "logs/supplemental_terminal_visible_capture.log"
+      ]
+    },
+    {
+      "ordinal": "006",
+      "command": "$WARPCTRL --output-format json tab color clear --tab active",
+      "supplemental_ordinal": "106",
+      "context": "outside-Warp invocation from external xterm; active Warp tab visible",
+      "permission_state": {
+        "settings_visible": "Settings > Scripting metadata/configuration mutations enabled.",
+        "required_permission_category": "mutate_metadata_configuration",
+        "enabled_permissions": [
+          "LocalControlAllowOutsideWarp",
+          "LocalControlOutsideWarpMetadataConfigurationMutations"
+        ]
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show the active tab with no custom color before and after, because the prior exact color set failed.",
+      "expected_result": "Command succeeds and active tab has no custom color indicator; visually no-op because #ff00ff set failed.",
+      "actual_result": "Returned ok=true. Visual state remained default/no custom tab color.",
+      "exit_code": 0,
+      "stdout": "{\"action\":\"tab.color.clear\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"tab_id\":\"2681\",\"window_id\":\"0\"}",
+      "supplemental_stdout": "{\"action\":\"tab.color.clear\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"tab_id\":\"2751\",\"window_id\":\"0\"}",
+      "stderr": "",
+      "status": "pass",
+      "visual_inspection": {
+        "expected_visual_effect": "Active tab remains/returns to no custom color.",
+        "observed_visual_effect": "No custom color indicator visible before or after; terminal transcript shows ok=true.",
+        "result": "pass",
+        "unexpected_ui_changes": [],
+        "ambiguity_or_blocker": "This is visually a no-op because the preceding color-set command was rejected."
+      },
+      "screenshots": [
+        "screenshots/006__outside-staggered__appstate__tab_color_clear__before_terminal_ui.png",
+        "screenshots/006__outside-staggered__appstate__tab_color_clear__after_terminal_ui.png",
+        "screenshots/106__outside-staggered__appstate__tab_color_clear__supplemental_terminal_ui.png"
+      ],
+      "log_paths": [
+        "logs/build_warpctrl.log",
+        "logs/build_warp_oss_gui.log",
+        "logs/app_stdout.log",
+        "logs/app_stderr.log",
+        "logs/computer_use_visual_notes.md",
+        "logs/supplemental_terminal_visible_capture.log"
+      ]
+    },
+    {
+      "ordinal": "007",
+      "command": "$WARPCTRL --output-format json pane rename --pane active \"WarpCtrl Validation Pane\"",
+      "supplemental_ordinal": "107",
+      "context": "outside-Warp invocation from external xterm; active terminal pane targeted in supplemental pass",
+      "permission_state": {
+        "settings_visible": "Settings > Scripting metadata/configuration mutations enabled.",
+        "required_permission_category": "mutate_metadata_configuration",
+        "enabled_permissions": [
+          "LocalControlAllowOutsideWarp",
+          "LocalControlOutsideWarpMetadataConfigurationMutations"
+        ]
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show a visible pane title/header changing to WarpCtrl Validation Pane while the terminal transcript shows ok=true.",
+      "expected_result": "Active pane title/header visibly changes to WarpCtrl Validation Pane; JSON reports ok=true.",
+      "actual_result": "Returned ok=true. Initial pass accidentally targeted the Settings pane; supplemental pass targeted terminal pane Pane Pane Terminal (3125). However the screenshot does not expose a distinct pane-title UI/header, so the visual effect is not clearly proven.",
+      "exit_code": 0,
+      "stdout": "{\"action\":\"pane.rename\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"pane_id\":\"Pane Pane Settings (2682)\",\"tab_id\":\"2681\"}",
+      "supplemental_stdout": "{\"action\":\"pane.rename\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"pane_id\":\"Pane Pane Terminal (3125)\",\"tab_id\":\"2751\"}",
+      "stderr": "",
+      "status": "blocked",
+      "visual_inspection": {
+        "expected_visual_effect": "Pane title/header visibly reads WarpCtrl Validation Pane.",
+        "observed_visual_effect": "Terminal transcript shows ok=true and pane_id identifies a terminal pane, but the captured Warp UI does not show a separate pane title/header that changed.",
+        "result": "blocked",
+        "unexpected_ui_changes": [
+          "Initial pass targeted Settings pane because Settings was active. Supplemental pass targeted terminal pane."
+        ],
+        "ambiguity_or_blocker": "Visible pane-title affordance was not present/legible in the captured layout, so JSON success alone is insufficient for visible-effect validation."
+      },
+      "screenshots": [
+        "screenshots/007__outside-staggered__appstate__pane_rename__before_terminal_ui.png",
+        "screenshots/007__outside-staggered__appstate__pane_rename__after_terminal_ui.png",
+        "screenshots/107__outside-staggered__appstate__pane_rename__supplemental_terminal_ui.png"
+      ],
+      "log_paths": [
+        "logs/build_warpctrl.log",
+        "logs/build_warp_oss_gui.log",
+        "logs/app_stdout.log",
+        "logs/app_stderr.log",
+        "logs/computer_use_visual_notes.md",
+        "logs/supplemental_terminal_visible_capture.log"
+      ],
+      "blocker_reason": "No clear visible pane title/header in screenshot to prove visual rename effect."
+    },
+    {
+      "ordinal": "008",
+      "command": "$WARPCTRL --output-format json pane reset-name --pane active",
+      "supplemental_ordinal": "108",
+      "context": "outside-Warp invocation from external xterm; active terminal pane targeted in supplemental pass",
+      "permission_state": {
+        "settings_visible": "Settings > Scripting metadata/configuration mutations enabled.",
+        "required_permission_category": "mutate_metadata_configuration",
+        "enabled_permissions": [
+          "LocalControlAllowOutsideWarp",
+          "LocalControlOutsideWarpMetadataConfigurationMutations"
+        ]
+      },
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Show a visible pane title/header reverting from WarpCtrl Validation Pane to its default title while the terminal transcript shows ok=true.",
+      "expected_result": "Active pane title/header visibly reverts to default; JSON reports ok=true.",
+      "actual_result": "Returned ok=true. Supplemental pass targeted terminal pane Pane Pane Terminal (3125), but no distinct pane-title UI/header was visible, so the reset effect is not visually proven.",
+      "exit_code": 0,
+      "stdout": "{\"action\":\"pane.reset_name\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"pane_id\":\"Pane Pane Settings (2682)\",\"tab_id\":\"2681\"}",
+      "supplemental_stdout": "{\"action\":\"pane.reset_name\",\"instance_id\":\"inst_32569fb91d4d439fbde8772245df7727\",\"ok\":true,\"pane_id\":\"Pane Pane Terminal (3125)\",\"tab_id\":\"2751\"}",
+      "stderr": "",
+      "status": "blocked",
+      "visual_inspection": {
+        "expected_visual_effect": "Pane title/header no longer reads WarpCtrl Validation Pane and returns to default.",
+        "observed_visual_effect": "Terminal transcript shows ok=true and pane_id identifies a terminal pane, but captured Warp UI does not expose a separate pane title/header before or after.",
+        "result": "blocked",
+        "unexpected_ui_changes": [
+          "Initial pass targeted Settings pane because Settings was active. Supplemental pass targeted terminal pane."
+        ],
+        "ambiguity_or_blocker": "Visible pane-title affordance was not present/legible in the captured layout, so JSON success alone is insufficient for visible-effect validation."
+      },
+      "screenshots": [
+        "screenshots/008__outside-staggered__appstate__pane_reset_name__before_terminal_ui.png",
+        "screenshots/008__outside-staggered__appstate__pane_reset_name__after_terminal_ui.png",
+        "screenshots/108__outside-staggered__appstate__pane_reset_name__supplemental_terminal_ui.png"
+      ],
+      "log_paths": [
+        "logs/build_warpctrl.log",
+        "logs/build_warp_oss_gui.log",
+        "logs/app_stdout.log",
+        "logs/app_stderr.log",
+        "logs/computer_use_visual_notes.md",
+        "logs/supplemental_terminal_visible_capture.log"
+      ],
+      "blocker_reason": "No clear visible pane title/header in screenshot to prove visual reset effect."
+    }
+  ]
+}

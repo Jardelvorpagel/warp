@@ -1,0 +1,125 @@
+SUPPLEMENTAL 101 app_focus
+What is the best way to show the impact of this CLI command? Show Warp being raised/focused while the terminal transcript shows the JSON result.
+COMMAND: $WARPCTRL --output-format json app focus
+STDOUT:
+{
+  "action": "app.focus",
+  "instance_id": "inst_32569fb91d4d439fbde8772245df7727",
+  "ok": true
+}
+
+STDERR:
+
+EXIT_CODE=0
+SUPPLEMENTAL 102 tab_create
+What is the best way to show the impact of this CLI command? Show the visible Warp tab strip gaining a new tab while the terminal transcript shows previous and new tab counts.
+COMMAND: $WARPCTRL --output-format json tab create
+STDOUT:
+{
+  "action": "tab.create",
+  "created": true,
+  "instance_id": "inst_32569fb91d4d439fbde8772245df7727",
+  "tab": {
+    "active_index": 2,
+    "count": 4,
+    "previous_count": 3
+  },
+  "window": {
+    "id": "0",
+    "selector": "active"
+  }
+}
+
+STDERR:
+
+EXIT_CODE=0
+SUPPLEMENTAL 103 tab_rename
+What is the best way to show the impact of this CLI command? Show the active visible tab label changing to WarpCtrl Validation Tab while the terminal transcript shows ok:true.
+COMMAND: $WARPCTRL --output-format json tab rename --tab active WarpCtrl\ Validation\ Tab
+STDOUT:
+{
+  "action": "tab.rename",
+  "instance_id": "inst_32569fb91d4d439fbde8772245df7727",
+  "ok": true,
+  "tab_id": "2751",
+  "window_id": "0"
+}
+
+STDERR:
+
+EXIT_CODE=0
+SUPPLEMENTAL 104 tab_reset_name
+What is the best way to show the impact of this CLI command? Show the active visible tab label reverting to its default title while the terminal transcript shows ok:true.
+COMMAND: $WARPCTRL --output-format json tab reset-name --tab active
+STDOUT:
+{
+  "action": "tab.reset_name",
+  "instance_id": "inst_32569fb91d4d439fbde8772245df7727",
+  "ok": true,
+  "tab_id": "2751",
+  "window_id": "0"
+}
+
+STDERR:
+
+EXIT_CODE=0
+SUPPLEMENTAL 105 tab_color_set
+What is the best way to show the impact of this CLI command? Show the requested magenta tab color command and verify either a visible color change or a structured unsupported-color error with no misleading UI change.
+COMMAND: $WARPCTRL --output-format json tab color set --tab active \#ff00ff
+STDOUT:
+{
+  "ok": false,
+  "error": {
+    "code": "invalid_params",
+    "message": "#ff00ff is not a supported tab color"
+  }
+}
+
+STDERR:
+
+EXIT_CODE=1
+SUPPLEMENTAL 106 tab_color_clear
+What is the best way to show the impact of this CLI command? Show the active tab retaining/returning to no custom color while the terminal transcript shows ok:true.
+COMMAND: $WARPCTRL --output-format json tab color clear --tab active
+STDOUT:
+{
+  "action": "tab.color.clear",
+  "instance_id": "inst_32569fb91d4d439fbde8772245df7727",
+  "ok": true,
+  "tab_id": "2751",
+  "window_id": "0"
+}
+
+STDERR:
+
+EXIT_CODE=0
+SUPPLEMENTAL 107 pane_rename
+What is the best way to show the impact of this CLI command? Show the active pane title changing to WarpCtrl Validation Pane while the terminal transcript shows ok:true.
+COMMAND: $WARPCTRL --output-format json pane rename --pane active WarpCtrl\ Validation\ Pane
+STDOUT:
+{
+  "action": "pane.rename",
+  "instance_id": "inst_32569fb91d4d439fbde8772245df7727",
+  "ok": true,
+  "pane_id": "Pane Pane Terminal (3125)",
+  "tab_id": "2751"
+}
+
+STDERR:
+
+EXIT_CODE=0
+SUPPLEMENTAL 108 pane_reset_name
+What is the best way to show the impact of this CLI command? Show the active pane title reverting to its default while the terminal transcript shows ok:true.
+COMMAND: $WARPCTRL --output-format json pane reset-name --pane active
+STDOUT:
+{
+  "action": "pane.reset_name",
+  "instance_id": "inst_32569fb91d4d439fbde8772245df7727",
+  "ok": true,
+  "pane_id": "Pane Pane Terminal (3125)",
+  "tab_id": "2751"
+}
+
+STDERR:
+
+EXIT_CODE=0
