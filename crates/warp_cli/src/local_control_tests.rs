@@ -46,6 +46,33 @@ fn parses_first_slice_instance_list() {
 fn parses_first_slice_app_smoke_metadata_commands() {
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "ping"]).is_ok());
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "version"]).is_ok());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "app", "active"]).is_ok());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "app", "focus"]).is_ok());
+}
+
+#[test]
+fn parses_catalog_metadata_commands() {
+    let args = ControlArgs::try_parse_from([
+        "warpctrl",
+        "action",
+        "inspect",
+        "surface.settings.open",
+    ])
+    .expect("action inspect parses");
+    let ControlCommand::Action(ActionCatalogCommand::Inspect { action }) = args.command else {
+        panic!("expected action inspect command");
+    };
+    assert_eq!(action, "surface.settings.open");
+    assert!(ControlArgs::try_parse_from(["warpctrl", "action", "list", "--stubs-only"]).is_ok());
+    assert!(ControlArgs::try_parse_from([
+        "warpctrl",
+        "capability",
+        "list",
+        "--implemented-only",
+    ])
+    .is_ok());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "capability", "inspect", "tab.create"])
+        .is_ok());
 }
 
 #[test]
@@ -119,11 +146,25 @@ fn parses_readonly_capability_and_target_commands() {
 }
 
 #[test]
+fn excluded_actions_are_not_allowlisted_catalog_entries() {
+    let args = ControlArgs::try_parse_from(["warpctrl", "action", "inspect", "auth.api_key.set"])
+        .expect("action inspect parses arbitrary action name");
+    let error = run_inner(args).expect_err("excluded auth api-key action is not allowlisted");
+    assert_eq!(error.code, ErrorCode::NotAllowlisted);
+    let args = ControlArgs::try_parse_from(["warpctrl", "action", "inspect", "file.write"])
+        .expect("action inspect parses arbitrary action name");
+    let error = run_inner(args).expect_err("excluded file mutation action is not allowlisted");
+    assert_eq!(error.code, ErrorCode::NotAllowlisted);
+}
+
+#[test]
 fn generated_bash_completions_include_readonly_commands() {
     let completions =
         generate_completion_string(Shell::Bash).expect("bash completions render to UTF-8");
     assert!(completions.contains("instance"));
+    assert!(completions.contains("action"));
     assert!(completions.contains("capability"));
+    assert!(completions.contains("stubs-only"));
     assert!(completions.contains("window"));
     assert!(completions.contains("block"));
     assert!(completions.contains("input"));

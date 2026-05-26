@@ -11,12 +11,11 @@ use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use clap_complete::aot::Shell;
 
 use commands::{
-    run_action_command, run_app_command, run_appearance_command, run_block_command,
-    run_capability_command,
-    run_drive_command, run_file_command, run_history_command, run_input_command,
-    run_instance_command, run_keybinding_command, run_pane_command, run_project_command,
-    run_session_command, run_setting_command, run_tab_command, run_theme_command,
-    run_window_command,
+    run_action_catalog_command, run_app_command, run_appearance_command, run_block_command,
+    run_capability_command, run_drive_command, run_file_command, run_history_command,
+    run_input_command, run_instance_command, run_keybinding_command, run_pane_command,
+    run_project_command, run_session_command, run_setting_command, run_tab_command,
+    run_theme_command, run_window_command,
 };
 use completions::generate_completions_to_stdout;
 use output::write_control_error;
@@ -43,6 +42,31 @@ pub struct ControlArgs {
     pub command: ControlCommand,
 }
 
+/// Commands that inspect the public action catalog.
+#[derive(Debug, Clone, Subcommand)]
+pub enum ActionCatalogCommand {
+    /// List allowlisted catalog actions with implementation status.
+    List(CatalogFilterArgs),
+
+    /// Inspect a single allowlisted catalog action.
+    Inspect {
+        /// Canonical action name, such as `tab.create` or `surface.settings.open`.
+        action: String,
+    },
+}
+
+/// Filters for local catalog and capability metadata commands.
+#[derive(Debug, Clone, Args, Default)]
+pub struct CatalogFilterArgs {
+    /// Show only actions with app-side handlers in this implementation slice.
+    #[arg(long = "implemented-only", conflicts_with = "stubs_only")]
+    pub implemented_only: bool,
+
+    /// Show only allowlisted catalog entries that currently return `unsupported_action`.
+    #[arg(long = "stubs-only")]
+    pub stubs_only: bool,
+}
+
 impl ControlArgs {
     pub fn from_env() -> Self {
         let matches = Self::clap_command().get_matches();
@@ -60,9 +84,13 @@ impl ControlArgs {
   <dim>$</dim> <bold>{bin_name} instance list</bold>
 
   <dim>$</dim> <bold>{bin_name} tab create</bold>
+  <dim>$</dim> <bold>{bin_name} action list --stubs-only</bold>
+
+  <dim>$</dim> <bold>{bin_name} action inspect surface.settings.open</bold>
 
 <bold><underline>Learn more:</underline></bold>
 * Use <bold>{bin_name} help</bold> to learn more about each command
+* Use <bold>{bin_name} action list</bold> to distinguish implemented commands from catalog stubs
 "#
             ))
     }
@@ -80,9 +108,9 @@ pub enum ControlCommand {
     /// Inspect local-control capabilities.
     #[command(subcommand)]
     Capability(CapabilityCommand),
-    /// Inspect the local-control action catalog.
+    /// Inspect public action metadata and implementation status.
     #[command(subcommand)]
-    Action(ActionCommand),
+    Action(ActionCatalogCommand),
 
     /// Inspect local Warp windows.
     #[command(subcommand)]
@@ -182,26 +210,22 @@ pub enum AppCommand {
 
     /// Print the active window/tab/pane/session chain.
     Active(TargetArgs),
+
+    /// Focus the selected local Warp app.
+    Focus(TargetArgs),
 }
 
+/// Commands that inspect public local-control capabilities.
 #[derive(Debug, Clone, Subcommand)]
 pub enum CapabilityCommand {
-    /// List implemented local-control capabilities.
-    List(TargetArgs),
+    /// List allowlisted local-control capabilities with implementation status.
+    List(CatalogFilterArgs),
 
-    /// Inspect one local-control capability.
-    #[command(alias = "get")]
-    Inspect(ActionInspectArgs),
-}
-
-#[derive(Debug, Clone, Subcommand)]
-pub enum ActionCommand {
-    /// List allowlisted local-control actions.
-    List(TargetArgs),
-
-    /// Inspect one allowlisted local-control action.
-    #[command(alias = "get")]
-    Inspect(ActionInspectArgs),
+    /// Inspect a single local-control capability by canonical action name.
+    Inspect {
+        /// Canonical action name, such as `tab.create` or `surface.settings.open`.
+        action: String,
+    },
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -645,7 +669,7 @@ fn run_inner(args: ControlArgs) -> Result<(), local_control::protocol::ControlEr
         ControlCommand::Instance(command) => run_instance_command(command, output_format),
         ControlCommand::App(command) => run_app_command(command, output_format),
         ControlCommand::Capability(command) => run_capability_command(command, output_format),
-        ControlCommand::Action(command) => run_action_command(command, output_format),
+        ControlCommand::Action(command) => run_action_catalog_command(command, output_format),
         ControlCommand::Window(command) => run_window_command(command, output_format),
         ControlCommand::Tab(command) => run_tab_command(command, output_format),
         ControlCommand::Pane(command) => run_pane_command(command, output_format),
