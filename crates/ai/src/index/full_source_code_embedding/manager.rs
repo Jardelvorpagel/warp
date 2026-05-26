@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use itertools::Itertools;
@@ -11,9 +11,9 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
         use chrono::Utc;
         use super::changed_files::ChangedFiles;
-        use crate::index::{is_git_internal_path, matches_gitignores};
-        use ignore::gitignore::Gitignore;
+        use crate::index::is_git_internal_path;
         use notify_debouncer_full::notify::{RecursiveMode, WatchFilter};
+        use repo_metadata::GitignoreRules;
         use warp_core::features::FeatureFlag;
         use watcher::{BulkFilesystemWatcher, BulkFilesystemWatcherEvent};
         use warpui::r#async::Timer;
@@ -832,7 +832,7 @@ impl CodebaseIndexManager {
     fn watch_path(
         &self,
         root_path: &Path,
-        gitignores: Arc<Vec<Gitignore>>,
+        gitignore_rules: Arc<Mutex<GitignoreRules>>,
         ctx: &mut ModelContext<Self>,
     ) {
         // The codebase indexer only cares about source files:
@@ -840,13 +840,13 @@ impl CodebaseIndexManager {
         // (including descendants of an ignored ancestor directory).
         // The same predicate gates both directory descent and event emission.
         let filter = Arc::new(move |path: &Path| {
-            !is_git_internal_path(path)
-                && !matches_gitignores(
-                    path,
-                    path.is_dir(),
-                    gitignores.as_slice(),
-                    true, /* check_ancestors */
-                )
+            if is_git_internal_path(path) {
+                return false;
+            }
+
+            gitignore_rules.lock().map_or(true, |mut rules| {
+                !rules.is_ignored(path, path.is_dir(), true)
+            })
         });
 
         let watch_filter = WatchFilter::with_filter(filter.clone(), filter);
@@ -1046,12 +1046,12 @@ impl CodebaseIndexManager {
                 })
             }
             #[cfg(feature = "local_fs")]
-            CodebaseIndexEvent::GitignoresUpdated {
+            CodebaseIndexEvent::GitignoreRulesUpdated {
                 repo_root_path,
-                gitignores,
+                gitignore_rules,
             } => {
                 self.unwatch_path(repo_root_path, ctx);
-                self.watch_path(repo_root_path, gitignores.clone(), ctx);
+                self.watch_path(repo_root_path, gitignore_rules.clone(), ctx);
             }
             CodebaseIndexEvent::LocalIndexBuilt { repo_root_path } => {
                 self.on_index_build_finished(repo_root_path, ctx);

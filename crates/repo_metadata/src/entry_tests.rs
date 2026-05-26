@@ -1,12 +1,10 @@
 use std::fs;
 use std::path::Path;
 
-use ignore::gitignore::Gitignore;
-
-use super::{Entry, GitignoreStack, IgnoredPathStrategy};
+use super::{Entry, GitignoreRules, IgnoredPathStrategy};
 
 #[test]
-fn gitignore_stack_truncates_sibling_scope() {
+fn gitignore_traversal_truncates_sibling_scope() {
     let tempdir = tempfile::tempdir().unwrap();
     let root = tempdir.path();
     let left = root.join("left");
@@ -16,20 +14,119 @@ fn gitignore_stack_truncates_sibling_scope() {
     fs::write(left.join(".gitignore"), "shared.txt\n").unwrap();
     fs::write(right.join(".gitignore"), "other.txt\n").unwrap();
 
-    let mut gitignore_stack = GitignoreStack::new(Vec::new());
-    let root_active_len = gitignore_stack.active_len();
+    let mut gitignore_rules = GitignoreRules::new(root);
+    let mut gitignore_traversal = gitignore_rules.traversal_for_path(root);
+    let root_active_len = gitignore_traversal.enter_directory(root);
 
-    let (left_gitignore, _) = Gitignore::new(left.join(".gitignore"));
-    gitignore_stack.push_active(left_gitignore);
-    assert!(gitignore_stack.matches(&left.join("shared.txt"), false, false));
+    let left_active_len = gitignore_traversal.enter_directory(&left);
+    assert!(gitignore_traversal.matches(&left.join("shared.txt"), false, false));
 
-    gitignore_stack.truncate_active(root_active_len);
-    assert!(!gitignore_stack.matches(&left.join("shared.txt"), false, false));
+    gitignore_traversal.truncate_active(left_active_len);
+    assert!(!gitignore_traversal.matches(&left.join("shared.txt"), false, false));
 
-    let (right_gitignore, _) = Gitignore::new(right.join(".gitignore"));
-    gitignore_stack.push_active(right_gitignore);
-    assert!(gitignore_stack.matches(&right.join("other.txt"), false, false));
-    assert!(!gitignore_stack.matches(&left.join("shared.txt"), false, false));
+    gitignore_traversal.enter_directory(&right);
+    assert!(gitignore_traversal.matches(&right.join("other.txt"), false, false));
+    assert!(!gitignore_traversal.matches(&left.join("shared.txt"), false, false));
+    gitignore_traversal.truncate_active(root_active_len);
+}
+
+#[test]
+fn gitignore_rules_repeated_lazy_loads_do_not_grow_matcher_count() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(tempdir.path()).unwrap();
+    let child = root.join("child");
+    fs::create_dir(&child).unwrap();
+    fs::write(child.join(".gitignore"), "ignored.txt\n").unwrap();
+    fs::write(child.join("ignored.txt"), "ignored").unwrap();
+
+    let mut gitignore_rules = GitignoreRules::new(&root);
+    for _ in 0..3 {
+        let mut files = Vec::new();
+        Entry::build_tree(
+            child.clone(),
+            &mut files,
+            &mut gitignore_rules,
+            None,
+            usize::MAX,
+            0,
+            &IgnoredPathStrategy::Exclude,
+        )
+        .unwrap();
+    }
+
+    assert_eq!(gitignore_rules.matcher_count(), 1);
+}
+
+#[test]
+fn gitignore_rules_refresh_changed_and_deleted_gitignore_files() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(tempdir.path()).unwrap();
+    let ignored = root.join("ignored.txt");
+    fs::write(root.join(".gitignore"), "ignored.txt\n").unwrap();
+    fs::write(&ignored, "ignored").unwrap();
+
+    let mut gitignore_rules = GitignoreRules::new(&root);
+    assert!(gitignore_rules.is_ignored(&ignored, false, false));
+
+    fs::write(root.join(".gitignore"), "other.txt\n").unwrap();
+    assert!(!gitignore_rules.is_ignored(&ignored, false, false));
+    assert!(gitignore_rules.is_ignored(&root.join("other.txt"), false, false));
+
+    fs::remove_file(root.join(".gitignore")).unwrap();
+    assert!(!gitignore_rules.is_ignored(&root.join("other.txt"), false, false));
+    assert_eq!(gitignore_rules.matcher_count(), 0);
+}
+
+#[test]
+fn gitignore_traversal_for_path_only_activates_ancestor_matchers() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(tempdir.path()).unwrap();
+    let left = root.join("left");
+    let right = root.join("right");
+    fs::create_dir(&left).unwrap();
+    fs::create_dir(&right).unwrap();
+    fs::write(left.join(".gitignore"), "shared.txt\n").unwrap();
+    fs::write(right.join(".gitignore"), "other.txt\n").unwrap();
+
+    let mut gitignore_rules = GitignoreRules::new(&root);
+    assert!(gitignore_rules.is_ignored(&left.join("shared.txt"), false, false));
+    let gitignore_traversal = gitignore_rules.traversal_for_path(&right);
+
+    assert!(gitignore_traversal.matches(&right.join("other.txt"), false, false));
+    assert!(!gitignore_traversal.matches(&left.join("shared.txt"), false, false));
+}
+
+#[test]
+fn build_tree_with_seeded_gitignores_does_not_apply_sibling_rules() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(tempdir.path()).unwrap();
+    let left = root.join("left");
+    let right = root.join("right");
+    fs::create_dir(&left).unwrap();
+    fs::create_dir(&right).unwrap();
+    fs::write(left.join(".gitignore"), "ignored.txt\n").unwrap();
+    fs::write(left.join("ignored.txt"), "left ignored").unwrap();
+    fs::write(right.join("ignored.txt"), "right visible").unwrap();
+
+    let mut gitignore_rules = GitignoreRules::new(&root);
+    assert!(gitignore_rules.is_ignored(&left.join("ignored.txt"), false, false));
+    let mut files = Vec::new();
+    Entry::build_tree(
+        right.clone(),
+        &mut files,
+        &mut gitignore_rules,
+        None,
+        usize::MAX,
+        0,
+        &IgnoredPathStrategy::Exclude,
+    )
+    .unwrap();
+
+    let file_paths: Vec<_> = files
+        .iter()
+        .map(|metadata| metadata.path.to_local_path_lossy())
+        .collect();
+    assert!(file_paths.contains(&right.join("ignored.txt")));
 }
 
 #[test]
@@ -45,11 +142,11 @@ fn build_tree_does_not_apply_sibling_gitignore_rules() {
     fs::write(right.join("ignored.txt"), "right visible").unwrap();
 
     let mut files = Vec::new();
-    let mut gitignores = Vec::new();
+    let mut gitignore_rules = GitignoreRules::new(&root);
     let entry = Entry::build_tree(
         root,
         &mut files,
-        &mut gitignores,
+        &mut gitignore_rules,
         None,
         usize::MAX,
         0,
@@ -64,7 +161,7 @@ fn build_tree_does_not_apply_sibling_gitignore_rules() {
         .collect();
     assert!(file_paths.contains(&right.join("ignored.txt")));
     assert!(!file_paths.contains(&left.join("ignored.txt")));
-    assert_eq!(gitignores.len(), 1);
+    assert_eq!(gitignore_rules.matcher_count(), 1);
 }
 
 #[test]

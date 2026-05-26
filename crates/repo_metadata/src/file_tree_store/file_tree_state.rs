@@ -2,11 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::sync::Arc;
 
-use ignore::gitignore::Gitignore;
 use warp_util::standardized_path::StandardizedPath;
 
 use crate::file_tree_store::{FileTreeDirectoryEntryState, FileTreeEntry, FileTreeEntryState};
-use crate::{BuildTreeError, DirectoryEntry, Entry};
+use crate::{BuildTreeError, DirectoryEntry, Entry, GitignoreRules};
 
 #[derive(Debug, Clone)]
 pub(super) struct FileTreeMapStore {
@@ -186,7 +185,7 @@ impl FileTreeMapStore {
     pub fn load_at_path(
         &mut self,
         path: &StandardizedPath,
-        gitignores: &mut Vec<Gitignore>,
+        gitignore_rules: &mut GitignoreRules,
     ) -> Result<(), BuildTreeError> {
         let child_path: Arc<StandardizedPath> = Arc::new(path.clone());
         let mut entry = Entry::Directory(DirectoryEntry {
@@ -196,7 +195,7 @@ impl FileTreeMapStore {
             loaded: true,
         });
 
-        entry.load(gitignores)?;
+        entry.load(gitignore_rules)?;
         self.insert_entry_at_path(child_path, entry);
         Ok(())
     }

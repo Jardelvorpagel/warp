@@ -2,11 +2,11 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use futures::executor::block_on;
-use repo_metadata::DirectoryWatcher;
+use repo_metadata::{DirectoryWatcher, GitignoreRules};
 use string_offset::ByteOffset;
 use virtual_fs::{Stub, VirtualFS};
 use warp_util::standardized_path::StandardizedPath;
@@ -42,6 +42,7 @@ impl CodebaseIndex {
                 )
                 .unwrap()
         });
+        let gitignore_rules = Arc::new(Mutex::new(GitignoreRules::new(&repo_path)));
 
         Self {
             repo_path,
@@ -57,7 +58,7 @@ impl CodebaseIndex {
             leaf_node_to_fragment_metadatas: LeafToFragmentMetadata::new_for_test(
                 fragment_metadata,
             ),
-            gitignores: Arc::new(vec![]),
+            gitignore_rules,
             tree_sync_state: TreeSourceSyncState::unsynced(),
             retrieval_requests: HashMap::new(),
             store_client: Arc::new(MockStoreClient {}),
@@ -708,14 +709,14 @@ fn test_diff_merkle_node_no_diffs() {
         let (tree, _) = block_on(MerkleTree::try_new(build_file_tree_result.file_tree)).unwrap();
 
         let mut changed_files = ChangedFiles::default();
-        let mut gitignores = vec![];
+        let mut gitignore_rules = GitignoreRules::new(&repo_path);
 
         // Diff with no changes
         let result = CodebaseIndex::diff_merkle_node(
             &mut changed_files,
             &tree.root_node(),
             repo_path.clone(),
-            &mut gitignores,
+            &mut gitignore_rules,
             None,
             MAX_DEPTH,
             0,
@@ -763,12 +764,12 @@ fn test_diff_merkle_node_new_file() {
 
         // Diff with new file
         let mut changed_files = ChangedFiles::default();
-        let mut gitignores = vec![];
+        let mut gitignore_rules = GitignoreRules::new(&repo_path);
         let result = CodebaseIndex::diff_merkle_node(
             &mut changed_files,
             &tree.root_node(),
             repo_path.clone(),
-            &mut gitignores,
+            &mut gitignore_rules,
             None,
             MAX_DEPTH,
             0,
@@ -814,12 +815,12 @@ fn test_diff_merkle_node_does_not_apply_sibling_gitignore_rules() {
             ]);
 
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -832,7 +833,7 @@ fn test_diff_merkle_node_does_not_apply_sibling_gitignore_rules() {
             assert!(!changed_files
                 .upsertions
                 .contains(&repo_path.join("left/new.txt")));
-            assert_eq!(gitignores.len(), 1);
+            assert_eq!(gitignore_rules.matcher_count(), 1);
         },
     );
 }
@@ -875,12 +876,12 @@ fn test_diff_merkle_node_new_empty_subdirectory() {
 
             // Diff with new subdirectory:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -934,12 +935,12 @@ fn test_diff_merkle_node_new_subdirectory_with_file() {
 
             // Diff with new subdirectory
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -988,12 +989,12 @@ fn test_diff_merkle_node_deleted_file() {
 
         // Diff with deleted foo:
         let mut changed_files = ChangedFiles::default();
-        let mut gitignores = vec![];
+        let mut gitignore_rules = GitignoreRules::new(&repo_path);
         let result = CodebaseIndex::diff_merkle_node(
             &mut changed_files,
             &tree.root_node(),
             repo_path.clone(),
-            &mut gitignores,
+            &mut gitignore_rules,
             None,
             MAX_DEPTH,
             0,
@@ -1041,12 +1042,12 @@ fn test_diff_merkle_node_deleted_empty_subdirectory() {
 
             // Diff with deleted subdirectory:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1098,12 +1099,12 @@ fn test_diff_merkle_node_deleted_subdirectory_with_file() {
 
             // Diff with deleted subdirectory:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1156,12 +1157,12 @@ fn test_diff_merkle_node_moved_file() {
 
         // Diff with renamed bar:
         let mut changed_files = ChangedFiles::default();
-        let mut gitignores = vec![];
+        let mut gitignore_rules = GitignoreRules::new(&repo_path);
         let result = CodebaseIndex::diff_merkle_node(
             &mut changed_files,
             &tree.root_node(),
             repo_path.clone(),
-            &mut gitignores,
+            &mut gitignore_rules,
             None,
             MAX_DEPTH,
             0,
@@ -1219,12 +1220,12 @@ fn test_diff_merkle_node_moved_subdirectory_with_file() {
 
             // Diff with renamed subdirectory:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1287,12 +1288,12 @@ fn test_diff_merkle_node_file_changed_to_empty_subdirectory() {
 
             // Diff with changed foo:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1356,12 +1357,12 @@ fn test_diff_merkle_node_file_changed_to_non_empty_subdirectory() {
 
             // Diff with changed foo:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1423,12 +1424,12 @@ fn test_diff_merkle_node_subdirectory_changed_to_file() {
 
             // Diff with changed subdir:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1491,12 +1492,12 @@ fn test_diff_merkle_node_file_content_changed() {
 
             // Diff with changed content:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1561,12 +1562,12 @@ fn test_diff_merkle_node_file_content_changed_but_file_size_unchanged() {
 
             // Diff with changed content:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1642,12 +1643,12 @@ fn test_diff_merkle_node_multiple_files_changed() {
 
             // Diff with multiple changed files:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1726,12 +1727,12 @@ fn test_diff_merkle_node_gitignore_file_changed() {
 
             // Diff with changed gitignore file:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1759,12 +1760,12 @@ fn test_diff_merkle_node_gitignore_file_changed() {
 
             // Diff with changed gitignore file:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1852,12 +1853,12 @@ fn test_diff_merkle_node_file_node_with_no_children() {
 
             // Diff with changed file:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -1976,12 +1977,12 @@ fn test_diff_merkle_node_file_node_with_fragment_children_with_children() {
 
             // Diff with changed file:
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 MAX_DEPTH,
                 0,
@@ -2029,12 +2030,12 @@ fn test_diff_merkle_node_max_depth_exceeded() {
 
             // Try diffing with max_depth set to 0 (should fail immediately)
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 0, // max_depth = 0
                 0, // current_depth = 0, when we recurse from root to its children, max depth check should fail
@@ -2084,12 +2085,12 @@ fn test_diff_merkle_node_max_depth_boundary() {
             // Use max_depth = 1 with current_depth = 0, so recursion to depth 1 succeeds
             // but further recursion to depth 2 would fail (if there were deeper directories)
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 1, // max_depth = 1 (allows root=0 and children=1)
                 0, // current_depth = 0 (root level)
@@ -2129,13 +2130,13 @@ fn test_diff_merkle_node_file_limit_exceeded() {
 
             // Try diffing with file quota set to 0 (should fail when processing files)
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let mut file_quota = 0usize;
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 Some(&mut file_quota),
                 MAX_DEPTH,
                 0,
@@ -2186,13 +2187,13 @@ fn test_diff_merkle_node_file_limit_boundary() {
 
             // Try diffing with file quota set to 2 (enough for both existing and new file operations)
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let mut file_quota = 2usize;
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 Some(&mut file_quota),
                 MAX_DEPTH,
                 0,
@@ -2259,12 +2260,12 @@ fn test_add_merkle_node_max_depth_exceeded() {
             // Diffing the merkle tree will cause it to try and recurse and add the deep directory
             // to the changed files but max depth check should fail.
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let result = CodebaseIndex::diff_merkle_node(
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 1, // max_depth = 1
                 0, // current_depth = 0 (root level)
@@ -2287,7 +2288,7 @@ fn test_add_merkle_node_max_depth_exceeded() {
                 &mut changed_files,
                 &tree.root_node(),
                 repo_path.clone(),
-                &mut gitignores,
+                &mut gitignore_rules,
                 None,
                 4,
                 0,
@@ -2336,12 +2337,12 @@ fn test_add_merkle_node_file_limit_exceeded() {
 
             // Try adding the directory with file quota set to 1 (should fail after processing 1 file)
             let mut changed_files = ChangedFiles::default();
-            let mut gitignores = vec![];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
             let mut file_quota = 1usize;
             let result = CodebaseIndex::add_merkle_node(
                 &mut changed_files,
                 &dir_path,
-                &mut gitignores,
+                &mut gitignore_rules,
                 Some(&mut file_quota),
                 MAX_DEPTH,
                 0,

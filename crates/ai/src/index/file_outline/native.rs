@@ -5,10 +5,9 @@ use std::path::Path;
 use anyhow::anyhow;
 use arborium::tree_sitter::{Parser, Query, QueryCursor, Tree};
 use futures::channel::oneshot;
-use ignore::gitignore::Gitignore;
 use itertools::Itertools;
 use rayon::prelude::*;
-use repo_metadata::entry::{is_file_parsable, IgnoredPathStrategy};
+use repo_metadata::entry::{gitignore_rules_for_directory, is_file_parsable, IgnoredPathStrategy};
 use repo_metadata::RepositoryUpdate;
 use streaming_iterator::StreamingIterator;
 use syntax_tree::TextSlice;
@@ -17,12 +16,6 @@ use warp_util::standardized_path::StandardizedPath;
 use crate::index::file_outline::{FileOutline, Outline, Symbol};
 use crate::index::{Entry, FileId, FileMetadata, THREADPOOL};
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "local_fs")] {
-        use crate::index::matches_gitignores;
-    }
-}
-
 /// Given a repo path, try to build its outline. An outline is a list of all its files and the symbols
 /// of interest from each file.
 pub async fn build_outline(
@@ -30,19 +23,7 @@ pub async fn build_outline(
     max_num_files_limit: Option<usize>,
 ) -> anyhow::Result<Outline> {
     const MAX_DEPTH: usize = 200;
-    let mut gitignores = vec![];
-
-    // Add global gitignore, if it exists
-    let (global_gitignore, _) = Gitignore::global();
-    if !global_gitignore.is_empty() {
-        gitignores.push(global_gitignore);
-    }
-
-    let gitignore_path = path.join(".gitignore");
-    if gitignore_path.exists() {
-        let (gitignore, _) = Gitignore::new(gitignore_path);
-        gitignores.push(gitignore);
-    }
+    let mut gitignore_rules = gitignore_rules_for_directory(path);
 
     // First traverse the repo path to retrieve all files we want to parse.
     let mut files = Vec::new();
@@ -50,7 +31,7 @@ pub async fn build_outline(
     let entry = Entry::build_tree(
         path,
         &mut files,
-        &mut gitignores,
+        &mut gitignore_rules,
         remaining_file_quotas.as_mut(),
         MAX_DEPTH,
         0,
@@ -88,7 +69,7 @@ pub async fn build_outline(
     Ok(Outline {
         root: entry,
         file_id_to_outline,
-        gitignores,
+        gitignore_rules,
     })
 }
 
@@ -167,10 +148,9 @@ impl Outline {
                 // At the end of the iteration we'll have reached the target path.
                 let mut current_parent = directory;
                 for ancestor in ancestors_between_target_and_directory.iter().rev() {
-                    if matches_gitignores(
+                    if self.gitignore_rules.is_ignored(
                         ancestor,
                         ancestor.is_dir(),
-                        &self.gitignores,
                         false, /* check_ancestors */
                     ) || ancestor.ends_with(".git")
                     {

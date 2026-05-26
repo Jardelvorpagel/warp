@@ -22,10 +22,10 @@ pub enum RepoContent<'a> {
 
 use warp_util::standardized_path::StandardizedPath;
 
-use crate::entry::{BuildTreeError, Entry, FileId, IgnoredPathStrategy};
+use crate::entry::{BuildTreeError, Entry, FileId, GitignoreRules, IgnoredPathStrategy};
 use crate::repository::Repository;
 use crate::telemetry::RepoMetadataTelemetryEvent;
-use crate::{gitignores_for_directory, matches_gitignores, RepoMetadataError};
+use crate::{gitignore_rules_for_directory, RepoMetadataError};
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
         use notify_debouncer_full::notify::RecursiveMode;
@@ -39,7 +39,6 @@ cfg_if::cfg_if! {
     }
 }
 
-use ignore::gitignore::Gitignore;
 use warpui::ModelContext;
 
 use crate::file_tree_store::{
@@ -312,21 +311,20 @@ impl LocalRepoMetadataModel {
         for (repo_path, repo_scoped_update) in repo_updates {
             if let Some(IndexedRepoState::Indexed(state)) = self.repositories.get_mut(&repo_path) {
                 let repo_path_clone = repo_path.clone();
-                let gitignores_clone = state.gitignores.clone();
+                let gitignore_rules = state.gitignore_rules.clone();
                 let lazy_load = self.lazy_loaded_paths.contains_key(&repo_path);
                 ctx.spawn(
                     async move {
-                        let mutations = Self::compute_file_tree_mutations(
-                            &repo_scoped_update,
-                            &gitignores_clone,
-                        )
-                        .await;
-                        (mutations, repo_path_clone, lazy_load)
+                        let (mutations, gitignore_rules) =
+                            Self::compute_file_tree_mutations(&repo_scoped_update, gitignore_rules)
+                                .await;
+                        (mutations, gitignore_rules, repo_path_clone, lazy_load)
                     },
-                    |model, (mutations, repo_path, lazy_load), ctx| {
+                    |model, (mutations, gitignore_rules, repo_path, lazy_load), ctx| {
                         if let Some(IndexedRepoState::Indexed(state)) =
                             model.repositories.get_mut(&repo_path)
                         {
+                            state.gitignore_rules = gitignore_rules;
                             let update = Self::apply_file_tree_mutations(
                                 &mut state.entry,
                                 mutations,
@@ -511,11 +509,12 @@ impl LocalRepoMetadataModel {
 
         // Build first-level-only tree.
         let mut files = Vec::new();
+        let mut gitignore_rules = GitignoreRules::for_directory(&local_path);
         let mut file_limit = MAX_FILES_PER_REPO;
         let root_entry = Entry::build_tree(
             &local_path,
             &mut files,
-            &mut vec![],
+            &mut gitignore_rules,
             Some(&mut file_limit),
             1, // max_depth — only first level
             0,
@@ -523,7 +522,7 @@ impl LocalRepoMetadataModel {
         )
         .map_err(RepoMetadataError::BuildTree)?;
 
-        let state = FileTreeState::new_lazy_loaded(root_entry);
+        let state = FileTreeState::new(root_entry, gitignore_rules, None);
         self.add_repository_internal(path.clone(), state, ctx)?;
         self.lazy_loaded_paths.insert(path.clone(), 1);
         Ok(())
@@ -561,10 +560,9 @@ impl LocalRepoMetadataModel {
             return Err(RepoMetadataError::RepoNotFound(repo_root.to_string()));
         };
 
-        let mut gitignores = state.gitignores.clone();
         state
             .entry
-            .load_at_path(dir_path, &mut gitignores)
+            .load_at_path(dir_path, &mut state.gitignore_rules)
             .map_err(RepoMetadataError::BuildTree)?;
 
         ctx.emit(RepositoryMetadataEvent::FileTreeEntryUpdated {
@@ -588,8 +586,8 @@ impl LocalRepoMetadataModel {
     /// be applied to the tree on the main thread without cloning it.
     async fn compute_file_tree_mutations(
         update: &RepoUpdate,
-        gitignores: &[Gitignore],
-    ) -> Vec<FileTreeMutation> {
+        mut gitignore_rules: GitignoreRules,
+    ) -> (Vec<FileTreeMutation>, GitignoreRules) {
         let mut mutations = Vec::new();
 
         // Removals for deleted and moved-from paths
@@ -603,16 +601,15 @@ impl LocalRepoMetadataModel {
                 continue;
             }
 
-            let is_ignored = Self::path_is_ignored(path_to_add, gitignores);
+            let is_ignored = Self::path_is_ignored(path_to_add, &mut gitignore_rules);
 
             if path_to_add.is_dir() {
                 let mut files = Vec::new();
-                let mut gitignores = gitignores.to_owned();
                 let mut file_limit = MAX_FILES_PER_REPO;
                 match Entry::build_tree_with_ignored_ancestor(
                     path_to_add,
                     &mut files,
-                    &mut gitignores,
+                    &mut gitignore_rules,
                     Some(&mut file_limit),
                     MAX_TREE_DEPTH,
                     0,
@@ -645,7 +642,7 @@ impl LocalRepoMetadataModel {
             }
         }
 
-        mutations
+        (mutations, gitignore_rules)
     }
 
     /// Phase 2: Applies pre-computed mutations to the file tree on the main thread.
@@ -817,7 +814,7 @@ impl LocalRepoMetadataModel {
     }
 
     /// Checks if a path matches any of the gitignore patterns
-    fn path_is_ignored(path: &Path, gitignores: &[Gitignore]) -> bool {
+    fn path_is_ignored(path: &Path, gitignore_rules: &mut GitignoreRules) -> bool {
         // Check if any component of the path is .git
         if path
             .components()
@@ -828,7 +825,7 @@ impl LocalRepoMetadataModel {
 
         // Check if path matches any gitignore patterns
         let is_dir = path.is_dir();
-        matches_gitignores(path, is_dir, gitignores, true)
+        gitignore_rules.is_ignored(path, is_dir, true)
     }
 
     /// Indexes a repository from the given repository handle.
@@ -886,7 +883,7 @@ impl LocalRepoMetadataModel {
         }
 
         // Collect gitignore files from the repository
-        let gitignores = gitignores_for_directory(&local_path);
+        let gitignore_rules = gitignore_rules_for_directory(&local_path);
 
         // Mark the repository as pending to prevent duplicate work
         self.replace_repository_state(std_path.clone(), IndexedRepoState::pending());
@@ -896,7 +893,7 @@ impl LocalRepoMetadataModel {
 
         // Build the complete file tree for the repository asynchronously
         let repo_path_for_build = local_path;
-        let gitignores_for_build = gitignores.clone();
+        let gitignore_rules_for_build = gitignore_rules.clone();
         let repo_path_str_for_log = std_path.to_string();
         let std_path_for_completion = std_path;
         let repository_handle_for_completion = repository_handle.clone();
@@ -904,18 +901,18 @@ impl LocalRepoMetadataModel {
         ctx.spawn(
             async move {
                 let mut files: Vec<crate::entry::FileMetadata> = Vec::new();
-                let mut gitignores_for_build = gitignores_for_build;
+                let mut gitignore_rules_for_build = gitignore_rules_for_build;
                 // Snapshot the initial gitignores so we can retry from a clean
                 // state if the full-depth build is partially populated before
                 // it hits the file limit.
-                let initial_gitignores = gitignores_for_build.clone();
+                let initial_gitignore_rules = gitignore_rules_for_build.clone();
 
                 let mut file_limit = MAX_FILES_PER_REPO;
 
                 let mut build_result = Entry::build_tree(
                     &repo_path_for_build,
                     &mut files,
-                    &mut gitignores_for_build,
+                    &mut gitignore_rules_for_build,
                     Some(&mut file_limit),
                     MAX_TREE_DEPTH,        // max_depth
                     0,                 // current_depth
@@ -933,11 +930,11 @@ impl LocalRepoMetadataModel {
                 let mut indexed_with_limit = false;
                 if matches!(build_result, Err(BuildTreeError::ExceededMaxFileLimit)) {
                     files.clear();
-                    gitignores_for_build = initial_gitignores;
+                    gitignore_rules_for_build = initial_gitignore_rules;
                     build_result = Entry::build_tree(
                         &repo_path_for_build,
                         &mut files,
-                        &mut gitignores_for_build,
+                        &mut gitignore_rules_for_build,
                         None,
                         1, // max_depth — only first level
                         0,
@@ -951,7 +948,7 @@ impl LocalRepoMetadataModel {
                 (
                     build_result,
                     files,
-                    gitignores_for_build,
+                    gitignore_rules_for_build,
                     repo_path_str_for_log,
                     std_path_for_completion,
                     repository_handle_for_completion,
@@ -962,7 +959,7 @@ impl LocalRepoMetadataModel {
                   (
                       build_result,
                       files,
-                      gitignores_for_build,
+                      gitignore_rules_for_build,
                       repo_path_str,
                       std_repo_path,
                       repository_handle,
@@ -972,7 +969,7 @@ impl LocalRepoMetadataModel {
                 match build_result {
                     Ok(root_entry) => {
                         let state =
-                            FileTreeState::new(root_entry, gitignores_for_build, Some(repository_handle));
+                            FileTreeState::new(root_entry, gitignore_rules_for_build, Some(repository_handle));
 
                         if let Err(e) =
                             model.add_repository_internal(std_repo_path.clone(), state, ctx)

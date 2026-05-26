@@ -12,7 +12,6 @@ mod tests {
 
     use futures::channel::oneshot;
     use futures::executor::block_on;
-    use ignore::gitignore::Gitignore;
     use virtual_fs::{Stub, VirtualFS};
     use warp_util::standardized_path::StandardizedPath;
     use warpui::r#async::FutureExt as _;
@@ -20,6 +19,7 @@ mod tests {
 
     use crate::entry::{DirectoryEntry, Entry, FileMetadata};
     use crate::file_tree_store::{FileTreeEntry, FileTreeEntryState, FileTreeState};
+    use crate::gitignore_stack::GitignoreRules;
     use crate::local_model::{
         GetContentsArgs, IndexedRepoState, LocalRepoMetadataModel, RepoUpdate,
         RepositoryMetadataEvent,
@@ -47,7 +47,11 @@ mod tests {
             ignored: false,
             loaded: true,
         });
-        FileTreeState::new(root, Vec::new(), None)
+        FileTreeState::new(
+            root,
+            GitignoreRules::new(repo_path.to_local_path_lossy()),
+            None,
+        )
     }
 
     #[test]
@@ -243,8 +247,6 @@ mod tests {
                 loaded: true,
             });
 
-            let (gitignore, _) = Gitignore::new(test_repo.join(".gitignore"));
-
             App::test((), |mut app| async move {
                 // Create RepoWatcher and get Repository handle through it
                 let repo_watcher = app.add_singleton_model(DirectoryWatcher::new);
@@ -256,7 +258,8 @@ mod tests {
                         )
                         .unwrap()
                 });
-                let state = FileTreeState::new(root, vec![gitignore], Some(repo_handle));
+                let state =
+                    FileTreeState::new(root, GitignoreRules::new(&test_repo), Some(repo_handle));
 
                 let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
 
@@ -534,8 +537,6 @@ mod tests {
                 loaded: true,
             });
 
-            let (gitignore, _) = Gitignore::new(test_repo.join(".gitignore"));
-
             App::test((), |mut app| async move {
                 let repo_watcher = app.add_singleton_model(DirectoryWatcher::new);
                 let repo_handle = repo_watcher.update(&mut app, |repo_watcher, ctx| {
@@ -546,7 +547,8 @@ mod tests {
                         )
                         .unwrap()
                 });
-                let state = FileTreeState::new(root, vec![gitignore], Some(repo_handle));
+                let state =
+                    FileTreeState::new(root, GitignoreRules::new(&test_repo), Some(repo_handle));
 
                 let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
 
@@ -650,11 +652,7 @@ mod tests {
                     Stub::FileWithContent(".gitignore", "*.log\n/target/\nnode_modules/\n.env"),
                 ]);
 
-            let gitignore_path = repo_path.join(".gitignore");
-
-            // Create the gitignore object
-            let (gitignore, _) = Gitignore::new(&gitignore_path);
-            let gitignores = vec![gitignore];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
 
             // Test files that should be excluded
             let excluded_paths = vec![
@@ -669,7 +667,7 @@ mod tests {
 
             for path in excluded_paths {
                 assert!(
-                    LocalRepoMetadataModel::path_is_ignored(&path, &gitignores),
+                    LocalRepoMetadataModel::path_is_ignored(&path, &mut gitignore_rules),
                     "Path should be excluded by gitignore: {path:?}"
                 );
             }
@@ -684,7 +682,7 @@ mod tests {
 
             for path in included_paths {
                 assert!(
-                    !LocalRepoMetadataModel::path_is_ignored(&path, &gitignores),
+                    !LocalRepoMetadataModel::path_is_ignored(&path, &mut gitignore_rules),
                     "Path should be included: {path:?}"
                 );
             }
@@ -706,9 +704,7 @@ mod tests {
                 ])
                 .mkdir("target");
 
-            let gitignore_path = repo_path.join(".gitignore");
-            let (gitignore, _) = Gitignore::new(&gitignore_path);
-            let gitignores = vec![gitignore];
+            let gitignore_rules = GitignoreRules::new(&repo_path);
 
             // Create an initial file tree
             let root_entry = Entry::Directory(DirectoryEntry {
@@ -740,9 +736,9 @@ mod tests {
             };
 
             // Compute mutations on the "background thread" then apply on the "main thread".
-            let mutations = block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
+            let (mutations, _) = block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
                 &update,
-                &gitignores,
+                gitignore_rules,
             ));
             LocalRepoMetadataModel::apply_file_tree_mutations(&mut root, mutations, false, false);
 
@@ -844,10 +840,7 @@ Thumbs.db
                 Stub::FileWithContent(".gitignore", gitignore_content),
             ]);
 
-            let gitignore_path = repo_path.join(".gitignore");
-
-            let (gitignore, _) = Gitignore::new(&gitignore_path);
-            let gitignores = vec![gitignore];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
 
             // Test various patterns
             let test_cases = vec![
@@ -880,7 +873,7 @@ Thumbs.db
             ];
 
             for (path, should_include) in test_cases {
-                let actual = !LocalRepoMetadataModel::path_is_ignored(&path, &gitignores);
+                let actual = !LocalRepoMetadataModel::path_is_ignored(&path, &mut gitignore_rules);
                 assert_eq!(
                     actual, should_include,
                     "Path {path:?} - expected: {should_include}, actual: {actual}"
@@ -901,26 +894,26 @@ Thumbs.db
                 Stub::FileWithContent("src/main.rs", "rust"),
             ]);
 
-            let gitignores = vec![]; // Empty gitignore rules
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
 
             // .git directory and its contents should be excluded
             assert!(LocalRepoMetadataModel::path_is_ignored(
                 &repo_path.join(".git"),
-                &gitignores
+                &mut gitignore_rules
             ));
             assert!(LocalRepoMetadataModel::path_is_ignored(
                 &repo_path.join(".git").join("config"),
-                &gitignores
+                &mut gitignore_rules
             ));
             assert!(LocalRepoMetadataModel::path_is_ignored(
                 &repo_path.join(".git").join("objects").join("abc123"),
-                &gitignores
+                &mut gitignore_rules
             ));
 
             // Regular files should be included
             assert!(!LocalRepoMetadataModel::path_is_ignored(
                 &repo_path.join("src").join("main.rs"),
-                &gitignores
+                &mut gitignore_rules
             ));
         });
     }
@@ -942,26 +935,20 @@ Thumbs.db
                     Stub::FileWithContent("frontend/.gitignore", "!dist/important.js"),
                 ]);
 
-            // Create gitignore objects
-            let root_gitignore_path = repo_path.join(".gitignore");
-            let frontend_gitignore_path = repo_path.join("frontend").join(".gitignore");
-
-            let (root_gitignore, _) = Gitignore::new(&root_gitignore_path);
-            let (frontend_gitignore, _) = Gitignore::new(&frontend_gitignore_path);
-            let gitignores = vec![root_gitignore, frontend_gitignore];
+            let mut gitignore_rules = GitignoreRules::new(&repo_path);
 
             // Test that nested gitignore rules are respected
             assert!(LocalRepoMetadataModel::path_is_ignored(
                 &repo_path.join("frontend").join("dist").join("bundle.js"),
-                &gitignores
+                &mut gitignore_rules
             ));
             assert!(LocalRepoMetadataModel::path_is_ignored(
                 &repo_path.join("backend").join("target").join("binary"),
-                &gitignores
+                &mut gitignore_rules
             ));
             assert!(!LocalRepoMetadataModel::path_is_ignored(
                 &repo_path.join("frontend").join("src").join("main.ts"),
-                &gitignores
+                &mut gitignore_rules
             ));
         });
     }
@@ -1323,7 +1310,6 @@ Thumbs.db
                         loaded: true,
                     });
 
-                    let (gitignore, _) = Gitignore::new(real_repo.join(".gitignore"));
                     let repo_handle = repo_watcher.update(&mut app, |repo_watcher, ctx| {
                         repo_watcher
                             .add_directory(
@@ -1332,7 +1318,11 @@ Thumbs.db
                             )
                             .unwrap()
                     });
-                    let state = FileTreeState::new(root, vec![gitignore], Some(repo_handle));
+                    let state = FileTreeState::new(
+                        root,
+                        GitignoreRules::new(&real_repo),
+                        Some(repo_handle),
+                    );
 
                     // Test adding repository using different path representations
                     model_handle.update(&mut app, |model, ctx| {

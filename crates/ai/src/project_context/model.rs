@@ -13,8 +13,7 @@ use super::GlobalRules;
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
         use async_channel::Sender;
-        use ignore::gitignore::Gitignore;
-        use repo_metadata::entry::{Entry, FileMetadata};
+        use repo_metadata::entry::{gitignore_rules_for_directory, Entry, FileMetadata};
         use repo_metadata::repository::RepositorySubscriber;
         use repo_metadata::{DirectoryWatcher, Repository, RepositoryUpdate};
 
@@ -676,7 +675,7 @@ impl ProjectContextModel {
 
         // Use build_tree to collect all files, then filter for rule files
         let mut files = Vec::<FileMetadata>::new();
-        let mut gitignores = Vec::<Gitignore>::new();
+        let mut gitignore_rules = gitignore_rules_for_directory(dir_path);
 
         // Collect patterns that should not be ignored
         let override_ignore_patterns: Vec<String> =
@@ -689,7 +688,7 @@ impl ProjectContextModel {
         let _ = Entry::build_tree(
             dir_path,
             &mut files,
-            &mut gitignores,
+            &mut gitignore_rules,
             Some(&mut file_limit),
             MAX_SCAN_DEPTH,
             0,

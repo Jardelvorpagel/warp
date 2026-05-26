@@ -13,7 +13,7 @@ use thiserror::Error;
 use warp_util::standardized_path::StandardizedPath;
 
 use crate::gitignore_stack::gitignore_matches_path;
-pub use crate::gitignore_stack::GitignoreStack;
+pub use crate::gitignore_stack::{GitignoreRules, GitignoreTraversal};
 
 /// Maximum file size allowed for treesitter parsing (3MB).
 const MAX_FILE_SIZE: usize = 3 * 1000 * 1000;
@@ -98,7 +98,7 @@ impl Entry {
     pub fn build_tree(
         path: impl Into<PathBuf>,
         files: &mut Vec<FileMetadata>,
-        gitignores: &mut Vec<Gitignore>,
+        gitignore_rules: &mut GitignoreRules,
         remaining_file_quota: Option<&mut usize>,
         max_depth: usize,
         current_depth: usize,
@@ -107,7 +107,7 @@ impl Entry {
         Self::build_tree_with_ignored_ancestor(
             path,
             files,
-            gitignores,
+            gitignore_rules,
             remaining_file_quota,
             max_depth,
             current_depth,
@@ -120,25 +120,25 @@ impl Entry {
     pub(crate) fn build_tree_with_ignored_ancestor(
         path: impl Into<PathBuf>,
         files: &mut Vec<FileMetadata>,
-        gitignores: &mut Vec<Gitignore>,
+        gitignore_rules: &mut GitignoreRules,
         remaining_file_quota: Option<&mut usize>,
         max_depth: usize,
         current_depth: usize,
         ignored_path_strategy: &IgnoredPathStrategy,
         ancestor_is_ignored: bool,
     ) -> Result<Self, BuildTreeError> {
-        let mut gitignore_stack = GitignoreStack::new(std::mem::take(gitignores));
+        let path = path.into();
+        let mut gitignore_traversal = gitignore_rules.traversal_for_path(&path);
         let result = Self::build_tree_inner(
             path,
             files,
-            &mut gitignore_stack,
+            &mut gitignore_traversal,
             remaining_file_quota,
             max_depth,
             current_depth,
             ignored_path_strategy,
             ancestor_is_ignored,
         );
-        *gitignores = gitignore_stack.into_gitignores();
         result
     }
 
@@ -146,7 +146,7 @@ impl Entry {
     fn build_tree_inner(
         path: impl Into<PathBuf>,
         files: &mut Vec<FileMetadata>,
-        gitignore_stack: &mut GitignoreStack,
+        gitignore_traversal: &mut GitignoreTraversal<'_>,
         mut remaining_file_quota: Option<&mut usize>,
         max_depth: usize,
         current_depth: usize,
@@ -160,17 +160,11 @@ impl Entry {
         if curr_path.is_symlink() && is_dir {
             return Err(BuildTreeError::Symlink);
         }
-        let active_len = gitignore_stack.active_len();
-
-        let gitignore_path = curr_path.join(".gitignore");
-        if gitignore_path.exists() {
-            let (gitignore, _) = Gitignore::new(gitignore_path);
-            gitignore_stack.push_active(gitignore);
-        }
+        let active_len = is_dir.then(|| gitignore_traversal.enter_directory(&curr_path));
 
         let result = (|| {
             let path_is_ignored = ancestor_is_ignored
-                || gitignore_stack.matches(&curr_path, is_dir, true /* check_ancestors */)
+                || gitignore_traversal.matches(&curr_path, is_dir, true /* check_ancestors */)
                 || is_git_internal_path(&curr_path);
 
             // If we've reached the max depth, force lazy-loading even of non-ignored folders.
@@ -238,7 +232,7 @@ impl Entry {
                                 match Entry::build_tree_inner(
                                     canonical_path,
                                     files,
-                                    gitignore_stack,
+                                    gitignore_traversal,
                                     remaining_file_quota.as_deref_mut(),
                                     max_depth,
                                     current_depth + 1,
@@ -283,7 +277,9 @@ impl Entry {
             }
         })();
 
-        gitignore_stack.truncate_active(active_len);
+        if let Some(active_len) = active_len {
+            gitignore_traversal.truncate_active(active_len);
+        }
         result
     }
 
@@ -315,7 +311,7 @@ impl Entry {
     }
 
     /// Loads an unloaded directory
-    pub fn load(&mut self, gitignores: &mut Vec<Gitignore>) -> Result<(), BuildTreeError> {
+    pub fn load(&mut self, gitignore_rules: &mut GitignoreRules) -> Result<(), BuildTreeError> {
         // TODO: Consider a similar `unload` method if we run into performance issues.
         let Self::Directory(directory) = self else {
             return Ok(());
@@ -327,7 +323,7 @@ impl Entry {
         let result = Entry::build_tree_with_ignored_ancestor(
             directory.path.to_local_path_lossy(),
             &mut files,
-            gitignores,
+            gitignore_rules,
             Some(&mut remaining_file_quota),
             1, /* max_depth */
             0, /* current_depth */
@@ -638,18 +634,8 @@ pub fn is_file_parsable(path: &Path) -> Result<bool, io::Error> {
     std::fs::metadata(path).map(|metadata| (metadata.len() as usize) < MAX_FILE_SIZE)
 }
 
-pub fn gitignores_for_directory(directory_path: &Path) -> Vec<Gitignore> {
-    let mut gitignores = Vec::new();
-    let gitignore_path = directory_path.join(".gitignore");
-    if gitignore_path.exists() {
-        let (gitignore, _) = Gitignore::new(&gitignore_path);
-        gitignores.push(gitignore);
-    }
-    let (global_gitignore, _) = Gitignore::global();
-    if !global_gitignore.is_empty() {
-        gitignores.push(global_gitignore);
-    }
-    gitignores
+pub fn gitignore_rules_for_directory(directory_path: &Path) -> GitignoreRules {
+    GitignoreRules::for_directory(directory_path)
 }
 
 #[derive(Debug, Clone)]

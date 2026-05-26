@@ -1,13 +1,13 @@
 mod file_tree_state;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use ignore::gitignore::Gitignore;
 use warp_util::standardized_path::StandardizedPath;
 use warpui::ModelHandle;
 
 use crate::file_tree_store::file_tree_state::FileTreeMapStore;
-use crate::{BuildTreeError, Entry, FileId, FileMetadata, Repository};
+use crate::{BuildTreeError, Entry, FileId, FileMetadata, GitignoreRules, Repository};
 
 #[derive(Debug, Clone)]
 pub struct FileTreeEntry {
@@ -46,9 +46,9 @@ impl FileTreeEntry {
     pub fn load_at_path(
         &mut self,
         path: &StandardizedPath,
-        gitignores: &mut Vec<Gitignore>,
+        gitignore_rules: &mut GitignoreRules,
     ) -> Result<(), BuildTreeError> {
-        self.state_map.load_at_path(path, gitignores)
+        self.state_map.load_at_path(path, gitignore_rules)
     }
 
     pub fn insert_entry_at_path(&mut self, path: Arc<StandardizedPath>, entry: Entry) {
@@ -356,7 +356,7 @@ pub struct FileTreeState {
     /// The entry representing the file tree structure.
     pub entry: FileTreeEntry,
     /// Gitignore rules applicable to this repository.
-    pub gitignores: Vec<Gitignore>,
+    pub gitignore_rules: GitignoreRules,
 
     /// Handle to the backing repository (None for lazily-loaded standalone paths).
     #[expect(unused)]
@@ -367,21 +367,22 @@ impl FileTreeState {
     /// Creates a new FileTreeState.
     pub fn new(
         entry: Entry,
-        gitignores: Vec<Gitignore>,
+        gitignore_rules: GitignoreRules,
         repository: Option<ModelHandle<Repository>>,
     ) -> Self {
         Self {
             entry: entry.into(),
-            gitignores,
+            gitignore_rules,
             repository,
         }
     }
 
     /// Creates a new FileTreeState for a lazily-loaded standalone path.
     pub fn new_lazy_loaded(entry: Entry) -> Self {
+        let rule_root = entry_path_for_rules(&entry);
         Self {
             entry: entry.into(),
-            gitignores: vec![],
+            gitignore_rules: GitignoreRules::new(rule_root),
             repository: None,
         }
     }
@@ -393,10 +394,14 @@ impl FileTreeState {
     pub fn from_file_tree_entry(entry: FileTreeEntry) -> Self {
         Self {
             entry,
-            gitignores: vec![],
+            gitignore_rules: GitignoreRules::new(PathBuf::new()),
             repository: None,
         }
     }
+}
+
+fn entry_path_for_rules(entry: &Entry) -> PathBuf {
+    entry.path().to_local_path_lossy()
 }
 
 #[cfg(test)]

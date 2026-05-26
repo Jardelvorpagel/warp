@@ -493,7 +493,7 @@ impl DirectoryWatcher {
                             if let Some(repo_handle) = self.find_containing_directory(&standardized)
                             {
                                 let is_ignored = repo_handle
-                                    .read(ctx, |repo, _| repo.check_gitignore_status(path));
+                                    .update(ctx, |repo, _| repo.check_gitignore_status(path));
                                 let target_file = TargetFile::new(path.to_path_buf(), is_ignored);
                                 let repo_update = repo_updates.entry(repo_handle).or_default();
                                 insert(repo_update, target_file);
@@ -534,8 +534,8 @@ impl DirectoryWatcher {
                     {
                         if let Some(repo_handle) = self.find_containing_directory(&standardized) {
                             // Gitignore checking is pattern-based and doesn't require file existence
-                            let is_ignored =
-                                repo_handle.read(ctx, |repo, _| repo.check_gitignore_status(path));
+                            let is_ignored = repo_handle
+                                .update(ctx, |repo, _| repo.check_gitignore_status(path));
                             let target_file = TargetFile::new(path.to_path_buf(), is_ignored);
                             let repo_update = repo_updates.entry(repo_handle).or_default();
                             repo_update.deleted.insert(target_file);
@@ -570,9 +570,9 @@ impl DirectoryWatcher {
             {
                 if let Some(repo_handle) = self.find_containing_directory(&standardized) {
                     let to_is_ignored =
-                        repo_handle.read(ctx, |repo, _| repo.check_gitignore_status(to_path));
+                        repo_handle.update(ctx, |repo, _| repo.check_gitignore_status(to_path));
                     let from_is_ignored =
-                        repo_handle.read(ctx, |repo, _| repo.check_gitignore_status(from_path));
+                        repo_handle.update(ctx, |repo, _| repo.check_gitignore_status(from_path));
                     let to_target = TargetFile::new(to_path.to_path_buf(), to_is_ignored);
                     let from_target = TargetFile::new(from_path.to_path_buf(), from_is_ignored);
                     let repo_update = repo_updates.entry(repo_handle).or_default();
