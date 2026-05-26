@@ -212,6 +212,7 @@ fn capabilities_advertises_implemented_readonly_app_state_metadata_config_and_dr
         ActionKind::InputReplace,
         ActionKind::InputClear,
         ActionKind::InputModeSet,
+        ActionKind::InputRun,
         ActionKind::ThemeSet,
         ActionKind::ThemeSystemSet,
         ActionKind::ThemeLightSet,
@@ -246,12 +247,9 @@ fn capabilities_advertises_implemented_readonly_app_state_metadata_config_and_dr
         ActionKind::DriveObjectDelete,
         ActionKind::DriveObjectInsert,
         ActionKind::DriveObjectShareToTeam,
+        ActionKind::DriveWorkflowRun,
     ] {
         assert!(actions.contains(&action), "missing {}", action.as_str());
-    }
-
-    for action in [ActionKind::InputRun, ActionKind::DriveWorkflowRun] {
-        assert!(!actions.contains(&action), "unexpected {}", action.as_str());
     }
 }
 

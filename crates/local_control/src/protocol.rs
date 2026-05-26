@@ -5,8 +5,9 @@ use uuid::Uuid;
 
 pub use crate::catalog::{
     ActionImplementationStatus, ActionKind, ActionMetadata, ActionParameterSpec, ActionResultSpec,
-    AuthenticatedUserRequirement, EXCLUDED_LOCAL_FILE_MUTATION_ACTION_NAMES,
-    EXCLUDED_STANDALONE_SECRET_AUTH_ACTION_NAMES, ExecutionContextProof, InvocationContext,
+    AuthenticatedUserRequirement, EXCLUDED_EXECUTION_SUBMISSION_ACTION_NAMES,
+    EXCLUDED_LOCAL_FILE_MUTATION_ACTION_NAMES, EXCLUDED_STANDALONE_SECRET_AUTH_ACTION_NAMES,
+    ExecutionContextProof, InvocationContext,
     PROTOCOL_VERSION, PermissionCategory, RiskTier, StateDataCategory, TargetScope,
 };
 pub use crate::selectors::{
@@ -272,6 +273,15 @@ pub enum ControlResult {
     Acknowledgement { action: ActionKind },
     Metadata { data: serde_json::Value },
     Content { data: serde_json::Value },
+}
+
+/// Structured audit payload for local-control execution attempts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalControlAuditRecord {
+    pub action: String,
+    pub target_scope: TargetScope,
+    pub permission_category: PermissionCategory,
+    pub authenticated_user_subject: String,
 }
 
 /// Top-level request sent by a local-control client to a Warp instance.

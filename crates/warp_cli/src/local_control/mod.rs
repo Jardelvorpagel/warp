@@ -290,6 +290,9 @@ pub enum BlockCommand {
 pub enum InputCommand {
     /// Read the current input buffer.
     Get(TargetArgs),
+
+    /// Run text in the targeted terminal session.
+    Run(InputRunArgs),
 }
 
 /// Commands that inspect Warp themes.
@@ -392,6 +395,17 @@ pub enum DriveCommand {
     /// Read one authenticated Warp Drive object by id.
     #[command(alias = "get")]
     Inspect(DriveInspectArgs),
+
+    /// Operate on Warp Drive workflows.
+    #[command(subcommand)]
+    Workflow(DriveWorkflowCommand),
+}
+
+/// Commands that operate on Warp Drive workflows.
+#[derive(Debug, Clone, Subcommand)]
+pub enum DriveWorkflowCommand {
+    /// Run a Warp Drive workflow by ID.
+    Run(DriveWorkflowRunArgs),
 }
 
 /// Common flags for selecting which running Warp instance receives a command.
@@ -540,6 +554,28 @@ pub struct KeybindingGetArgs {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct InputRunArgs {
+    /// Text to run in the target terminal.
+    pub text: String,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DriveWorkflowRunArgs {
+    /// Workflow object ID to run.
+    pub id: String,
+
+    /// Name=value workflow argument. Repeat for multiple arguments.
+    #[arg(long = "arg", value_parser = parse_workflow_argument)]
+    pub args: Vec<local_control::protocol::WorkflowArgument>,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct DriveListArgs {
     #[command(flatten)]
     pub target: TargetArgs,
@@ -626,6 +662,21 @@ fn run_inner(args: ControlArgs) -> Result<(), local_control::protocol::ControlEr
         ControlCommand::Drive(command) => run_drive_command(command, output_format),
         ControlCommand::Completions { shell } => generate_completions_to_stdout(shell),
     }
+}
+
+fn parse_workflow_argument(
+    value: &str,
+) -> Result<local_control::protocol::WorkflowArgument, String> {
+    let Some((name, argument_value)) = value.split_once('=') else {
+        return Err("workflow arguments must be formatted as name=value".to_owned());
+    };
+    if name.trim().is_empty() {
+        return Err("workflow argument names must be non-empty".to_owned());
+    }
+    Ok(local_control::protocol::WorkflowArgument {
+        name: name.to_owned(),
+        value: argument_value.to_owned(),
+    })
 }
 
 #[cfg(test)]

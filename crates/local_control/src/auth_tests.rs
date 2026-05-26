@@ -215,6 +215,21 @@ fn authenticated_action_accepts_matching_terminal_scripting_grant() {
 }
 
 #[test]
+fn execution_grant_rejects_outside_warp_context_even_with_subject() {
+    let grant = CredentialGrant::new(
+        InstanceId("inst_test".to_owned()),
+        ActionKind::DriveWorkflowRun,
+        InvocationContext::OutsideWarp,
+        Duration::minutes(5),
+    )
+    .with_authenticated_user_subject("user_123");
+    let err = grant
+        .verify_for_action(ActionKind::DriveWorkflowRun)
+        .expect_err("drive.workflow.run cannot run outside Warp");
+    assert_eq!(err.code, ErrorCode::AuthenticatedUserRequired);
+}
+
+#[test]
 fn credential_request_rejects_placeholder_inside_warp_terminal_proof() {
     let mut request = CredentialRequest::new(ActionKind::TabCreate, InvocationContext::InsideWarp);
     request.execution_context_proof = Some(ExecutionContextProof::VerifiedWarpTerminal {

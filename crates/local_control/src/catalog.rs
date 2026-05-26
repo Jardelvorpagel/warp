@@ -19,6 +19,12 @@ pub const EXCLUDED_STANDALONE_SECRET_AUTH_ACTION_NAMES: &[&str] = &[
     "auth.api_key.revoke",
 ];
 
+pub const EXCLUDED_EXECUTION_SUBMISSION_ACTION_NAMES: &[&str] = &[
+    "input.accepted_command.run",
+    "agent.prompt.submit",
+    "drive.workflow.submit_external",
+];
+
 /// Runtime context from which a control request was initiated.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -638,10 +644,10 @@ impl ActionKind {
             | Self::DriveObjectUpdate
             | Self::DriveObjectDelete
             | Self::DriveObjectInsert
-            | Self::DriveObjectShareToTeam => ActionImplementationStatus::Implemented,
-            Self::AuthStatus | Self::AuthLogin | Self::InputRun | Self::DriveWorkflowRun => {
-                ActionImplementationStatus::Stub
-            }
+            | Self::DriveObjectShareToTeam
+            | Self::InputRun
+            | Self::DriveWorkflowRun => ActionImplementationStatus::Implemented,
+            Self::AuthStatus | Self::AuthLogin => ActionImplementationStatus::Stub,
         }
     }
 
