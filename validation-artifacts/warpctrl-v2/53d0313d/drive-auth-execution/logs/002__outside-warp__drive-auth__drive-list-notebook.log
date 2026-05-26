@@ -1,0 +1,11 @@
+validation_context=outside-warp
+permission_state=outside control enabled; authenticated-user/verified-terminal success unavailable
+$ $WARPCTRL --output-format json drive list --type notebook
+{
+  "ok": false,
+  "error": {
+    "code": "execution_context_not_allowed",
+    "message": "drive.list cannot run from the requested invocation context"
+  }
+}
+exit_code=1

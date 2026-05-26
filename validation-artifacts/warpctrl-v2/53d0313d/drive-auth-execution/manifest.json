@@ -1,0 +1,202 @@
+{
+  "agent_name": "drive-auth-execution",
+  "artifact_branch": "zach/warpctrl-validation-artifacts/53d0313d/drive-auth-execution",
+  "repository": "git@github.com:warpdotdev/warp.git",
+  "validation_ref": "origin/zach/warpctrl-validation/53d0313d",
+  "expected_sha": "53d0313df1f712cf98b1c53e9272c588141da350",
+  "validated_sha": "53d0313df1f712cf98b1c53e9272c588141da350",
+  "head_matches_expected": true,
+  "build": {
+    "build_command": "cargo build --manifest-path /workspace/warp/Cargo.toml -p warp --bin warp-oss --bin warpctrl --features warp_control_cli,gui",
+    "app_binary": "/workspace/warp/target/debug/warp-oss",
+    "warpctrl_binary": "/workspace/warp/target/debug/warpctrl",
+    "warpctrl_env_note": "All executed commands were logged using $WARPCTRL, set to /workspace/warp/target/debug/warpctrl in /tmp/warpctrl-drive-auth-execution/env.sh.",
+    "status": "pass"
+  },
+  "runtime": {
+    "display": ":117",
+    "window_manager": "openbox",
+    "x_server": "Xvfb",
+    "isolated_profile": "WARP_DATA_PROFILE=warpctrl-validation-drive-auth-execution",
+    "discovery_dir": "/tmp/warpctrl-drive-auth-execution/discovery",
+    "runtime_feature_flag": "FeatureFlag::WarpControlCli enabled via OSS debug build with cargo feature warp_control_cli; local-control discovery confirmed.",
+    "permission_seed": "LocalControlAllowOutsideWarp and all outside-Warp permission categories plus LocalControlInsideWarpAuthenticatedUserActions set true in isolated user_preferences.json."
+  },
+  "validation_cases": [
+    {
+      "ordinal": "001",
+      "command": "$WARPCTRL --output-format json drive list --type workflow",
+      "expected_result": "Denial: authenticated-user Drive list requires verified Warp-terminal invocation; outside-Warp invocation must be rejected before Drive object access.",
+      "actual_result": "{\"error\": {\"code\": \"execution_context_not_allowed\", \"message\": \"drive.list cannot run from the requested invocation context\"}, \"ok\": false}",
+      "exit_code": 1,
+      "invocation_context": "outside-warp",
+      "permission_state": "Outside-Warp control and all outside-Warp permission categories pre-enabled in isolated private preferences; authenticated-user/verified Warp-terminal proof unavailable.",
+      "terminal_screenshot": "screenshots/001__outside-warp__drive-auth__drive-list-workflow__terminal.png",
+      "ui_screenshot": null,
+      "log_path": "logs/001__outside-warp__drive-auth__drive-list-workflow.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": "002",
+      "command": "$WARPCTRL --output-format json drive list --type notebook",
+      "expected_result": "Denial: authenticated-user Drive list requires verified Warp-terminal invocation; outside-Warp invocation must be rejected before Drive object access.",
+      "actual_result": "{\"error\": {\"code\": \"execution_context_not_allowed\", \"message\": \"drive.list cannot run from the requested invocation context\"}, \"ok\": false}",
+      "exit_code": 1,
+      "invocation_context": "outside-warp",
+      "permission_state": "Outside-Warp control and all outside-Warp permission categories pre-enabled in isolated private preferences; authenticated-user/verified Warp-terminal proof unavailable.",
+      "terminal_screenshot": "screenshots/002__outside-warp__drive-auth__drive-list-notebook__terminal.png",
+      "ui_screenshot": null,
+      "log_path": "logs/002__outside-warp__drive-auth__drive-list-notebook.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": "003",
+      "command": "$WARPCTRL --output-format json drive list --type env-var-collection",
+      "expected_result": "Denial: authenticated-user Drive list requires verified Warp-terminal invocation; outside-Warp invocation must be rejected before Drive object access.",
+      "actual_result": "{\"error\": {\"code\": \"execution_context_not_allowed\", \"message\": \"drive.list cannot run from the requested invocation context\"}, \"ok\": false}",
+      "exit_code": 1,
+      "invocation_context": "outside-warp",
+      "permission_state": "Outside-Warp control and all outside-Warp permission categories pre-enabled in isolated private preferences; authenticated-user/verified Warp-terminal proof unavailable.",
+      "terminal_screenshot": "screenshots/003__outside-warp__drive-auth__drive-list-env-var-collection__terminal.png",
+      "ui_screenshot": null,
+      "log_path": "logs/003__outside-warp__drive-auth__drive-list-env-var-collection.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": "004",
+      "command": "$WARPCTRL --output-format json drive inspect drive_object_id_unavailable_due_expected_denial",
+      "expected_result": "Denial: Drive inspect requires verified Warp-terminal invocation; outside-Warp invocation must be rejected before object ID lookup. Dummy ID used because Drive list denial produced no disposable object ID.",
+      "actual_result": "{\"error\": {\"code\": \"execution_context_not_allowed\", \"message\": \"drive.inspect cannot run from the requested invocation context\"}, \"ok\": false}",
+      "exit_code": 1,
+      "invocation_context": "outside-warp",
+      "permission_state": "Outside-Warp control and all outside-Warp permission categories pre-enabled in isolated private preferences; authenticated-user/verified Warp-terminal proof unavailable.",
+      "terminal_screenshot": "screenshots/004__outside-warp__drive-auth__drive-inspect-dummy__terminal.png",
+      "ui_screenshot": null,
+      "log_path": "logs/004__outside-warp__drive-auth__drive-inspect-dummy.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": "005",
+      "command": "$WARPCTRL --output-format json drive workflow run workflow_id_unavailable_due_expected_denial --arg validation=warpctrl",
+      "expected_result": "Denial: workflow execution is underlying-data mutation requiring authenticated verified Warp-terminal grant; outside-Warp invocation must be rejected before workflow lookup. Dummy ID used because Drive list denial produced no workflow ID.",
+      "actual_result": "{\"error\": {\"code\": \"execution_context_not_allowed\", \"message\": \"drive.workflow.run cannot run from the requested invocation context\"}, \"ok\": false}",
+      "exit_code": 1,
+      "invocation_context": "outside-warp",
+      "permission_state": "Outside-Warp control and all outside-Warp permission categories pre-enabled in isolated private preferences; authenticated-user/verified Warp-terminal proof unavailable.",
+      "terminal_screenshot": "screenshots/005__outside-warp__drive-auth__drive-workflow-run-dummy__terminal.png",
+      "ui_screenshot": null,
+      "log_path": "logs/005__outside-warp__drive-auth__drive-workflow-run-dummy.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": "006",
+      "command": "$WARPCTRL --output-format json input run \"printf warpctrl-validation\"",
+      "expected_result": "Denial: input.run is underlying-data mutation requiring authenticated verified Warp-terminal grant; outside-Warp invocation must be rejected without executing command text.",
+      "actual_result": "{\"error\": {\"code\": \"execution_context_not_allowed\", \"message\": \"input.run cannot run from the requested invocation context\"}, \"ok\": false}",
+      "exit_code": 1,
+      "invocation_context": "outside-warp",
+      "permission_state": "Outside-Warp control and all outside-Warp permission categories pre-enabled in isolated private preferences; authenticated-user/verified Warp-terminal proof unavailable.",
+      "terminal_screenshot": "screenshots/006__outside-warp__execution-underlying__input-run__terminal.png",
+      "ui_screenshot": null,
+      "log_path": "logs/006__outside-warp__execution-underlying__input-run.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": "007",
+      "command": "$WARPCTRL --output-format json drive list --type workflow (inside verified Warp terminal, logged-in user)",
+      "expected_result": "Success path would return workflow Drive metadata for logged-in disposable test user with authenticated-user grant.",
+      "actual_result": "Not executed; no disposable test credentials and no app-issued WARPCTRL_TERMINAL_PROOF_* material available in this validation environment.",
+      "exit_code": null,
+      "invocation_context": "inside-warp",
+      "permission_state": "Authenticated-user success path unavailable.",
+      "terminal_screenshot": null,
+      "ui_screenshot": null,
+      "log_path": null,
+      "status": "skip",
+      "skip_reason": "Requires logged-in disposable Warp user and registry-issued verified terminal proof; unavailable in sandbox. Denial path captured in cases 001-003."
+    },
+    {
+      "ordinal": "008",
+      "command": "$WARPCTRL --output-format json drive inspect <DRIVE_OBJECT_ID_FROM_DRIVE_LIST> (inside verified Warp terminal, logged-in user)",
+      "expected_result": "Success path would inspect a Drive object returned from Drive list.",
+      "actual_result": "Not executed; Drive list success did not run and produced no object ID because authenticated success prerequisites were unavailable.",
+      "exit_code": null,
+      "invocation_context": "inside-warp",
+      "permission_state": "Authenticated-user success path unavailable.",
+      "terminal_screenshot": null,
+      "ui_screenshot": null,
+      "log_path": null,
+      "status": "skip",
+      "skip_reason": "Requires disposable logged-in user, verified terminal proof, and a Drive object ID from successful Drive list. Denial path captured in case 004."
+    },
+    {
+      "ordinal": "009",
+      "command": "$WARPCTRL --output-format json drive workflow run <WORKFLOW_ID_FROM_DRIVE_LIST> --arg validation=warpctrl (inside verified Warp terminal, logged-in user)",
+      "expected_result": "Success path would execute a disposable workflow with argument validation=warpctrl.",
+      "actual_result": "Not executed; no disposable workflow/test account and no verified terminal proof available.",
+      "exit_code": null,
+      "invocation_context": "inside-warp",
+      "permission_state": "Underlying-data mutation success path unavailable.",
+      "terminal_screenshot": null,
+      "ui_screenshot": null,
+      "log_path": null,
+      "status": "skip",
+      "skip_reason": "Unsafe/non-disposable mutation without test credentials/resources; denial path captured in case 005."
+    },
+    {
+      "ordinal": "010",
+      "command": "$WARPCTRL --output-format json input run \"printf warpctrl-validation\" (inside verified Warp terminal, logged-in user)",
+      "expected_result": "Success path would run text in the targeted terminal session.",
+      "actual_result": "Not executed; command execution is high-risk and requires authenticated verified Warp-terminal grant that was unavailable.",
+      "exit_code": null,
+      "invocation_context": "inside-warp",
+      "permission_state": "Underlying-data mutation success path unavailable.",
+      "terminal_screenshot": null,
+      "ui_screenshot": null,
+      "log_path": null,
+      "status": "skip",
+      "skip_reason": "High-risk execution success path requires app-issued terminal proof and disposable environment; denial path captured in case 006."
+    }
+  ],
+  "counts": {
+    "pass": 6,
+    "fail": 0,
+    "skip": 4
+  },
+  "screenshots": [
+    "screenshots/001__outside-warp__drive-auth__drive-list-workflow__terminal.png",
+    "screenshots/002__outside-warp__drive-auth__drive-list-notebook__terminal.png",
+    "screenshots/003__outside-warp__drive-auth__drive-list-env-var-collection__terminal.png",
+    "screenshots/004__outside-warp__drive-auth__drive-inspect-dummy__terminal.png",
+    "screenshots/005__outside-warp__drive-auth__drive-workflow-run-dummy__terminal.png",
+    "screenshots/006__outside-warp__execution-underlying__input-run__terminal.png"
+  ],
+  "logs": [
+    "logs/001__outside-warp__drive-auth__drive-list-workflow.log",
+    "logs/002__outside-warp__drive-auth__drive-list-notebook.log",
+    "logs/003__outside-warp__drive-auth__drive-list-env-var-collection.log",
+    "logs/004__outside-warp__drive-auth__drive-inspect-dummy.log",
+    "logs/005__outside-warp__drive-auth__drive-workflow-run-dummy.log",
+    "logs/006__outside-warp__execution-underlying__input-run.log",
+    "logs/openbox.log",
+    "logs/warp-app-stdout.log",
+    "logs/xvfb.log"
+  ],
+  "blockers": [
+    "No disposable authenticated Warp test credentials/resources were available.",
+    "No app-issued WARPCTRL_TERMINAL_PROOF_ID/WARPCTRL_TERMINAL_SESSION_ID/WARPCTRL_TERMINAL_PROOF_SECRET path was exposed to the standalone validation shell, so inside-Warp authenticated success paths could not be exercised.",
+    "Drive list success was unavailable, so DRIVE_OBJECT_ID_FROM_DRIVE_LIST and WORKFLOW_ID_FROM_DRIVE_LIST could not be obtained; dummy IDs were used only to validate pre-dispatch denial behavior."
+  ],
+  "commands_not_executed": [
+    "$WARPCTRL --output-format json drive list --type workflow (inside verified Warp terminal, logged-in user)",
+    "$WARPCTRL --output-format json drive inspect <DRIVE_OBJECT_ID_FROM_DRIVE_LIST> (inside verified Warp terminal, logged-in user)",
+    "$WARPCTRL --output-format json drive workflow run <WORKFLOW_ID_FROM_DRIVE_LIST> --arg validation=warpctrl (inside verified Warp terminal, logged-in user)",
+    "$WARPCTRL --output-format json input run \"printf warpctrl-validation\" (inside verified Warp terminal, logged-in user)"
+  ]
+}
