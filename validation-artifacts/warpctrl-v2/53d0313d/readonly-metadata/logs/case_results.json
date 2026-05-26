@@ -1,0 +1,296 @@
+{
+  "warp_window_id": "14680067",
+  "counts": {
+    "pass": 13,
+    "fail": 0,
+    "skip": 0
+  },
+  "results": [
+    {
+      "ordinal": 1,
+      "command": "$WARPCTRL --output-format json window list",
+      "expected_result": "window metadata list succeeds",
+      "actual_result": "{\n  \"action\": \"window.list\",\n  \"windows\": [\n    {\n      \"is_active\": true,\n      \"title\": \"bash\",\n      \"window_id\": \"0\"\n    }\n  ]\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/01__outside__metadata__window_list__terminal.png",
+      "ui_screenshot": "screenshots/01__outside__metadata__window_list__ui.png",
+      "log_path": "logs/01__outside__metadata__window_list.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 2,
+      "command": "$WARPCTRL window inspect --window active",
+      "expected_result": "active window inspect succeeds",
+      "actual_result": "{\n  \"action\": \"window.inspect\",\n  \"window\": {\n    \"is_active\": true,\n    \"title\": \"bash\",\n    \"window_id\": \"0\"\n  }\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/02__outside__metadata__window_inspect_active__terminal.png",
+      "ui_screenshot": "screenshots/02__outside__metadata__window_inspect_active__ui.png",
+      "log_path": "logs/02__outside__metadata__window_inspect_active.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 3,
+      "command": "$WARPCTRL tab list",
+      "expected_result": "tab metadata list succeeds",
+      "actual_result": "{\n  \"action\": \"tab.list\",\n  \"tabs\": [\n    {\n      \"index\": 0,\n      \"is_active\": true,\n      \"tab_id\": \"1661\",\n      \"title\": \"bash\",\n      \"window_id\": \"0\"\n    }\n  ]\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/03__outside__metadata__tab_list__terminal.png",
+      "ui_screenshot": "screenshots/03__outside__metadata__tab_list__ui.png",
+      "log_path": "logs/03__outside__metadata__tab_list.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 4,
+      "command": "$WARPCTRL tab inspect --tab active",
+      "expected_result": "active tab inspect succeeds",
+      "actual_result": "{\n  \"action\": \"tab.inspect\",\n  \"tab\": {\n    \"index\": 0,\n    \"is_active\": true,\n    \"tab_id\": \"1661\",\n    \"title\": \"bash\",\n    \"window_id\": \"0\"\n  }\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/04__outside__metadata__tab_inspect_active__terminal.png",
+      "ui_screenshot": "screenshots/04__outside__metadata__tab_inspect_active__ui.png",
+      "log_path": "logs/04__outside__metadata__tab_inspect_active.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 5,
+      "command": "$WARPCTRL tab inspect --tab-index 0",
+      "expected_result": "tab index 0 inspect succeeds",
+      "actual_result": "{\n  \"action\": \"tab.inspect\",\n  \"tab\": {\n    \"index\": 0,\n    \"is_active\": true,\n    \"tab_id\": \"1661\",\n    \"title\": \"bash\",\n    \"window_id\": \"0\"\n  }\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/05__outside__metadata__tab_inspect_index_0__terminal.png",
+      "ui_screenshot": "screenshots/05__outside__metadata__tab_inspect_index_0__ui.png",
+      "log_path": "logs/05__outside__metadata__tab_inspect_index_0.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 6,
+      "command": "$WARPCTRL pane list",
+      "expected_result": "pane metadata list succeeds",
+      "actual_result": "{\n  \"action\": \"pane.list\",\n  \"panes\": [\n    {\n      \"has_terminal_session\": true,\n      \"index\": 0,\n      \"is_active\": true,\n      \"pane_id\": \"Pane Pane Terminal (2035)\",\n      \"tab_id\": \"1661\"\n    }\n  ]\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/06__outside__metadata__pane_list__terminal.png",
+      "ui_screenshot": "screenshots/06__outside__metadata__pane_list__ui.png",
+      "log_path": "logs/06__outside__metadata__pane_list.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 7,
+      "command": "$WARPCTRL pane inspect --pane active",
+      "expected_result": "active pane inspect succeeds",
+      "actual_result": "{\n  \"action\": \"pane.inspect\",\n  \"pane\": {\n    \"has_terminal_session\": true,\n    \"index\": 0,\n    \"is_active\": true,\n    \"pane_id\": \"Pane Pane Terminal (2035)\",\n    \"tab_id\": \"1661\"\n  }\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/07__outside__metadata__pane_inspect_active__terminal.png",
+      "ui_screenshot": "screenshots/07__outside__metadata__pane_inspect_active__ui.png",
+      "log_path": "logs/07__outside__metadata__pane_inspect_active.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 8,
+      "command": "$WARPCTRL pane inspect --pane-index 0",
+      "expected_result": "pane index 0 inspect succeeds",
+      "actual_result": "{\n  \"action\": \"pane.inspect\",\n  \"pane\": {\n    \"has_terminal_session\": true,\n    \"index\": 0,\n    \"is_active\": true,\n    \"pane_id\": \"Pane Pane Terminal (2035)\",\n    \"tab_id\": \"1661\"\n  }\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/08__outside__metadata__pane_inspect_index_0__terminal.png",
+      "ui_screenshot": "screenshots/08__outside__metadata__pane_inspect_index_0__ui.png",
+      "log_path": "logs/08__outside__metadata__pane_inspect_index_0.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 9,
+      "command": "$WARPCTRL session list",
+      "expected_result": "session metadata list succeeds",
+      "actual_result": "{\n  \"action\": \"session.list\",\n  \"sessions\": [\n    {\n      \"is_active\": true,\n      \"pane_id\": \"Pane Pane Terminal (2035)\",\n      \"session_id\": \"Pane Pane Terminal (2035)\"\n    }\n  ]\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/09__outside__metadata__session_list__terminal.png",
+      "ui_screenshot": "screenshots/09__outside__metadata__session_list__ui.png",
+      "log_path": "logs/09__outside__metadata__session_list.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 10,
+      "command": "$WARPCTRL session inspect --session active",
+      "expected_result": "active session inspect succeeds",
+      "actual_result": "{\n  \"action\": \"session.inspect\",\n  \"session\": {\n    \"is_active\": true,\n    \"pane_id\": \"Pane Pane Terminal (2035)\",\n    \"session_id\": \"Pane Pane Terminal (2035)\"\n  }\n}\n\nexit_code=0",
+      "exit_code": 0,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/10__outside__metadata__session_inspect_active__terminal.png",
+      "ui_screenshot": "screenshots/10__outside__metadata__session_inspect_active__ui.png",
+      "log_path": "logs/10__outside__metadata__session_inspect_active.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 11,
+      "command": "$WARPCTRL window inspect --window missing-window-id",
+      "expected_result": "missing/stale target error",
+      "actual_result": "error: stale_target: window.list cannot resolve the requested window id\n\nexit_code=1",
+      "exit_code": 1,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/11__outside__selector_edge__window_inspect_missing_window_id__terminal.png",
+      "ui_screenshot": "screenshots/11__outside__selector_edge__window_inspect_missing_window_id__ui.png",
+      "log_path": "logs/11__outside__selector_edge__window_inspect_missing_window_id.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 12,
+      "command": "$WARPCTRL tab inspect --tab-index 999",
+      "expected_result": "missing target error",
+      "actual_result": "error: stale_target: tab.list cannot resolve the requested tab index\n\nexit_code=1",
+      "exit_code": 1,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/12__outside__selector_edge__tab_inspect_index_999__terminal.png",
+      "ui_screenshot": "screenshots/12__outside__selector_edge__tab_inspect_index_999__ui.png",
+      "log_path": "logs/12__outside__selector_edge__tab_inspect_index_999.log",
+      "status": "pass",
+      "skip_reason": null
+    },
+    {
+      "ordinal": 13,
+      "command": "$WARPCTRL window inspect --window active --window-index 0",
+      "expected_result": "CLI conflict error",
+      "actual_result": "error: the argument '--window <WINDOW>' cannot be used with '--window-index <WINDOW_INDEX>'\n\nUsage: warpctrl window inspect --window <WINDOW>\n\nFor more information, try '--help'.\n\nexit_code=2",
+      "exit_code": 2,
+      "invocation_context": "outside_warp",
+      "permission_state": {
+        "outside_warp_control": true,
+        "outside_warp_metadata_reads": true,
+        "outside_warp_underlying_data_reads": false,
+        "outside_warp_app_state_mutations": false,
+        "outside_warp_metadata_configuration_mutations": false,
+        "outside_warp_underlying_data_mutations": false,
+        "inside_warp_authenticated_user_actions": false
+      },
+      "terminal_screenshot": "screenshots/13__outside__selector_edge__window_inspect_active_conflict_window_index_0__terminal.png",
+      "ui_screenshot": null,
+      "log_path": "logs/13__outside__selector_edge__window_inspect_active_conflict_window_index_0.log",
+      "status": "pass",
+      "skip_reason": null
+    }
+  ]
+}

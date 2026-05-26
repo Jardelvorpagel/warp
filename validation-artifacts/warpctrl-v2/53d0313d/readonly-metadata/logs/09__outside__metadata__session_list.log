@@ -1,0 +1,12 @@
+{
+  "action": "session.list",
+  "sessions": [
+    {
+      "is_active": true,
+      "pane_id": "Pane Pane Terminal (2035)",
+      "session_id": "Pane Pane Terminal (2035)"
+    }
+  ]
+}
+
+exit_code=0

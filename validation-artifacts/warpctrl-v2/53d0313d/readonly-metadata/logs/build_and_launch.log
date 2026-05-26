@@ -1,0 +1,9 @@
+channel config: /workspace/warp/script/install_channel_config --force
+initial build: CARGO_FULL_PROFILE=dev cargo build --manifest-path /workspace/warp/Cargo.toml -p warp --bin dev --bin warpctrl --features gui,warp_control_cli,standalone
+initial build result: passed; this compiled standalone warpctrl and showed that building the GUI binary with standalone makes it print CLI help instead of launching UI because cargo features are additive.
+gui rebuild: CARGO_FULL_PROFILE=dev cargo build --manifest-path /workspace/warp/Cargo.toml -p warp --bin dev --features gui,warp_control_cli,fast_dev
+gui rebuild result: passed
+warp app binary: /workspace/warp/target/debug/dev
+warpctrl binary: /workspace/warp/target/debug/warpctrl
+launch: DISPLAY=:99 WARP_DATA_PROFILE=warpctrl-validation-53d0313d-readonly-metadata LIBGL_ALWAYS_SOFTWARE=1 MESA_GL_VERSION_OVERRIDE=3.3 XDG_RUNTIME_DIR=/tmp RUST_BACKTRACE=1 env -u WARP_API_KEY /workspace/warp/target/debug/dev
+launch validation: computer-use observed a usable WarpDev bash terminal pane past onboarding/login.

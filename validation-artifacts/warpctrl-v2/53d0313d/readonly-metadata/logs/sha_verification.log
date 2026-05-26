@@ -1,0 +1,4 @@
+fetch: git -C /workspace/warp fetch origin zach/warpctrl-validation/53d0313d
+checkout: git -C /workspace/warp checkout --detach 53d0313df1f712cf98b1c53e9272c588141da350
+rev-parse: 53d0313df1f712cf98b1c53e9272c588141da350
+status: verified before build/test
