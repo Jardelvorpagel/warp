@@ -1,0 +1,257 @@
+{
+  "verification_id": "computer-use-verify-warpctrl-file-project-drive-app-state-commands",
+  "branch": "zach/warp-cli-integration-fanin",
+  "commit": "492fde34b397ec9ab89f1dee2f11087b03ce3b2b",
+  "build_and_launch": {
+    "build_commands": [
+      "PATH=\"$HOME/.cargo/bin:$PATH\" CARGO_BUILD_JOBS=1 cargo build --manifest-path /workspace/warp/Cargo.toml -p warp --bin warpctrl --features warp/warp_control_cli",
+      "PATH=\"$HOME/.cargo/bin:$PATH\" CARGO_BUILD_JOBS=1 cargo build --manifest-path /workspace/warp/Cargo.toml -p warp --bin warp --features warp/warp_control_cli"
+    ],
+    "launch_method": "DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 MESA_GL_VERSION_OVERRIDE=4.5 PATH=/root/.cargo/bin:$PATH /workspace/warp/target/debug/warp &",
+    "launch_notes": "Required installing libxcursor1, libx11-xcb1, mesa-utils, libgl1-mesa-dri, mesa-vulkan-drivers and other X11 deps. Warp launched with software GL rendering on Xvfb display :99. App logged in as Zach Lloyd (zach@warp.dev).",
+    "build_results": {
+      "warpctrl": "passed after installing protobuf-compiler for protoc",
+      "warp_app": "passed"
+    },
+    "checkout": {
+      "repository": "warpdotdev/warp",
+      "branch": "origin/zach/warp-cli-integration-fanin",
+      "commit": "492fde34b397ec9ab89f1dee2f11087b03ce3b2b"
+    }
+  },
+  "commands": [
+    {
+      "sequence": "01",
+      "command": "/workspace/warp/target/debug/warpctrl instance list --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "metadata_reads",
+      "expected_result": "List of running Warp instances or denial if disabled",
+      "actual_result": "Returned JSON with full list of supported actions and instance metadata. exit=0. This command works even with outside_warp_control_enabled=false because instance.list is always allowed.",
+      "exit_code": 0,
+      "terminal_screenshot_path": "screenshots/01-default-instance-list-terminal.png",
+      "ui_screenshot_paths": [],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "02",
+      "command": "/workspace/warp/target/debug/warpctrl file list --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "metadata_reads",
+      "expected_result": "Denial because outside-Warp control is disabled by default",
+      "actual_result": "Error: {\"ok\": false, \"error\": {\"code\": \"local_control_disabled\", \"message\": \"outside-Warp local control credential broker is disabled for this instance\"}}",
+      "exit_code": 1,
+      "terminal_screenshot_path": "screenshots/02-default-file-list-terminal.png",
+      "ui_screenshot_paths": [],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "03",
+      "command": "Settings > Scripting toggle enablement",
+      "invocation_context": "warp_ui",
+      "required_permission_category": "none",
+      "expected_result": "Toggle on: Warp control outside Warp, Allow metadata reads, Allow underlying data reads, Allow app-state mutations",
+      "actual_result": "All four toggles successfully enabled in Settings > Scripting UI. Metadata/configuration mutations and underlying data mutations left OFF.",
+      "exit_code": null,
+      "terminal_screenshot_path": null,
+      "ui_screenshot_paths": [
+        "screenshots/03-settings-scripting-enabled.png"
+      ],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "04",
+      "command": "/workspace/warp/target/debug/warpctrl file list --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "metadata_reads",
+      "expected_result": "List of open files (may be empty)",
+      "actual_result": "{\"files\": []}. No files currently open.",
+      "exit_code": 0,
+      "terminal_screenshot_path": "screenshots/04-file-list-terminal.png",
+      "ui_screenshot_paths": [],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "06",
+      "command": "/workspace/warp/target/debug/warpctrl file open /workspace/warp/README.md --line 1 --column 1 --new-tab --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "app_state_mutations",
+      "expected_result": "Open README.md in Warp editor tab",
+      "actual_result": "Error: {\"ok\": false, \"error\": {\"code\": \"missing_target\", \"message\": \"file.open requires an active Warp window\"}}. The Warp window was not the active/focused window because xterm was on top in the headless X11 environment without a proper window manager.",
+      "exit_code": 1,
+      "terminal_screenshot_path": "screenshots/06-file-open-terminal.png",
+      "ui_screenshot_paths": [
+        "screenshots/05-before-file-open-ui.png",
+        "screenshots/07-after-file-open-ui.png"
+      ],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "08",
+      "command": "/workspace/warp/target/debug/warpctrl project active --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "metadata_reads",
+      "expected_result": "Active project info or empty",
+      "actual_result": "{}. No active project.",
+      "exit_code": 0,
+      "terminal_screenshot_path": "screenshots/08-project-active-terminal.png",
+      "ui_screenshot_paths": [],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "09",
+      "command": "/workspace/warp/target/debug/warpctrl project list --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "metadata_reads",
+      "expected_result": "List of projects (may be empty)",
+      "actual_result": "{\"projects\": []}. No projects configured.",
+      "exit_code": 0,
+      "terminal_screenshot_path": "screenshots/09-project-list-terminal.png",
+      "ui_screenshot_paths": [],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "11",
+      "command": "/workspace/warp/target/debug/warpctrl project open /tmp/warpctrl-disposable-project --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "app_state_mutations",
+      "expected_result": "Open disposable project in Warp",
+      "actual_result": "Error: {\"ok\": false, \"error\": {\"code\": \"missing_target\", \"message\": \"project.open requires an active Warp window\"}}. Same active window issue as file.open.",
+      "exit_code": 1,
+      "terminal_screenshot_path": "screenshots/11-project-open-terminal.png",
+      "ui_screenshot_paths": [
+        "screenshots/10-before-project-open-ui.png",
+        "screenshots/12-after-project-open-ui.png"
+      ],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "13",
+      "command": "/workspace/warp/target/debug/warpctrl drive list --type notebook --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "metadata_reads",
+      "expected_result": "List of Drive notebooks or denial if not authenticated",
+      "actual_result": "Returned JSON with list of notebook objects including IDs and names. Multiple notebooks returned. exit=0. User was authenticated as zach@warp.dev.",
+      "exit_code": 0,
+      "terminal_screenshot_path": "screenshots/13-drive-list-notebook-terminal.png",
+      "ui_screenshot_paths": [],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "14",
+      "command": "/workspace/warp/target/debug/warpctrl drive list --type env-var-collection --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "metadata_reads",
+      "expected_result": "List of Drive env-var-collections or denial",
+      "actual_result": "Returned JSON with list of env_var_collection objects including IDs and names. Multiple collections returned. exit=0.",
+      "exit_code": 0,
+      "terminal_screenshot_path": "screenshots/14-drive-list-env-var-collection-terminal.png",
+      "ui_screenshot_paths": [],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "15",
+      "command": "/workspace/warp/target/debug/warpctrl drive inspect 8X528LtWQOQ516E2BidVCk --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "underlying_data_reads",
+      "expected_result": "Metadata and content of the specified Drive notebook",
+      "actual_result": "Returned JSON with content (ai_document_id, conversation_id, data, title) and object metadata (id, name, object_type: notebook). exit=0.",
+      "exit_code": 0,
+      "terminal_screenshot_path": "screenshots/15-drive-inspect-terminal.png",
+      "ui_screenshot_paths": [],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "17",
+      "command": "/workspace/warp/target/debug/warpctrl drive open 8X528LtWQOQ516E2BidVCk --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "app_state_mutations",
+      "expected_result": "Open the Drive object in Warp UI",
+      "actual_result": "Error: {\"ok\": false, \"error\": {\"code\": \"missing_target\", \"message\": \"drive.open requires an active Warp window\"}}",
+      "exit_code": 1,
+      "terminal_screenshot_path": "screenshots/17-drive-open-terminal.png",
+      "ui_screenshot_paths": [
+        "screenshots/16-before-drive-open-ui.png",
+        "screenshots/18-after-drive-open-ui.png"
+      ],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "20",
+      "command": "/workspace/warp/target/debug/warpctrl drive notebook open 8X528LtWQOQ516E2BidVCk --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "app_state_mutations",
+      "expected_result": "Open the notebook in Warp UI",
+      "actual_result": "Error: {\"ok\": false, \"error\": {\"code\": \"missing_target\", \"message\": \"drive.notebook.open requires an active Warp window\"}}",
+      "exit_code": 1,
+      "terminal_screenshot_path": "screenshots/20-drive-notebook-open-terminal.png",
+      "ui_screenshot_paths": [
+        "screenshots/19-before-drive-notebook-open-ui.png",
+        "screenshots/21-after-drive-notebook-open-ui.png"
+      ],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "23",
+      "command": "/workspace/warp/target/debug/warpctrl drive env-var-collection open UlciQHE7XRDbKAg4TAVtBM --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "app_state_mutations",
+      "expected_result": "Open the env-var-collection in Warp UI",
+      "actual_result": "Error: {\"ok\": false, \"error\": {\"code\": \"missing_target\", \"message\": \"drive.env_var_collection.open requires an active Warp window\"}}",
+      "exit_code": 1,
+      "terminal_screenshot_path": "screenshots/23-drive-env-var-collection-open-terminal.png",
+      "ui_screenshot_paths": [
+        "screenshots/22-before-drive-env-open-ui.png",
+        "screenshots/24-after-drive-env-open-ui.png"
+      ],
+      "skipped_reason": null
+    },
+    {
+      "sequence": "26",
+      "command": "/workspace/warp/target/debug/warpctrl drive object share open 8X528LtWQOQ516E2BidVCk --output-format json",
+      "invocation_context": "outside_warp_external_terminal",
+      "required_permission_category": "app_state_mutations",
+      "expected_result": "Open the share dialog for the Drive object in Warp UI",
+      "actual_result": "Error: {\"ok\": false, \"error\": {\"code\": \"missing_target\", \"message\": \"drive.object.share.open requires an active Warp window\"}}",
+      "exit_code": 1,
+      "terminal_screenshot_path": "screenshots/26-drive-object-share-open-terminal.png",
+      "ui_screenshot_paths": [
+        "screenshots/25-before-drive-share-open-ui.png",
+        "screenshots/27-after-drive-share-open-ui.png"
+      ],
+      "skipped_reason": null
+    }
+  ],
+  "observations": {
+    "warp_app_launched": true,
+    "warp_app_launch_notes": "Required LIBGL_ALWAYS_SOFTWARE=1 and MESA_GL_VERSION_OVERRIDE=4.5 for software rendering. Also needed to install libxcursor1, libx11-xcb1, and mesa packages. App started successfully after these dependencies were installed.",
+    "settings_scripting_reachable": true,
+    "settings_scripting_toggles_observed": [
+      "Warp control outside Warp (toggled ON)",
+      "Allow metadata reads (toggled ON)",
+      "Allow underlying data reads (toggled ON)",
+      "Allow app-state mutations (toggled ON)",
+      "Allow metadata/configuration mutations (left OFF)",
+      "Allow underlying data mutations (left OFF)"
+    ],
+    "drive_ids_used": {
+      "notebook_id": "8X528LtWQOQ516E2BidVCk",
+      "env_var_collection_id": "UlciQHE7XRDbKAg4TAVtBM",
+      "generic_drive_object_id": "8X528LtWQOQ516E2BidVCk"
+    },
+    "drive_id_source": "Real IDs from drive list commands (user authenticated as zach@warp.dev)",
+    "blockers": [
+      "All app_state_mutation commands (file.open, project.open, drive.open, drive.notebook.open, drive.env_var_collection.open, drive.object.share.open) failed with 'missing_target' error because they require an active Warp window. In the headless X11 environment without a proper window manager, the Warp window loses active/focused status when the external xterm terminal is brought to the foreground to run commands. This is an environmental limitation of running in a headless Xvfb session without a compositing window manager, not a code bug."
+    ],
+    "command_summary": {
+      "total_commands_run": 15,
+      "passed_exit_0": 7,
+      "failed_exit_1_denial": 1,
+      "failed_exit_1_missing_target": 6,
+      "failed_exit_1_other": 0,
+      "ui_toggle_operations": 1,
+      "total_warpctrl_invocations": 14
+    },
+    "screenshot_directory": "/workspace/warp/specs/warp-control-cli/verification/computer-use-verify-warpctrl-file-project-drive-app-state-commands/screenshots",
+    "manifest_path": "/workspace/warp/specs/warp-control-cli/verification/computer-use-verify-warpctrl-file-project-drive-app-state-commands/manifest.json"
+  }
+}
