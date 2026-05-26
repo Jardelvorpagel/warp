@@ -1,0 +1,272 @@
+{
+  "agent_name": "drive-auth-execution",
+  "validated_ref": "origin/zach/warpctrl-validation/f61caf49",
+  "validated_sha": "f61caf49400dc5c0d37d57a553d27733700e5204",
+  "expected_sha": "f61caf49400dc5c0d37d57a553d27733700e5204",
+  "sha_matches_expected": true,
+  "artifact_root": "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution",
+  "builds": [
+    {
+      "name": "warpctrl",
+      "command": "cargo build -p warp --bin warpctrl --features standalone,warp_control_cli",
+      "status": "pass",
+      "log": "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/build_warpctrl.log"
+    },
+    {
+      "name": "warp-oss",
+      "command": "cargo build -p warp --bin warp-oss --features gui,warp_control_cli",
+      "status": "pass",
+      "log": "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/build_warp_oss.log"
+    }
+  ],
+  "runtime": {
+    "display": "Xvfb :119 with Openbox",
+    "external_terminal": "xterm",
+    "screenshot_tool": "scrot",
+    "isolated_profile": "warpctrl-drive-auth-execution-f61caf49",
+    "discovery_dir": "/tmp/warpctrl-validation/drive-auth-execution-run/discovery",
+    "warp_ui_state": "first-run/logged-out onboarding",
+    "settings_state": "outside-Warp local control and all granular outside-Warp categories preloaded true in private local preferences; inside-Warp authenticated-user actions false",
+    "api_key_denial_note": "A dummy WARPCTRL_API_KEY value was used for the API-key denial case. No real API key was printed or committed."
+  },
+  "commands": [
+    {
+      "ordinal": "002",
+      "command": "$WARPCTRL --output-format json drive list --type workflow",
+      "context": "outside_warp external xterm with dummy API-key-like env var",
+      "permission_state": "Outside-Warp local control was enabled with all granular outside-Warp categories preloaded in private local preferences for the isolated profile. The app was still first-run/logged-out, inside-Warp authenticated-user actions were disabled, and no verified Warp-terminal proof/API-key exchange implementation was available. A dummy WARPCTRL_API_KEY was supplied only for the workflow-list denial case and was not logged as a secret.",
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "The terminal should show the exact JSON-mode drive list command and a structured denial, while the Warp UI remains logged out/onboarding with no Drive data exposed.",
+      "proof_setup_notes": "Use a staggered outside terminal plus the visible logged-out Warp app. Include a dummy API-key-like env var to prove the external/API-key path does not grant authenticated Drive access.",
+      "expected_result": "Structured JSON denial with execution_context_not_allowed before Drive data is exposed.",
+      "actual_result": "{\n  \"ok\": false,\n  \"error\": {\n    \"code\": \"execution_context_not_allowed\",\n    \"message\": \"drive.list cannot run from the requested invocation context\"\n  }\n}",
+      "actual_error_code": "execution_context_not_allowed",
+      "exit_code": 1,
+      "status": "pass",
+      "required_permission_category": "read_metadata plus authenticated_user requirement for Drive",
+      "visual_inspection": {
+        "expected_visual_effect": "A JSON error should be visible in the external terminal and the Warp app should remain on logged-out/onboarding with no Drive objects shown.",
+        "observed_visual_effect": "Screenshot shows a staggered external xterm on the left with the command/output and the Warp app on the right. The Warp app remains on the first-run/logged-out Welcome to Warp screen; no Drive data, object content, environment-variable data, terminal command execution, or output containing warpctrl-validation appears in the Warp UI.",
+        "result": "pass",
+        "unexpected_ui_changes": "None observed. Warp remained on onboarding/logged-out state.",
+        "ambiguous_or_blocking_artifacts": "The Warp UI is partially covered by the xterm in the staggered composition, but the Welcome to Warp screen and lack of target-side mutation remain visible."
+      },
+      "screenshots": [
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/screenshots/002__outside-staggered__drive-auth-execution__drive_list_workflow_api_key_denied__terminal_ui.png"
+      ],
+      "logs": [
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/002__drive_list_workflow_api_key_denied.stdout_stderr.log",
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/002__drive_list_workflow_api_key_denied.exit_code"
+      ],
+      "skip_or_blocker_reason": null
+    },
+    {
+      "ordinal": "003",
+      "command": "$WARPCTRL --output-format json drive list --type notebook",
+      "context": "outside_warp external xterm",
+      "permission_state": "Outside-Warp local control was enabled with all granular outside-Warp categories preloaded in private local preferences for the isolated profile. The app was still first-run/logged-out, inside-Warp authenticated-user actions were disabled, and no verified Warp-terminal proof/API-key exchange implementation was available. A dummy WARPCTRL_API_KEY was supplied only for the workflow-list denial case and was not logged as a secret.",
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "The terminal should show a structured authenticated-user/execution-context denial and the app should remain unchanged with no notebooks exposed.",
+      "proof_setup_notes": "Use the same staggered terminal/UI composition and keep the logged-out app visible.",
+      "expected_result": "Structured JSON denial with execution_context_not_allowed before notebook metadata is exposed.",
+      "actual_result": "{\n  \"ok\": false,\n  \"error\": {\n    \"code\": \"execution_context_not_allowed\",\n    \"message\": \"drive.list cannot run from the requested invocation context\"\n  }\n}",
+      "actual_error_code": "execution_context_not_allowed",
+      "exit_code": 1,
+      "status": "pass",
+      "required_permission_category": "read_metadata plus authenticated_user requirement for Drive",
+      "visual_inspection": {
+        "expected_visual_effect": "A JSON error should be visible in the external terminal and the Warp app should remain on logged-out/onboarding with no notebooks shown.",
+        "observed_visual_effect": "Screenshot shows a staggered external xterm on the left with the command/output and the Warp app on the right. The Warp app remains on the first-run/logged-out Welcome to Warp screen; no Drive data, object content, environment-variable data, terminal command execution, or output containing warpctrl-validation appears in the Warp UI.",
+        "result": "pass",
+        "unexpected_ui_changes": "None observed. Warp remained on onboarding/logged-out state.",
+        "ambiguous_or_blocking_artifacts": "The Warp UI is partially covered by the xterm in the staggered composition, but the Welcome to Warp screen and lack of target-side mutation remain visible."
+      },
+      "screenshots": [
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/screenshots/003__outside-staggered__drive-auth-execution__drive_list_notebook_denied__terminal_ui.png"
+      ],
+      "logs": [
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/003__drive_list_notebook_denied.stdout_stderr.log",
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/003__drive_list_notebook_denied.exit_code"
+      ],
+      "skip_or_blocker_reason": null
+    },
+    {
+      "ordinal": "004",
+      "command": "$WARPCTRL --output-format json drive list --type env-var-collection",
+      "context": "outside_warp external xterm",
+      "permission_state": "Outside-Warp local control was enabled with all granular outside-Warp categories preloaded in private local preferences for the isolated profile. The app was still first-run/logged-out, inside-Warp authenticated-user actions were disabled, and no verified Warp-terminal proof/API-key exchange implementation was available. A dummy WARPCTRL_API_KEY was supplied only for the workflow-list denial case and was not logged as a secret.",
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "The terminal should show a structured denial and no environment-variable collection data should be displayed.",
+      "proof_setup_notes": "Use the same staggered terminal/UI composition and keep the logged-out app visible.",
+      "expected_result": "Structured JSON denial with execution_context_not_allowed before env-var collection metadata is exposed.",
+      "actual_result": "{\n  \"ok\": false,\n  \"error\": {\n    \"code\": \"execution_context_not_allowed\",\n    \"message\": \"drive.list cannot run from the requested invocation context\"\n  }\n}",
+      "actual_error_code": "execution_context_not_allowed",
+      "exit_code": 1,
+      "status": "pass",
+      "required_permission_category": "read_metadata plus authenticated_user requirement for Drive",
+      "visual_inspection": {
+        "expected_visual_effect": "A JSON error should be visible in the external terminal and the Warp app should remain on logged-out/onboarding with no env-var collection data shown.",
+        "observed_visual_effect": "Screenshot shows a staggered external xterm on the left with the command/output and the Warp app on the right. The Warp app remains on the first-run/logged-out Welcome to Warp screen; no Drive data, object content, environment-variable data, terminal command execution, or output containing warpctrl-validation appears in the Warp UI.",
+        "result": "pass",
+        "unexpected_ui_changes": "None observed. Warp remained on onboarding/logged-out state.",
+        "ambiguous_or_blocking_artifacts": "The Warp UI is partially covered by the xterm in the staggered composition, but the Welcome to Warp screen and lack of target-side mutation remain visible."
+      },
+      "screenshots": [
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/screenshots/004__outside-staggered__drive-auth-execution__drive_list_env_var_collection_denied__terminal_ui.png"
+      ],
+      "logs": [
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/004__drive_list_env_var_collection_denied.stdout_stderr.log",
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/004__drive_list_env_var_collection_denied.exit_code"
+      ],
+      "skip_or_blocker_reason": null
+    },
+    {
+      "ordinal": "005",
+      "command": "$WARPCTRL --output-format json input run \"printf warpctrl-validation\"",
+      "context": "outside_warp external xterm targeting visible Warp app",
+      "permission_state": "Outside-Warp local control was enabled with all granular outside-Warp categories preloaded in private local preferences for the isolated profile. The app was still first-run/logged-out, inside-Warp authenticated-user actions were disabled, and no verified Warp-terminal proof/API-key exchange implementation was available. A dummy WARPCTRL_API_KEY was supplied only for the workflow-list denial case and was not logged as a secret.",
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "The terminal should show denial before execution, and the visible Warp app should not show a new terminal command or output containing warpctrl-validation.",
+      "proof_setup_notes": "Use a staggered terminal/UI composition with the target Warp app visible before running the command; this command would visibly print text if it were allowed.",
+      "expected_result": "Structured JSON denial with execution_context_not_allowed before command execution.",
+      "actual_result": "{\n  \"ok\": false,\n  \"error\": {\n    \"code\": \"execution_context_not_allowed\",\n    \"message\": \"input.run cannot run from the requested invocation context\"\n  }\n}",
+      "actual_error_code": "execution_context_not_allowed",
+      "exit_code": 1,
+      "status": "pass",
+      "required_permission_category": "mutate_underlying_data plus authenticated_user requirement for execution",
+      "visual_inspection": {
+        "expected_visual_effect": "A JSON error should be visible in the external terminal and the Warp app should not display a terminal, submitted command, or output containing warpctrl-validation.",
+        "observed_visual_effect": "Screenshot shows a staggered external xterm on the left with the command/output and the Warp app on the right. The Warp app remains on the first-run/logged-out Welcome to Warp screen; no Drive data, object content, environment-variable data, terminal command execution, or output containing warpctrl-validation appears in the Warp UI.",
+        "result": "pass",
+        "unexpected_ui_changes": "None observed. Warp remained on onboarding/logged-out state.",
+        "ambiguous_or_blocking_artifacts": "The Warp UI is partially covered by the xterm in the staggered composition, but the Welcome to Warp screen and lack of target-side mutation remain visible."
+      },
+      "screenshots": [
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/screenshots/005__outside-staggered__drive-auth-execution__input_run_denied__terminal_ui.png"
+      ],
+      "logs": [
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/005__input_run_denied.stdout_stderr.log",
+        "/workspace/warpctrl-validation/drive-auth-execution/validation-artifacts/warpctrl-v2/f61caf49/drive-auth-execution/logs/005__input_run_denied.exit_code"
+      ],
+      "skip_or_blocker_reason": null
+    },
+    {
+      "ordinal": "006",
+      "command": "$WARPCTRL --output-format json drive inspect <DRIVE_OBJECT_ID_FROM_DRIVE_LIST>",
+      "context": "not executed",
+      "permission_state": "Outside-Warp local control was enabled with all granular outside-Warp categories preloaded in private local preferences for the isolated profile. The app was still first-run/logged-out, inside-Warp authenticated-user actions were disabled, and no verified Warp-terminal proof/API-key exchange implementation was available. A dummy WARPCTRL_API_KEY was supplied only for the workflow-list denial case and was not logged as a secret.",
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "First obtain a Drive object ID from a successful authenticated drive list response, then show the inspect JSON output without exposing secrets.",
+      "proof_setup_notes": "No Drive object ID was available because all Drive list commands correctly failed closed from outside-Warp with execution_context_not_allowed.",
+      "expected_result": "Skipped; requires ID from successful drive list and authenticated-user grant.",
+      "actual_result": "Not executed.",
+      "exit_code": null,
+      "status": "skip",
+      "required_permission_category": "read_underlying_data plus authenticated_user requirement for Drive inspect",
+      "visual_inspection": {
+        "expected_visual_effect": "Would show JSON inspect result for a disposable Drive object only after an authenticated list success supplied an ID.",
+        "observed_visual_effect": "No command screenshot because the command was intentionally not executed without an ID.",
+        "result": "blocked",
+        "unexpected_ui_changes": "None.",
+        "ambiguous_or_blocking_artifacts": "Blocked by lack of authenticated Drive list success / no Drive object ID."
+      },
+      "screenshots": [],
+      "logs": [],
+      "skip_or_blocker_reason": "Drive list failed closed before returning any DRIVE_OBJECT_ID_FROM_DRIVE_LIST; executing inspect with a fabricated ID would not validate the requested command semantics."
+    },
+    {
+      "ordinal": "007",
+      "command": "$WARPCTRL --output-format json drive workflow run <WORKFLOW_ID_FROM_DRIVE_LIST> --arg validation=warpctrl",
+      "context": "not executed",
+      "permission_state": "Outside-Warp local control was enabled with all granular outside-Warp categories preloaded in private local preferences for the isolated profile. The app was still first-run/logged-out, inside-Warp authenticated-user actions were disabled, and no verified Warp-terminal proof/API-key exchange implementation was available. A dummy WARPCTRL_API_KEY was supplied only for the workflow-list denial case and was not logged as a secret.",
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Create/select a disposable workflow, show its ID from authenticated drive list, then run it and show the terminal/UI/audit result without exposing user data.",
+      "proof_setup_notes": "No workflow ID was available because workflow listing correctly failed closed from outside-Warp with execution_context_not_allowed.",
+      "expected_result": "Skipped; requires workflow ID from successful drive list and authenticated execution/Drive workflow grant.",
+      "actual_result": "Not executed.",
+      "exit_code": null,
+      "status": "skip",
+      "required_permission_category": "mutate_underlying_data plus authenticated_user requirement for workflow execution",
+      "visual_inspection": {
+        "expected_visual_effect": "Would show a workflow execution result for a disposable workflow only after authenticated Drive access supplied an ID.",
+        "observed_visual_effect": "No command screenshot because the command was intentionally not executed without a workflow ID.",
+        "result": "blocked",
+        "unexpected_ui_changes": "None.",
+        "ambiguous_or_blocking_artifacts": "Blocked by lack of authenticated workflow list success / no WORKFLOW_ID_FROM_DRIVE_LIST."
+      },
+      "screenshots": [],
+      "logs": [],
+      "skip_or_blocker_reason": "Workflow list failed closed before returning any WORKFLOW_ID_FROM_DRIVE_LIST; executing workflow run with a fabricated ID would not validate the requested command semantics."
+    }
+  ],
+  "counts": {
+    "pass": 4,
+    "fail": 0,
+    "skip": 2,
+    "total": 6,
+    "executed": 4
+  },
+  "visual_inspection_summary": {
+    "failures": [],
+    "blockers": [
+      "Authenticated Drive inspect could not be visually validated because drive list correctly failed closed and returned no object ID.",
+      "Authenticated workflow run could not be visually validated because workflow list correctly failed closed and returned no workflow ID.",
+      "No verified Warp-terminal proof was available in this foundation build/session, and the app remained first-run/logged-out despite launch with a staging API key."
+    ]
+  },
+  "blockers": [
+    "The implemented catalog marks Drive and input.run as authenticated-user actions allowed only from inside_warp; outside-Warp/API-key scripting is not implemented in this checked-out commit, so external attempts fail before target resolution.",
+    "The GUI launched into first-run/logged-out onboarding; no authenticated Drive objects or verified terminal proof could be established for success-path validation.",
+    "Drive inspect and workflow run require IDs from successful authenticated drive list output; no IDs were available after fail-closed list denials."
+  ],
+  "skipped_commands": [
+    {
+      "ordinal": "006",
+      "command": "$WARPCTRL --output-format json drive inspect <DRIVE_OBJECT_ID_FROM_DRIVE_LIST>",
+      "context": "not executed",
+      "permission_state": "Outside-Warp local control was enabled with all granular outside-Warp categories preloaded in private local preferences for the isolated profile. The app was still first-run/logged-out, inside-Warp authenticated-user actions were disabled, and no verified Warp-terminal proof/API-key exchange implementation was available. A dummy WARPCTRL_API_KEY was supplied only for the workflow-list denial case and was not logged as a secret.",
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "First obtain a Drive object ID from a successful authenticated drive list response, then show the inspect JSON output without exposing secrets.",
+      "proof_setup_notes": "No Drive object ID was available because all Drive list commands correctly failed closed from outside-Warp with execution_context_not_allowed.",
+      "expected_result": "Skipped; requires ID from successful drive list and authenticated-user grant.",
+      "actual_result": "Not executed.",
+      "exit_code": null,
+      "status": "skip",
+      "required_permission_category": "read_underlying_data plus authenticated_user requirement for Drive inspect",
+      "visual_inspection": {
+        "expected_visual_effect": "Would show JSON inspect result for a disposable Drive object only after an authenticated list success supplied an ID.",
+        "observed_visual_effect": "No command screenshot because the command was intentionally not executed without an ID.",
+        "result": "blocked",
+        "unexpected_ui_changes": "None.",
+        "ambiguous_or_blocking_artifacts": "Blocked by lack of authenticated Drive list success / no Drive object ID."
+      },
+      "screenshots": [],
+      "logs": [],
+      "skip_or_blocker_reason": "Drive list failed closed before returning any DRIVE_OBJECT_ID_FROM_DRIVE_LIST; executing inspect with a fabricated ID would not validate the requested command semantics."
+    },
+    {
+      "ordinal": "007",
+      "command": "$WARPCTRL --output-format json drive workflow run <WORKFLOW_ID_FROM_DRIVE_LIST> --arg validation=warpctrl",
+      "context": "not executed",
+      "permission_state": "Outside-Warp local control was enabled with all granular outside-Warp categories preloaded in private local preferences for the isolated profile. The app was still first-run/logged-out, inside-Warp authenticated-user actions were disabled, and no verified Warp-terminal proof/API-key exchange implementation was available. A dummy WARPCTRL_API_KEY was supplied only for the workflow-list denial case and was not logged as a secret.",
+      "proof_setup_question": "What is the best way to show the impact of this CLI command?",
+      "proof_setup_answer": "Create/select a disposable workflow, show its ID from authenticated drive list, then run it and show the terminal/UI/audit result without exposing user data.",
+      "proof_setup_notes": "No workflow ID was available because workflow listing correctly failed closed from outside-Warp with execution_context_not_allowed.",
+      "expected_result": "Skipped; requires workflow ID from successful drive list and authenticated execution/Drive workflow grant.",
+      "actual_result": "Not executed.",
+      "exit_code": null,
+      "status": "skip",
+      "required_permission_category": "mutate_underlying_data plus authenticated_user requirement for workflow execution",
+      "visual_inspection": {
+        "expected_visual_effect": "Would show a workflow execution result for a disposable workflow only after authenticated Drive access supplied an ID.",
+        "observed_visual_effect": "No command screenshot because the command was intentionally not executed without a workflow ID.",
+        "result": "blocked",
+        "unexpected_ui_changes": "None.",
+        "ambiguous_or_blocking_artifacts": "Blocked by lack of authenticated workflow list success / no WORKFLOW_ID_FROM_DRIVE_LIST."
+      },
+      "screenshots": [],
+      "logs": [],
+      "skip_or_blocker_reason": "Workflow list failed closed before returning any WORKFLOW_ID_FROM_DRIVE_LIST; executing workflow run with a fabricated ID would not validate the requested command semantics."
+    }
+  ]
+}

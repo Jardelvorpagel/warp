@@ -1,0 +1,11 @@
+{
+  "prefs": {
+    "LocalControlAllowOutsideWarp": "true",
+    "LocalControlOutsideWarpMetadataReads": "true",
+    "LocalControlOutsideWarpUnderlyingDataReads": "true",
+    "LocalControlOutsideWarpAppStateMutations": "true",
+    "LocalControlOutsideWarpMetadataConfigurationMutations": "true",
+    "LocalControlOutsideWarpUnderlyingDataMutations": "true",
+    "LocalControlInsideWarpAuthenticatedUserActions": "false"
+  }
+}

@@ -1,0 +1,5 @@
+XDG_CONFIG_HOME=/tmp/warpctrl-validation/drive-auth-execution-run/xdg-config
+XDG_DATA_HOME=/tmp/warpctrl-validation/drive-auth-execution-run/xdg-data
+XDG_CACHE_HOME=/tmp/warpctrl-validation/drive-auth-execution-run/xdg-cache
+WARP_DATA_PROFILE=warpctrl-drive-auth-execution-f61caf49
+WARP_LOCAL_CONTROL_DISCOVERY_DIR=/tmp/warpctrl-validation/drive-auth-execution-run/discovery
