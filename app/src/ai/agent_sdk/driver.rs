@@ -31,10 +31,10 @@ use warp_managed_secrets::ManagedSecretValue;
 use warpui::r#async::{FutureExt, TimeoutError};
 use warpui::{AppContext, Entity, ModelContext, ModelHandle, ModelSpawner, SingletonEntity};
 
-use crate::ai::agent::conversation::{AIConversationId, InvokeSkillUserQuery};
+use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{
     AIAgentActionResultType, AIAgentExchange, AIAgentInput, AIAgentOutput, CancellationReason,
-    RenderableAIError, RequestFileEditsResult,
+    InvokeSkillUserQuery, RenderableAIError, RequestFileEditsResult,
 };
 use crate::ai::agent_sdk::driver::harness::{
     harness_model_env_vars, task_env_vars, HarnessCleanupDisposition, HarnessKind, HarnessRunner,

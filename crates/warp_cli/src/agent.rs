@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
+use crate::SortOrderArg;
 use crate::config_file::ConfigFileArgs;
 use crate::environment::EnvironmentCreateArgs;
 use crate::json_filter::JsonOutput;
@@ -12,7 +13,6 @@ use crate::model::ModelArgs;
 use crate::scope::ObjectScope;
 use crate::share::ShareArgs;
 use crate::skill::SkillSpec;
-use crate::SortOrderArg;
 
 /// Output format for agent results.
 #[derive(Debug, Copy, Clone, ValueEnum, Eq, PartialEq, Default)]

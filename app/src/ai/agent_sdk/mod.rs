@@ -12,6 +12,7 @@ use anyhow::Context;
 pub(crate) use driver::harness::{task_env_vars, validate_cli_installed, ClaudeHarness};
 pub use driver::AgentDriver;
 use driver::AgentDriverError;
+use futures::future::try_join_all;
 use telemetry::CliTelemetryEvent;
 use warp_cli::agent::{
     AgentCommand, AgentProfileCommand, Harness, OutputFormat, Prompt, RunAgentArgs,
@@ -31,6 +32,7 @@ use warp_cli::share::ShareRequest;
 use warp_cli::task::{MessageCommand, TaskCommand};
 use warp_cli::{CliCommand, GlobalOptions, OZ_HARNESS_ENV};
 use warp_core::features::FeatureFlag;
+use warp_core::safe_info;
 use warp_graphql::object_permissions::OwnerType;
 use warp_isolation_platform::IsolationPlatformError;
 #[cfg(not(target_family = "wasm"))]
@@ -43,7 +45,8 @@ use crate::ai::agent::api::convert_conversation::{
     convert_conversation_data_to_ai_conversation, RestorationMode,
 };
 use crate::ai::agent::api::ServerConversationToken;
-use crate::ai::agent::{conversation::AIConversationId, InvokeSkillUserQuery};
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::InvokeSkillUserQuery;
 use crate::ai::agent_sdk::driver::harness::{harness_kind, HarnessKind};
 use crate::ai::agent_sdk::driver::{AgentDriverOptions, AgentRunPrompt, Task};
 use crate::ai::agent_sdk::mcp_config::build_mcp_servers_from_specs;
@@ -58,7 +61,7 @@ use crate::ai::aws_credentials::refresh_aws_credentials;
 use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::ai::llms::LLMId;
 use crate::ai::skills::{
-    clone_repo_for_skill, resolve_skill_spec, ResolveSkillError, ResolvedSkill,
+    clone_repo_for_skill, resolve_skill_spec, ResolveSkillError, ResolvedSkill, SkillManager,
 };
 use crate::auth::auth_manager::{AuthManager, AuthManagerEvent};
 use crate::auth::AuthStateProvider;
@@ -902,9 +905,11 @@ impl AgentDriverRunner {
                             ))
                         })
                 });
-            setup_events.record_result(SetupStep::SkillRepoClone, async {
-                try_join_all(clone_futures).await
-            });
+            setup_events
+                .record_result(SetupStep::SkillRepoClone, async {
+                    try_join_all(clone_futures).await
+                })
+                .await?;
         }
 
         let mut resolved_skills = Vec::with_capacity(skill_specs.len());
