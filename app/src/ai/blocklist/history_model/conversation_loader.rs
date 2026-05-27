@@ -65,8 +65,18 @@ pub fn convert_persisted_conversation_to_ai_conversation(
 pub fn convert_persisted_conversation_to_ai_conversation_with_metadata(
     persisted_conversation: AgentConversation,
 ) -> Option<AIConversation> {
+    // Detect and drop the optimistic stub task (zero-message root paired with
+    // a real upgraded root) BEFORE consuming the conversation. The pattern is
+    // observed on local-no-harness Oz children that persisted the optimistic
+    // root before the server-issued task arrived; both end up in
+    // `agent_tasks` and the unfiltered list looks like "two root tasks" to
+    // `is_restorable`/`new_restored`.
+    let stub_task_id: Option<String> =
+        persistence::model::optimistic_stub_task_id(&persisted_conversation.tasks)
+            .map(|s| s.to_string());
+
     let AgentConversation {
-        tasks,
+        mut tasks,
         conversation:
             AgentConversationRecord {
                 conversation_id,
@@ -74,6 +84,10 @@ pub fn convert_persisted_conversation_to_ai_conversation_with_metadata(
                 ..
             },
     } = persisted_conversation;
+
+    if let Some(stub_id) = stub_task_id.as_deref() {
+        tasks.retain(|task| task.id != stub_id);
+    }
 
     let conversation_id = match AIConversationId::try_from(conversation_id) {
         Ok(id) => id,
@@ -552,18 +566,19 @@ impl BlocklistAIHistoryModel {
                     // later when the hidden pane is materialized via
                     // `restore_conversations`. A subsequent `restore_conversations`
                     // call replaces this entry idempotently.
-                    if let Some(child_conversation) =
-                        convert_persisted_conversation_to_ai_conversation_with_metadata(
-                            agent_conversation.clone(),
-                        )
-                    {
-                        self.conversations_by_id
-                            .insert(conversation_id, child_conversation);
-                    } else {
-                        log::warn!(
-                            "Failed to eagerly hydrate orchestration child {conversation_id}; \
-                             pill bar / name resolution will fall back to lazy materialization",
-                        );
+                    match convert_persisted_conversation_to_ai_conversation_with_metadata(
+                        agent_conversation.clone(),
+                    ) {
+                        Some(child_conversation) => {
+                            self.conversations_by_id
+                                .insert(conversation_id, child_conversation);
+                        }
+                        None => {
+                            log::warn!(
+                                "Failed to eager-hydrate orchestration child {conversation_id}; \
+                                 pill bar / name resolution will fall back to lazy materialization",
+                            );
+                        }
                     }
                     return None;
                 }

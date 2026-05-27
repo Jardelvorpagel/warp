@@ -938,27 +938,83 @@ pub struct AgentConversation {
     pub tasks: Vec<api::Task>,
 }
 
+/// Returns `true` if a task is shaped like a root task (no `dependencies`
+/// or `dependencies.parent_task_id.is_empty()`).
+fn task_is_root_shaped(task: &api::Task) -> bool {
+    task.dependencies
+        .as_ref()
+        .map(|deps| deps.parent_task_id.is_empty())
+        .unwrap_or(true)
+}
+
+/// If `tasks` matches the "optimistic stub + real upgraded root" pattern
+/// that local-no-harness Oz child conversations exhibit after the local
+/// optimistic task gets replaced by a server-issued task, returns the
+/// `id` of the stub that should be ignored on restore. Otherwise returns
+/// `None`.
+///
+/// The pattern: exactly two tasks, both shaped like a root task (`dependencies`
+/// is `None` or `dependencies.parent_task_id.is_empty()`), AND exactly one of
+/// them has zero `messages` while the other has at least one message. The
+/// zero-message task is the optimistic stub.
+///
+/// We deliberately do NOT delete the stub from disk; this is a read-time
+/// filter so the in-memory conversation skips the stub during restoration.
+pub fn optimistic_stub_task_id(tasks: &[api::Task]) -> Option<&str> {
+    if tasks.len() != 2 {
+        return None;
+    }
+    if !tasks.iter().all(task_is_root_shaped) {
+        return None;
+    }
+    let zero_message_count = tasks.iter().filter(|t| t.messages.is_empty()).count();
+    let non_empty_count = tasks.iter().filter(|t| !t.messages.is_empty()).count();
+    if zero_message_count != 1 || non_empty_count != 1 {
+        return None;
+    }
+    tasks
+        .iter()
+        .find(|t| t.messages.is_empty())
+        .map(|t| t.id.as_str())
+}
+
 impl AgentConversation {
+    /// Returns a borrowed view of the tasks that should participate in
+    /// restoration. Excludes the optimistic stub when
+    /// [`optimistic_stub_task_id`] matches; otherwise returns references to
+    /// all tasks unchanged.
+    pub fn tasks_for_restore(&self) -> Vec<&api::Task> {
+        match optimistic_stub_task_id(&self.tasks) {
+            Some(stub_id) => self.tasks.iter().filter(|t| t.id != stub_id).collect(),
+            None => self.tasks.iter().collect(),
+        }
+    }
+
+    /// Returns the `id` of the optimistic stub task in this conversation, if
+    /// the optimistic-stub pattern matches. Wrapper around
+    /// [`optimistic_stub_task_id`].
+    pub fn optimistic_stub_task_id(&self) -> Option<&str> {
+        optimistic_stub_task_id(&self.tasks)
+    }
+
     /// Returns `true` if the conversation is restorable.
     ///
     /// A conversation is restorable if:
-    /// - It contains a single task or fewer, OR
-    /// - It contains multiple tasks where every task other than the root task has a parent task ID.
+    /// - It contains a single task or fewer (after filtering out the
+    ///   optimistic stub via [`Self::tasks_for_restore`]), OR
+    /// - It contains multiple tasks where every task other than the root task
+    ///   has a parent task ID.
     pub fn is_restorable(&self) -> bool {
-        if self.tasks.len() <= 1 {
+        let filtered = self.tasks_for_restore();
+        if filtered.len() <= 1 {
             return true;
         }
 
         // Find the root task(s) - tasks with no parent_task_id or empty parent_task_id
-        let root_tasks: Vec<_> = self
-            .tasks
+        let root_tasks: Vec<_> = filtered
             .iter()
-            .filter(|task| {
-                task.dependencies
-                    .as_ref()
-                    .map(|deps| deps.parent_task_id.is_empty())
-                    .unwrap_or(true)
-            })
+            .copied()
+            .filter(|task| task_is_root_shaped(task))
             .collect();
 
         // Must have exactly one root task
@@ -967,14 +1023,9 @@ impl AgentConversation {
         }
 
         // All non-root tasks must have a non-empty parent_task_id
-        self.tasks.iter().all(|task| {
+        filtered.iter().copied().all(|task| {
             // Root task is always valid
-            if task
-                .dependencies
-                .as_ref()
-                .map(|deps| deps.parent_task_id.is_empty())
-                .unwrap_or(true)
-            {
+            if task_is_root_shaped(task) {
                 return true;
             }
 
@@ -1357,7 +1408,120 @@ pub struct NewMCPServerInstallation {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentConversationData;
+    use warp_multi_agent_api::{self as api};
+
+    use super::{AgentConversation, AgentConversationData, optimistic_stub_task_id};
+
+    fn make_task(id: &str, parent_task_id: Option<&str>, num_messages: usize) -> api::Task {
+        api::Task {
+            id: id.to_string(),
+            description: String::new(),
+            dependencies: parent_task_id.map(|pid| api::task::Dependencies {
+                parent_task_id: pid.to_string(),
+            }),
+            messages: (0..num_messages).map(|_| api::Message::default()).collect(),
+            summary: String::new(),
+            server_data: String::new(),
+        }
+    }
+
+    fn agent_conversation_with_tasks(tasks: Vec<api::Task>) -> AgentConversation {
+        AgentConversation {
+            conversation: super::AgentConversationRecord::default(),
+            tasks,
+        }
+    }
+
+    /// Case (a): single task is always restorable; never flagged as an
+    /// optimistic stub (pattern requires exactly two tasks).
+    #[test]
+    fn restorable_with_single_root_task() {
+        let conv = agent_conversation_with_tasks(vec![make_task("root", None, 1)]);
+        assert!(conv.is_restorable());
+        assert_eq!(optimistic_stub_task_id(&conv.tasks), None);
+        assert_eq!(conv.tasks_for_restore().len(), 1);
+    }
+
+    /// Case (b): one root + one well-formed child is restorable. Optimistic
+    /// stub detection must not fire (child is not root-shaped).
+    #[test]
+    fn restorable_with_root_plus_child() {
+        let conv = agent_conversation_with_tasks(vec![
+            make_task("root", None, 1),
+            make_task("child", Some("root"), 1),
+        ]);
+        assert!(conv.is_restorable());
+        assert_eq!(optimistic_stub_task_id(&conv.tasks), None);
+        assert_eq!(conv.tasks_for_restore().len(), 2);
+    }
+
+    /// Case (c) — the bug fix: two root-shaped tasks where exactly one has
+    /// zero messages. The zero-message task is the optimistic stub and is
+    /// filtered out; the conversation must become restorable.
+    #[test]
+    fn restorable_after_filtering_optimistic_stub() {
+        let conv = agent_conversation_with_tasks(vec![
+            make_task("stub", None, 0),
+            make_task("real", None, 3),
+        ]);
+
+        assert_eq!(optimistic_stub_task_id(&conv.tasks), Some("stub"));
+        let filtered = conv.tasks_for_restore();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, "real");
+        assert!(conv.is_restorable());
+    }
+
+    /// Case (c) variant: same shape but with `Some(Dependencies { parent_task_id: "" })`
+    /// instead of `None`. Both shapes must be treated as root-shaped.
+    #[test]
+    fn restorable_after_filtering_optimistic_stub_with_empty_parent_id() {
+        let conv = agent_conversation_with_tasks(vec![
+            make_task("stub", Some(""), 0),
+            make_task("real", Some(""), 2),
+        ]);
+
+        assert_eq!(optimistic_stub_task_id(&conv.tasks), Some("stub"));
+        assert!(conv.is_restorable());
+    }
+
+    /// Case (d): two root-shaped tasks where BOTH have messages. The
+    /// stub-detection heuristic must not match, and the conversation must
+    /// stay non-restorable so we don't accidentally widen the original
+    /// invariant.
+    #[test]
+    fn non_restorable_with_two_message_carrying_root_tasks() {
+        let conv = agent_conversation_with_tasks(vec![
+            make_task("root_a", None, 1),
+            make_task("root_b", None, 1),
+        ]);
+        assert_eq!(optimistic_stub_task_id(&conv.tasks), None);
+        assert!(!conv.is_restorable());
+    }
+
+    /// Case (e): three root-shaped tasks (regardless of message counts) must
+    /// remain non-restorable.
+    #[test]
+    fn non_restorable_with_three_root_tasks() {
+        let conv = agent_conversation_with_tasks(vec![
+            make_task("root_a", None, 0),
+            make_task("root_b", None, 1),
+            make_task("root_c", None, 2),
+        ]);
+        assert_eq!(optimistic_stub_task_id(&conv.tasks), None);
+        assert!(!conv.is_restorable());
+    }
+
+    /// Safety net: two zero-message root-shaped tasks (no "real" task to
+    /// promote) must NOT match the optimistic-stub pattern. We require
+    /// exactly one zero-message AND one non-empty task before filtering.
+    #[test]
+    fn no_stub_match_when_both_root_tasks_are_empty() {
+        let conv =
+            agent_conversation_with_tasks(vec![make_task("a", None, 0), make_task("b", None, 0)]);
+        assert_eq!(optimistic_stub_task_id(&conv.tasks), None);
+        assert!(!conv.is_restorable());
+    }
 
     #[test]
     fn agent_conversation_data_roundtrips_last_event_sequence() {
