@@ -994,7 +994,10 @@ impl AgentConversation {
     /// stub task (if any) removed. Canonical helper for the conversion
     /// site in `convert_persisted_conversation_to_ai_conversation_with_metadata`
     /// that needs to pass `Vec<api::Task>` into
-    /// [`crate::api::AIConversation::new_restored`] without re-implementing
+    /// `AIConversation::new_restored` (defined in the `warp` crate at
+    /// `app/src/ai/agent/conversation.rs`; no rustdoc link here because
+    /// cross-crate paths from `persistence` to `warp` are not expressible
+    /// without churn that adds no navigation value) without re-implementing
     /// the stub-removal `retain`.
     pub fn into_tasks_for_restore(mut self) -> Vec<api::Task> {
         if let Some(stub_id) = optimistic_stub_task_id(&self.tasks).map(str::to_string) {

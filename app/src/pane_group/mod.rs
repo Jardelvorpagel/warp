@@ -4103,11 +4103,14 @@ impl PaneGroup {
     /// because the run is finished. If `false` (the task was
     /// `ActiveUnattachable`, i.e. still running on the server but not
     /// joinable from this client), we skip the tombstone so the user is not
-    /// led to believe a still-streaming run has ended.
+    /// led to believe a still-streaming run has ended. This gate applies
+    /// uniformly to all three spawn-continuation branches — successful
+    /// merge, merge error, and non-Oz / fetch-failure fallback — via
+    /// `attach_ambient_session_and_maybe_tombstone`.
     ///
-    /// Falls back to the live-session attach + tombstone path if the
-    /// transcript fetch fails or the merge errors out (e.g. placeholder is
-    /// no longer in `conversations_by_id`).
+    /// Falls back to the live-session attach (with conditional tombstone)
+    /// if the transcript fetch fails or the merge errors out (e.g.
+    /// placeholder is no longer in `conversations_by_id`).
     fn hydrate_remote_child_transcript_in_place(
         &mut self,
         pane_id: PaneId,
@@ -4174,64 +4177,71 @@ impl PaneGroup {
                                     );
                                 });
                             }
-                            // After merging, still attach to the live
-                            // ambient session so streaming runs continue to
-                            // attach as before; transcript is now visible
-                            // via the merged exchanges.
-                            group.apply_existing_ambient_task_to_pane(
-                                pane_id, child_id, task_id, ctx,
-                            );
-                            // Insert the conversation-ended tombstone only
-                            // when the task is in a terminal state. For
-                            // `ActiveUnattachable` tasks the run is still
-                            // executing on the server and the tombstone
-                            // would falsely signal completion.
-                            if task_is_terminal {
-                                if let Some(terminal_view) =
-                                    group.terminal_view_from_pane_id(pane_id, ctx)
-                                {
-                                    terminal_view.update(ctx, |view, ctx| {
-                                        view.insert_conversation_ended_tombstone_with_resolved_cta(
-                                            ctx,
-                                        );
-                                    });
-                                }
-                            }
                         }
                         Err(err) => {
                             log::warn!(
                                 "merge_cloud_tasks_into_existing_conversation failed for {child_id:?}: {err:#}"
                             );
-                            group.apply_existing_ambient_task_to_pane(
-                                pane_id, child_id, task_id, ctx,
-                            );
-                            if let Some(terminal_view) =
-                                group.terminal_view_from_pane_id(pane_id, ctx)
-                            {
-                                terminal_view.update(ctx, |view, ctx| {
-                                    view.insert_conversation_ended_tombstone_with_resolved_cta(
-                                        ctx,
-                                    );
-                                });
-                            }
                         }
                     }
                 }
                 Some(CloudConversationData::CLIAgent(_)) | None => {
-                    // Non-Oz transcript or fetch failure — fall back to the
-                    // pre-Fix-B behavior (attach to ambient session +
-                    // tombstone).
-                    group.apply_existing_ambient_task_to_pane(
-                        pane_id, child_id, task_id, ctx,
-                    );
-                    if let Some(terminal_view) = group.terminal_view_from_pane_id(pane_id, ctx) {
-                        terminal_view.update(ctx, |view, ctx| {
-                            view.insert_conversation_ended_tombstone_with_resolved_cta(ctx);
-                        });
-                    }
+                    // Non-Oz transcript or fetch failure — the
+                    // post-match call below still attaches to the live
+                    // ambient session and conditionally inserts the
+                    // tombstone, matching the pre-Fix-B behavior except
+                    // for the `task_is_terminal` gate.
                 }
             }
+
+            // Single post-match step: attach to the live ambient session
+            // and conditionally insert the conversation-ended tombstone.
+            // Centralising this guarantees the `task_is_terminal` gate is
+            // applied uniformly across all three branches; previously the
+            // Err and non-Oz/None branches inserted the tombstone
+            // unconditionally, which made an `ActiveUnattachable` run
+            // whose transcript fetch failed look ended even though it was
+            // still streaming on the server.
+            group.attach_ambient_session_and_maybe_tombstone(
+                pane_id,
+                child_id,
+                task_id,
+                task_is_terminal,
+                ctx,
+            );
         });
+    }
+
+    /// Post-match step for `hydrate_remote_child_transcript_in_place`:
+    /// attach the hidden child pane to the live ambient session via
+    /// `apply_existing_ambient_task_to_pane`, then insert the
+    /// conversation-ended tombstone iff the originating task was in a
+    /// terminal state.
+    ///
+    /// Splitting this out keeps the `task_is_terminal` gate consistent
+    /// across the three spawn-continuation branches (Ok-merge, Err-merge,
+    /// non-Oz / fetch-failure fallback). Without the gate, an
+    /// `ActiveUnattachable` run whose transcript fetch errored out or
+    /// returned a non-Oz payload would still get a "conversation ended"
+    /// tombstone in the local UI even though the run is still streaming
+    /// server-side.
+    fn attach_ambient_session_and_maybe_tombstone(
+        &mut self,
+        pane_id: PaneId,
+        child_id: AIConversationId,
+        task_id: AmbientAgentTaskId,
+        task_is_terminal: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.apply_existing_ambient_task_to_pane(pane_id, child_id, task_id, ctx);
+        if !task_is_terminal {
+            return;
+        }
+        if let Some(terminal_view) = self.terminal_view_from_pane_id(pane_id, ctx) {
+            terminal_view.update(ctx, |view, ctx| {
+                view.insert_conversation_ended_tombstone_with_resolved_cta(ctx);
+            });
+        }
     }
 
     /// Fetches conversation data and loads it into the given transcript viewer.
