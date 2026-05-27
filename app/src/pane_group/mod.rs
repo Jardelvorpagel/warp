@@ -50,7 +50,9 @@ use crate::ai::agent_conversations_model::{
     AgentConversationsModelEvent,
 };
 use crate::ai::ai_document_view::AIDocumentView;
-use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::ai::ambient_agents::{
+    AmbientAgentLiveSessionState, AmbientAgentTask, AmbientAgentTaskId,
+};
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::ai::blocklist::history_model::CloudConversationData;
 use crate::ai::blocklist::inline_action::code_diff_view::CodeDiffView;
@@ -1074,6 +1076,45 @@ enum AmbientRestoreKind {
     /// If there's no task ID to restore, we open a fresh cloud mode pane
     /// (this is a valid state from when a user quits with an empty cloud mode pane).
     NewCloudConversation,
+}
+
+/// Decision returned by [`decide_remote_child_hydration_action`]; describes
+/// how to hydrate a restored hidden remote-child pane given the current
+/// state of its [`AmbientAgentTask`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RemoteChildHydrationAction {
+    /// The task has a running execution with an attachable shared-session
+    /// id. Attach the existing ambient session in place.
+    LiveAttach,
+    /// The task has no attachable live session but does carry a server
+    /// conversation token. Fetch the cloud transcript and merge it onto
+    /// the local placeholder.
+    LoadTranscript {
+        /// Server conversation token to load and merge.
+        server_token: ServerConversationToken,
+    },
+    /// The task has neither an attachable live session nor a server
+    /// conversation token. Fall back to the pre-Fix-B behavior (attach to
+    /// the ambient session, then insert the conversation-ended tombstone).
+    Fallback,
+}
+
+/// Pure decision function used by
+/// [`PaneGroup::attempt_remote_child_hydration`]: given an
+/// [`AmbientAgentTask`], choose how to hydrate a restored hidden
+/// remote-child pane. Pulled out into a free function so it can be unit
+/// tested without standing up a full `PaneGroup`.
+fn decide_remote_child_hydration_action(task: &AmbientAgentTask) -> RemoteChildHydrationAction {
+    match task.active_live_session_state() {
+        AmbientAgentLiveSessionState::Attachable { .. } => RemoteChildHydrationAction::LiveAttach,
+        AmbientAgentLiveSessionState::Inactive
+        | AmbientAgentLiveSessionState::ActiveUnattachable => match task.conversation_id() {
+            Some(token) => RemoteChildHydrationAction::LoadTranscript {
+                server_token: ServerConversationToken::new(token.to_string()),
+            },
+            None => RemoteChildHydrationAction::Fallback,
+        },
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3912,7 +3953,18 @@ impl PaneGroup {
 
     /// Resolves a hydration action for a restored remote-child pane and
     /// applies it in place. Called both directly (sync path) and from the
-    /// long-lived AgentConversationsModel subscription (async retry).
+    /// long-lived `AgentConversationsModel` subscription (async retry).
+    ///
+    /// Inspects the [`AmbientAgentTask`] directly instead of routing through
+    /// `AgentConversationsModel::resolve_open_action`. The shared resolver
+    /// returns `RestoreOrNavigateToConversation` once the local placeholder
+    /// has been eagerly hydrated into `conversations_by_id`, which doesn't
+    /// distinguish between "navigate to the local conversation" and "hydrate
+    /// the cloud transcript onto the local placeholder". The hydration path
+    /// always wants the latter when the task has a server conversation
+    /// token, so we make the decision from the task itself. See
+    /// [`decide_remote_child_hydration_action`] for the pure decision
+    /// function backing this dispatch.
     fn attempt_remote_child_hydration(
         &mut self,
         child_id: AIConversationId,
@@ -3928,22 +3980,20 @@ impl PaneGroup {
             return;
         };
 
-        let resolution = AgentConversationsModel::resolve_open_action(
-            AgentConversationNavigationSubject::Entry(AgentConversationEntryId::AmbientRun(
-                task_id,
-            )),
-            None,
-            ctx,
-        );
+        let Some(task) = AgentConversationsModel::as_ref(ctx).get_task_data(&task_id) else {
+            // Defensive: this helper is only called from sync hydration
+            // (immediately after a successful fetch) or from the deferred
+            // retry path (which only enters after `get_task_data` returned
+            // Some). If the task data is gone, leave any pending entry in
+            // place so the next `TasksUpdated` event can re-drive.
+            return;
+        };
 
-        match resolution {
-            Some(WorkspaceAction::OpenOrAttachAmbientAgentConversation { task_id, .. }) => {
+        match decide_remote_child_hydration_action(&task) {
+            RemoteChildHydrationAction::LiveAttach => {
                 self.enter_remote_child_existing_session_in_place(pane_id, child_id, task_id, ctx);
             }
-            Some(WorkspaceAction::OpenConversationTranscriptViewer {
-                conversation_id: server_token,
-                ambient_agent_task_id: _,
-            }) => {
+            RemoteChildHydrationAction::LoadTranscript { server_token } => {
                 self.hydrate_remote_child_transcript_in_place(
                     pane_id,
                     child_id,
@@ -3952,12 +4002,11 @@ impl PaneGroup {
                     ctx,
                 );
             }
-            _ => {
-                // No live session and no transcript — fall back to the
-                // existing behavior: enter the (possibly empty) ambient
-                // session and insert the conversation-ended tombstone. This
-                // matches the pre-Fix-B behavior so we are never worse than
-                // today.
+            RemoteChildHydrationAction::Fallback => {
+                // No live session and no server conversation token — fall
+                // back to the pre-Fix-B behavior: enter the (possibly empty)
+                // ambient session and insert the conversation-ended
+                // tombstone. This guarantees we're never worse than today.
                 self.enter_remote_child_existing_session_in_place(pane_id, child_id, task_id, ctx);
                 if let Some(terminal_view) = self.terminal_view_from_pane_id(pane_id, ctx) {
                     terminal_view.update(ctx, |view, ctx| {

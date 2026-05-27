@@ -3038,3 +3038,113 @@ fn test_focused_pane_is_synchronized_with_application_focus() {
         });
     });
 }
+
+/// Builds an [`AmbientAgentTask`] tailored for unit-testing
+/// [`decide_remote_child_hydration_action`].
+///
+/// * `attachable` controls whether the live-session state resolves to
+///   [`AmbientAgentLiveSessionState::Attachable`] (`true`),
+///   [`AmbientAgentLiveSessionState::ActiveUnattachable`] (`false` + the
+///   `active_but_unparseable` toggle), or
+///   [`AmbientAgentLiveSessionState::Inactive`] (`false` + no live execution).
+/// * `conversation_id` populates the server conversation token used by the
+///   `LoadTranscript` branch.
+fn hydration_decision_task(
+    state: AmbientAgentTaskState,
+    is_sandbox_running: bool,
+    session_id: Option<&str>,
+    conversation_id: Option<&str>,
+) -> AmbientAgentTask {
+    let mut task = ambient_agent_task_for_current_user(new_ambient_agent_task_id());
+    task.state = state;
+    task.is_sandbox_running = is_sandbox_running;
+    task.session_id = session_id.map(str::to_string);
+    task.session_link = None;
+    task.conversation_id = conversation_id.map(str::to_string);
+    task
+}
+
+#[test]
+fn decide_remote_child_hydration_attachable_live_session_chooses_live_attach() {
+    // InProgress + sandbox running + parseable session id -> Attachable.
+    let task = hydration_decision_task(
+        AmbientAgentTaskState::InProgress,
+        true,
+        Some("11111111-1111-1111-1111-111111111111"),
+        Some("server-token-irrelevant-for-attach"),
+    );
+    assert_eq!(
+        task.active_live_session_state(),
+        AmbientAgentLiveSessionState::Attachable {
+            session_id: "11111111-1111-1111-1111-111111111111".parse().unwrap(),
+        },
+    );
+
+    assert_eq!(
+        decide_remote_child_hydration_action(&task),
+        RemoteChildHydrationAction::LiveAttach,
+    );
+}
+
+#[test]
+fn decide_remote_child_hydration_inactive_with_token_loads_transcript() {
+    // Terminal state -> Inactive, server token present -> LoadTranscript.
+    let task = hydration_decision_task(
+        AmbientAgentTaskState::Succeeded,
+        false,
+        None,
+        Some("my-server-token"),
+    );
+    assert_eq!(
+        task.active_live_session_state(),
+        AmbientAgentLiveSessionState::Inactive,
+    );
+
+    assert_eq!(
+        decide_remote_child_hydration_action(&task),
+        RemoteChildHydrationAction::LoadTranscript {
+            server_token: ServerConversationToken::new("my-server-token".to_string()),
+        },
+    );
+}
+
+#[test]
+fn decide_remote_child_hydration_active_unattachable_with_token_loads_transcript() {
+    // InProgress + sandbox running + unparseable session id ->
+    // ActiveUnattachable. With a server token we still prefer LoadTranscript
+    // over Fallback so the user sees the merged transcript instead of a bare
+    // tombstone.
+    let task = hydration_decision_task(
+        AmbientAgentTaskState::InProgress,
+        true,
+        Some("not-a-valid-uuid"),
+        Some("unattachable-server-token"),
+    );
+    assert_eq!(
+        task.active_live_session_state(),
+        AmbientAgentLiveSessionState::ActiveUnattachable,
+    );
+
+    assert_eq!(
+        decide_remote_child_hydration_action(&task),
+        RemoteChildHydrationAction::LoadTranscript {
+            server_token: ServerConversationToken::new("unattachable-server-token".to_string()),
+        },
+    );
+}
+
+#[test]
+fn decide_remote_child_hydration_inactive_without_token_falls_back() {
+    // Terminal state, no server token -> nothing to attach to and nothing to
+    // load, so we expose the pre-Fix-B tombstone path.
+    let task = hydration_decision_task(AmbientAgentTaskState::Succeeded, false, None, None);
+    assert_eq!(
+        task.active_live_session_state(),
+        AmbientAgentLiveSessionState::Inactive,
+    );
+
+    assert_eq!(
+        decide_remote_child_hydration_action(&task),
+        RemoteChildHydrationAction::Fallback,
+    );
+}
