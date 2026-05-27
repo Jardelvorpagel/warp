@@ -10452,12 +10452,14 @@ impl Input {
                                     .as_ref()
                                     .and_then(BlockMetadata::display_working_directory)
                                     .and_then(|pwd| {
+                                        let canonical_pwd =
+                                            dunce::canonicalize(Path::new(pwd)).ok()?;
                                         // Find git repo and construct absolute path
                                         use repo_metadata::repositories::DetectedRepositories;
                                         use warp_util::local_or_remote_path::LocalOrRemotePath;
                                         let git_repo_path = DetectedRepositories::as_ref(ctx)
                                             .get_root_for_path(&LocalOrRemotePath::Local(
-                                                Path::new(pwd).to_path_buf(),
+                                                canonical_pwd.clone(),
                                             ))
                                             .and_then(|r| PathBuf::try_from(r).ok())?;
                                         let absolute_path = git_repo_path.join(file_path);
@@ -10471,7 +10473,7 @@ impl Input {
                                         let relative_path = warp_util::path::to_relative_path(
                                             is_wsl,
                                             &absolute_path,
-                                            Path::new(pwd),
+                                            &canonical_pwd,
                                         );
 
                                         match relative_path {

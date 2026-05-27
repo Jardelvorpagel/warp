@@ -13069,9 +13069,9 @@ impl TerminalView {
         self.any_session_contains_remote_blocks |= self.active_block_is_considered_remote(ctx);
         self.update_focused_terminal_info(ctx);
 
-        if let Some(working_directory) = self.display_pwd_if_local(ctx) {
+        if let Some(cwd) = self.canonical_pwd_if_local() {
+            let path_buf = cwd.as_path_buf().clone();
             CodebaseIndexManager::handle(ctx).update(ctx, |manager, _ctx| {
-                let path_buf = PathBuf::from(&working_directory);
                 manager.handle_session_bootstrapped(&path_buf);
             });
         }
@@ -13514,9 +13514,8 @@ impl TerminalView {
 
     // Show or hide codebase index speedbump depending when a settings change happens.
     fn check_codebase_index_speedbump_on_settings_changed(&mut self, ctx: &mut ViewContext<Self>) {
-        if let Some(working_directory) = self.display_pwd_if_local(ctx) {
-            let path_buf = PathBuf::from(&working_directory);
-            self.update_repo_banner_state(path_buf, ctx);
+        if let Some(cwd) = self.canonical_pwd_if_local() {
+            self.update_repo_banner_state(cwd.as_path_buf().clone(), ctx);
         }
     }
 
