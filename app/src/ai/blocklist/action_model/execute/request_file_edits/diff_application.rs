@@ -8,8 +8,8 @@ use std::{
 };
 
 use ai::diff_validation::{
-    fuzzy_match_diffs, fuzzy_match_v4a_diffs, AIRequestedCodeDiff, DiffDelta, DiffMatchFailures,
-    DiffType, ParsedDiff, SearchAndReplace, V4AHunk,
+    fuzzy_match_diffs, fuzzy_match_v4a_diffs, AIRequestedCodeDiff, DiffDelta, DiffMatchFailure,
+    DiffMatchFailures, DiffType, ParsedDiff, SearchAndReplace, V4AHunk,
 };
 use itertools::Itertools;
 use vec1::Vec1;
@@ -29,6 +29,7 @@ use super::telemetry::{
     DiffInvalidFileEvent, DiffMatchFailedEvent, MissingLineNumbersEvent,
     RequestFileEditsTelemetryEvent,
 };
+const MAX_FUZZY_MATCH_FAILURE_DETAILS: usize = 3;
 
 /// Result of reading a file from disk or a remote server.
 ///
@@ -107,11 +108,16 @@ impl DiffApplicationError {
                 let mut message = String::new();
                 if match_failures.fuzzy_match_failures > 0 {
                     let _ = write!(message, "Could not apply all diffs to {file}.");
+                    append_fuzzy_match_failure_details(&mut message, match_failures);
                 }
 
                 if match_failures.noop_deltas > 0 {
                     if !message.is_empty() {
-                        message.push(' ');
+                        if message.contains('\n') {
+                            message.push('\n');
+                        } else {
+                            message.push(' ');
+                        }
                     }
                     let _ = write!(message, "The changes to {file} were already made.");
                 }
@@ -157,6 +163,54 @@ impl DiffApplicationError {
     }
 }
 
+fn append_fuzzy_match_failure_details(message: &mut String, match_failures: &DiffMatchFailures) {
+    if match_failures.fuzzy_match_failure_details.is_empty() {
+        return;
+    }
+
+    use std::fmt::Write;
+
+    message.push_str(" The following search blocks could not be matched:");
+    for (index, failure) in match_failures
+        .fuzzy_match_failure_details
+        .iter()
+        .take(MAX_FUZZY_MATCH_FAILURE_DETAILS)
+        .enumerate()
+    {
+        let _ = write!(message, "\n{}. ", index + 1);
+        append_fuzzy_match_failure(message, failure);
+    }
+
+    let remaining = match_failures
+        .fuzzy_match_failure_details
+        .len()
+        .saturating_sub(MAX_FUZZY_MATCH_FAILURE_DETAILS);
+    if remaining > 0 {
+        let _ = write!(message, "\n...and {remaining} more failed diff(s).");
+    }
+}
+
+fn append_fuzzy_match_failure(message: &mut String, failure: &DiffMatchFailure) {
+    use std::fmt::Write;
+
+    if let Some(range) = &failure.range {
+        let end_line = range.end.saturating_sub(1);
+        if range.start == end_line {
+            let _ = write!(message, "Expected line {}. ", range.start);
+        } else {
+            let _ = write!(message, "Expected lines {}-{}. ", range.start, end_line);
+        }
+    }
+
+    message.push_str("Search:\n");
+    message.push_str(&failure.search);
+
+    if let Some(replace) = &failure.replace {
+        message.push_str("\nReplace:\n");
+        message.push_str(replace);
+    }
+}
+
 /// Given a list of suggested edits from the server API, parse it into applicable diffs to be shown
 /// to the user as a series of code diffs.
 ///
@@ -191,7 +245,7 @@ where
                     auth_state,
                     RequestFileEditsTelemetryEvent::DiffMatchFailed(DiffMatchFailedEvent {
                         identifiers: ai_identifiers.clone(),
-                        failures: *match_failures,
+                        failures: match_failures.clone(),
                         passive_diff,
                     }),
                     background_executor
@@ -592,7 +646,7 @@ async fn apply_search_replace<F, Fut>(
                     );
                     result.errors.push(DiffApplicationError::UnmatchedDiffs {
                         file: file_path.clone(),
-                        match_failures: *failures,
+                        match_failures: failures.clone(),
                     });
                 }
             }
@@ -691,7 +745,7 @@ async fn apply_v4a_update<F, Fut>(
                 );
                 result.errors.push(DiffApplicationError::UnmatchedDiffs {
                     file: file_path.clone(),
-                    match_failures: *failures,
+                    match_failures: failures.clone(),
                 });
             }
             return;
@@ -752,7 +806,7 @@ async fn apply_v4a_update<F, Fut>(
                 );
                 result.errors.push(DiffApplicationError::UnmatchedDiffs {
                     file: file_path.clone(),
-                    match_failures: *failures,
+                    match_failures: failures.clone(),
                 });
             }
         }

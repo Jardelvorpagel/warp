@@ -56,6 +56,11 @@ fn test_apply_diffs_error_when_no_diffs_applied() {
             }
             other => panic!("Expected a single UnmatchedDiffs error, got {other:?}"),
         }
+
+        let message = DiffApplicationError::error_for_conversation(&errors);
+        assert!(message.contains("This content doesn't exist in the file"));
+        assert!(message.contains("Replacement content"));
+        assert!(message.contains("Expected line 1"));
     });
 }
 
@@ -516,12 +521,17 @@ fn test_format_match_error() {
             fuzzy_match_failures: 1,
             noop_deltas: 0,
             missing_line_numbers: 0,
+            fuzzy_match_failure_details: vec![DiffMatchFailure {
+                search: "bad search".to_string(),
+                replace: Some("good replace".to_string()),
+                range: Some(1..2),
+            }],
         },
     };
 
     assert_eq!(
         err.to_conversation_message(),
-        "Could not apply all diffs to file.txt."
+        "Could not apply all diffs to file.txt. The following search blocks could not be matched:\n1. Expected line 1. Search:\nbad search\nReplace:\ngood replace"
     );
 
     let err = DiffApplicationError::UnmatchedDiffs {
@@ -530,6 +540,7 @@ fn test_format_match_error() {
             fuzzy_match_failures: 0,
             noop_deltas: 1,
             missing_line_numbers: 0,
+            fuzzy_match_failure_details: Vec::new(),
         },
     };
 
@@ -544,13 +555,44 @@ fn test_format_match_error() {
             fuzzy_match_failures: 2,
             noop_deltas: 2,
             missing_line_numbers: 0,
+            fuzzy_match_failure_details: vec![DiffMatchFailure {
+                search: "bad search".to_string(),
+                replace: None,
+                range: None,
+            }],
         },
     };
 
     assert_eq!(
         err.to_conversation_message(),
-        "Could not apply all diffs to file.txt. The changes to file.txt were already made."
+        "Could not apply all diffs to file.txt. The following search blocks could not be matched:\n1. Search:\nbad search\nThe changes to file.txt were already made."
     );
+}
+
+#[test]
+fn test_format_match_error_caps_failure_details() {
+    let details = (0..4)
+        .map(|index| DiffMatchFailure {
+            search: format!("bad search {index}"),
+            replace: None,
+            range: None,
+        })
+        .collect();
+    let err = DiffApplicationError::UnmatchedDiffs {
+        file: "file.txt".to_string(),
+        match_failures: DiffMatchFailures {
+            fuzzy_match_failures: 4,
+            noop_deltas: 0,
+            missing_line_numbers: 0,
+            fuzzy_match_failure_details: details,
+        },
+    };
+
+    let message = err.to_conversation_message();
+    assert!(message.contains("bad search 0"));
+    assert!(message.contains("bad search 2"));
+    assert!(!message.contains("bad search 3"));
+    assert!(message.contains("...and 1 more failed diff(s)."));
 }
 
 #[test]
@@ -565,13 +607,18 @@ fn test_format_multiple_errors() {
                 fuzzy_match_failures: 1,
                 noop_deltas: 0,
                 missing_line_numbers: 0,
+                fuzzy_match_failure_details: vec![DiffMatchFailure {
+                    search: "missing search".to_string(),
+                    replace: None,
+                    range: None,
+                }],
             },
         },
     ];
 
     assert_eq!(
         DiffApplicationError::error_for_conversation(&errs),
-        "* missing.rs does not exist. Is the path correct?\n* Could not apply all diffs to unmatched.rs."
+        "* missing.rs does not exist. Is the path correct?\n* Could not apply all diffs to unmatched.rs. The following search blocks could not be matched:\n1. Search:\nmissing search"
     );
 }
 
