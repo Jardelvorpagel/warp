@@ -190,8 +190,8 @@ if [[ "$ARTIFACT" == "cli" ]]; then
     BINARY_NAME="${BINARY_NAME/warp/oz}"
   fi
 elif [[ "$ARTIFACT" == "warpctrl" ]]; then
-  WARP_BIN="warpctrl"
   BINARY_NAME="warpctrl"
+  PACKAGES=()
 fi
 
 # Artifact-specific configuration
@@ -244,6 +244,23 @@ else
   echo 'Skipping `cargo build` step due to --skip-build argument'
 fi
 
+if [[ "$ARTIFACT" == "warpctrl" ]]; then
+  echo "Copying control-mode binary into $OUT_DIR/$WARP_BIN"
+  cp "$EXECUTABLE_PATH" "$OUT_DIR/$WARP_BIN"
+  WARPCTRL_SCRIPT_PATH="$OUT_DIR/warpctrl"
+  echo "Creating warpctrl wrapper script at $WARPCTRL_SCRIPT_PATH"
+  cat > "$WARPCTRL_SCRIPT_PATH" << EOF
+#!/usr/bin/env bash
+script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+exec "\$script_dir/$WARP_BIN" --warpctrl "\$@"
+EOF
+  chmod +x "$WARPCTRL_SCRIPT_PATH"
+fi
+BINARY_PATH="$EXECUTABLE_PATH"
+if [[ "$ARTIFACT" == "warpctrl" ]]; then
+  BINARY_PATH="$WARPCTRL_SCRIPT_PATH"
+fi
+
 # Prepare bundled resources for CLI builds.
 if [[ "$ARTIFACT" == "cli" || "$ARTIFACT" == "warpctrl" ]]; then
   echo "Preparing CLI resources directory"
@@ -257,7 +274,7 @@ fi
 # as the directory containing all built packages.
 if [ "${GITHUB_ACTIONS}" == "true" ]; then
   echo "::echo::on"
-  echo "executable_path=$EXECUTABLE_PATH" >> "$GITHUB_OUTPUT"
+  echo "executable_path=$BINARY_PATH" >> "$GITHUB_OUTPUT"
   echo "debug_executable_path=$DEBUG_EXECUTABLE_PATH" >> "$GITHUB_OUTPUT"
   echo "packages_dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
   echo "bundled_resources_dir=${BUNDLED_RESOURCES_DIR:-}" >> "$GITHUB_OUTPUT"

@@ -54,7 +54,7 @@ impl LocalControlMode {
         match self {
             Self::Disabled => "Disabled",
             Self::EnabledWithinWarp => "Enabled within Warp",
-            Self::EnabledEverywhere => "Enabled everywhere",
+            Self::EnabledEverywhere => "Enabled everywhere, including outside Warp",
         }
     }
 }

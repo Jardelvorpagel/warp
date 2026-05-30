@@ -29,16 +29,16 @@ Human power-user scripting is a secondary beneficiary of the same design. Script
 Persistent settings changes, Warp Drive creation or sharing, cross-app preference migration, terminal command execution, and other underlying-data mutations must be visibly reviewable or require stronger explicit permission than low-risk workspace organization. `warpctrl` should support full typed control over time, but each command must be progressively unlocked through action categories, target resolution, Agent Profile permissions, Scripting settings, and authenticated-user requirements rather than broad unchecked authority.
 ## Behavior
 1. The Warp control CLI operates only on running local Warp app processes. If no compatible Warp process is available, the CLI exits non-zero with a clear “no running Warp instance found” error.
-2. The CLI exposes only explicitly allowlisted actions. Unknown action names, unsupported parameter combinations, or requests for non-allowlisted capabilities fail with structured errors; they are never forwarded to arbitrary internal dispatch.
+2. The CLI exposes only explicitly allowlisted actions. Protocol-level unknown action names, unsupported local-control parameter combinations, or requests for non-allowlisted capabilities fail with structured local-control errors; they are never forwarded to arbitrary internal dispatch. Clap parser usage errors, such as an unknown CLI subcommand or invalid flag syntax, may use the parser's normal CLI error behavior unless a later branch explicitly wraps them.
 3. Every successful mutating request identifies:
    - The Warp process instance that executed it.
    - The resolved target, when the action addresses a window, tab, pane, terminal session, terminal block, file, Warp Drive object, surface, or other targetable noun.
    - A success payload suitable for JSON output.
-4. Every failure identifies:
+4. Every protocol or runtime local-control failure identifies:
    - A stable machine-readable error code.
    - A human-readable explanation.
    - Any selector that was ambiguous, missing, stale, unsupported, or invalid.
-5. The CLI supports human-readable output by default and JSON output for scripts. JSON output has stable field names and is available for discovery commands, read commands, successful mutations, and failures.
+5. The CLI supports human-readable output by default and JSON output for scripts. JSON output has stable field names and is available for discovery commands, read commands, successful mutations, and protocol or runtime local-control failures.
 6. The CLI supports process discovery and instance selection:
    - `warpctrl instance list` returns all reachable local Warp app processes that support the protocol.
    - Each process has an opaque `instance_id`, a channel/build identity, and enough display metadata for a developer to choose it.
@@ -159,6 +159,8 @@ Persistent settings changes, Warp Drive creation or sharing, cross-app preferenc
    Terminal command execution and typed Warp Drive object mutations are no longer excluded from the full product scope, but they belong to later authenticated underlying-data mutation branches and require stronger authenticated-user and permission gates than app-state or settings mutations. Local file content reads, writes, appends, deletes, and other filesystem-content mutations are excluded from the public `warpctrl` catalog; file/path support is limited to app-state intents such as opening a path in Warp and metadata reads of files already open in Warp.
 27. CLI command names should be noun-oriented and discoverable. During the provisional wrapper-script phase, the control CLI should expose a `warpctrl ...` command surface:
    - `warpctrl instance list`
+   - `warpctrl app ping`
+   - `warpctrl app version`
    - `warpctrl app active`
    - `warpctrl tab create`
    - `warpctrl tab rename --window-id <window_id> --tab-id <tab_id> "Build logs"`
@@ -209,7 +211,7 @@ The product surface must distinguish what kind of state a command touches. This 
 - **Underlying data mutations** can change user data or cause external side effects: typed CRUD operations on Warp Drive objects, sharing Warp Drive objects to the user's team through an explicit approved command, inserting content into Warp Drive views, running allowlisted Warp Drive workflows, and running terminal commands through an explicit `input run` action. Accepted-command submission, agent-prompt submission, local file content mutation, arbitrary workflow execution, and arbitrary internal dispatch remain excluded until separately reviewed.
 A command that touches multiple categories must require the strongest applicable permission. For example, `file open` is an app-state mutation because it opens a visible Warp editor/view, while `input run` is an underlying data mutation because it executes a command in the target session.
 ### Targeting flags
-All commands that address a running app target accept the same selector flags where meaningful. Generic `--window`, `--tab`, `--pane`, `--session`, and `--block` flags accept the selector grammar below; explicit typed aliases are provided so scripts can avoid string parsing ambiguity:
+The full product should converge on shared selector flags for every command that addresses a running app target. The current foundation branch is not required to expose that complete CLI grammar yet: it supports instance selection with `--instance` and `--pid` for the implemented commands, while the shared window/tab/pane/session/block selector flags are deferred to the later target-selector branch that implements those target families. When the shared grammar ships, generic `--window`, `--tab`, `--pane`, `--session`, and `--block` flags accept the selector grammar below; explicit typed aliases are provided so scripts can avoid string parsing ambiguity:
 - `--instance <instance_id>` selects a running Warp process from `warpctrl instance list`.
 - `--pid <pid>` is a convenience instance selector and conflicts with `--instance`.
 - `--window <active|id:<id>|index:<n>|title:<title>>` selects a window inside the instance.
@@ -444,15 +446,15 @@ The CLI should expose auth/status flows for both modes:
 This authenticated scripting protocol applies only to actions whose allowlist entry requires a true logged-in Warp user, external API-key identity, or underlying-data-mutation authority. Logged-out-safe local actions continue to use local-control credentials without requiring Warp account login or API-key setup.
 ### Execution context policy
 `warpctrl` should eventually distinguish verified invocations from inside Warp-managed terminal sessions from external invocations. The current foundation branch implements the setting shape for both contexts, supports external invocation only when the user explicitly enables the broadest mode, and must reject verified Warp-terminal claims until the proof broker is implemented.
-- **Verified Warp-terminal invocation:** a `warpctrl` process started inside a Warp-managed terminal session and able to present an app-issued execution-context proof. This is allowed by the default **Enabled within Warp** mode once the proof broker exists. When the selected app has a logged-in Warp user, this context can receive authenticated-user grants if the selected mode allows the context and the action's catalog policy allows that grant.
+- **Verified Warp-terminal invocation:** a `warpctrl` process started inside a Warp-managed terminal session and able to present an app-issued execution-context proof. This is allowed when the user selects **Enabled within Warp** or the broadest mode after the proof broker exists; the default disabled mode blocks it. When the selected app has a logged-in Warp user, this context can receive authenticated-user grants if the selected mode allows the context and the action's catalog policy allows that grant.
 - **External invocation:** a `warpctrl` process started outside Warp's terminal, such as from another terminal app, launch agent, IDE, or background script. This is allowed only by **Enabled everywhere, including outside Warp**. When disabled for the selected mode, external invocations receive no local-control credentials, including logged-out-safe metadata credentials.
 - The app must not trust a caller-declared label. Environment variables may help discover the context, but the broker must verify a session-bound capability or equivalent proof before issuing in-Warp-only grants.
 ### Settings surface
 Warp should add a new top-level Settings pane page named **Scripting**. This page should own settings for local scripting and automation surfaces, including Warp control. Warp control should be represented as a single private, local-only mode setting with three choices:
-- **Disabled:** no local-control invocation context can receive credentials.
-- **Enabled within Warp:** default. Allows only verified Warp-managed terminal invocations once the proof broker exists. In the current foundation branch, inside-Warp proof verification is not implemented yet, so requests in this mode are rejected rather than silently treated as external.
+- **Disabled:** default. No local-control invocation context can receive credentials.
+- **Enabled within Warp:** allows only verified Warp-managed terminal invocations once the proof broker exists. In the current foundation branch, inside-Warp proof verification is not implemented yet, so requests in this mode are rejected rather than silently treated as external.
 - **Enabled everywhere, including outside Warp:** allows verified Warp-managed terminal invocations and external local clients such as other terminals, scripts, IDEs, launch agents, and same-user automation to request local-control credentials.
-The Scripting page should explain that the default mode scopes control to Warp-managed terminals, while the broadest mode allows other local apps and scripts to talk to Warp's control plane. Changing the mode should invalidate or prevent credentials for invocation contexts no longer allowed by the selected mode.
+The Scripting page should explain that the default mode blocks local-control credentials, the within-Warp mode is reserved for verified Warp-managed terminals once proof support lands, and the broadest mode allows other local apps and scripts to talk to Warp's control plane. Changing the mode should invalidate or prevent credentials for invocation contexts no longer allowed by the selected mode.
 ### Local-control permission policy
 The Scripting settings page should not expose separate per-risk local-control toggles in the foundation stack. The single mode setting defines which invocation contexts may receive credentials. The app bridge still enforces each action's risk posture, state/data category, authenticated-user requirement, execution-context requirement, and target scope for every request. Enabling the broadest mode must not bypass catalog enforcement or imply permission to run actions that require authenticated scripting identity, logged-in user state, or future review.
 ### Agent Profile permissions

@@ -315,9 +315,6 @@ elif [[ $RELEASE_CHANNEL = "oss" ]]; then
     # (which would otherwise pull in the Sentry framework dependency).
     FEATURES="release_bundle,extern_plist"
 fi
-if [[ "$ARTIFACT" == "warpctrl" ]]; then
-    WARP_BIN="warpctrl"
-fi
 
 OUT_DIR="target/$TARGET_PROFILE_DIR/bundle/osx"
 DOCK_TILE_PLUGIN_DIR="target/$TARGET_PROFILE_DIR/WarpDockTilePlugin.docktileplugin"
@@ -561,6 +558,16 @@ EOF
   # Make the script executable
   chmod +x "$CLI_SCRIPT_PATH"
 
+  WARPCTRL_SCRIPT_PATH="$BUNDLED_RESOURCES_DIR/bin/warpctrl"
+  echo "Creating warpctrl wrapper script..."
+  cat > "$WARPCTRL_SCRIPT_PATH" << 'EOF'
+#!/bin/bash
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec -a "$0" "$script_dir/../../MacOS/WARP_BIN_PLACEHOLDER" --warpctrl "$@"
+EOF
+  sed -i '' "s/WARP_BIN_PLACEHOLDER/$WARP_BIN/" "$WARPCTRL_SCRIPT_PATH"
+  chmod +x "$WARPCTRL_SCRIPT_PATH"
+
   # Store the built artifact locations for GitHub Actions outputs.
   BINARY_PATH="target/$DEFAULT_TARGET/$TARGET_PROFILE_DIR/$WARP_BIN"
   DMG_PATH="$OUT_DIR/$FINAL_DMG_NAME"
@@ -591,6 +598,18 @@ elif [[ "$ARTIFACT" == "cli" || "$ARTIFACT" == "warpctrl" ]]; then
   echo "Copying binary into $OUT_DIR/$WARP_BIN"
   cp "target/$DEFAULT_TARGET/$TARGET_PROFILE_DIR/$WARP_BIN" "$OUT_DIR/$WARP_BIN"
 
+  if [[ "$ARTIFACT" == "warpctrl" ]]; then
+    WARPCTRL_SCRIPT_PATH="$OUT_DIR/warpctrl"
+    echo "Creating warpctrl wrapper script at $WARPCTRL_SCRIPT_PATH"
+    cat > "$WARPCTRL_SCRIPT_PATH" << 'EOF'
+#!/bin/bash
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec -a "$0" "$script_dir/WARP_BIN_PLACEHOLDER" --warpctrl "$@"
+EOF
+    sed -i '' "s/WARP_BIN_PLACEHOLDER/$WARP_BIN/" "$WARPCTRL_SCRIPT_PATH"
+    chmod +x "$WARPCTRL_SCRIPT_PATH"
+  fi
+
   if [[ -n "$TARGET_ARCH" && -e "target/$DEFAULT_TARGET/$TARGET_PROFILE_DIR/$WARP_BIN.dSYM" ]]; then
     echo "Copying .dSYM into $OUT_DIR/$WARP_BIN.dSYM"
     cp -HR "target/$DEFAULT_TARGET/$TARGET_PROFILE_DIR/$WARP_BIN.dSYM" "$OUT_DIR/"
@@ -602,7 +621,11 @@ elif [[ "$ARTIFACT" == "cli" || "$ARTIFACT" == "warpctrl" ]]; then
 
 
   # Set the primary binary path to output.
-  BINARY_PATH="$OUT_DIR/$WARP_BIN"
+  if [[ "$ARTIFACT" == "warpctrl" ]]; then
+    BINARY_PATH="$OUT_DIR/warpctrl"
+  else
+    BINARY_PATH="$OUT_DIR/$WARP_BIN"
+  fi
 else
   echo "Unsupported artifact: $ARTIFACT" >&2
   exit 1

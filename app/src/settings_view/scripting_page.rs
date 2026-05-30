@@ -15,6 +15,7 @@ use settings::Setting as _;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use warpui::elements::{Element, MouseStateHandle};
+use warpui::ui_components::components::UiComponent;
 use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -155,11 +156,19 @@ impl SettingsWidget for LocalControlModeWidget {
         appearance: &Appearance,
         app: &AppContext,
     ) -> Box<dyn Element> {
+        let dropdown_subtext = appearance
+            .ui_builder()
+            .wrappable_text(
+                "Controls whether warpctrl can receive local-control credentials. Disabled blocks all invocation contexts. Enabled within Warp is reserved for verified Warp terminals once proof support lands and rejects requests today. Enabled everywhere, including outside Warp also allows local apps and scripts to request credentials.",
+                true,
+            )
+            .build()
+            .finish();
         render_dropdown_item(
             appearance,
             "warpctrl",
             Some("warpctrl CLI scripting"),
-            None,
+            Some(dropdown_subtext),
             LocalOnlyIconState::for_setting(
                 LocalControlModeSetting::storage_key(),
                 LocalControlModeSetting::sync_to_cloud(),

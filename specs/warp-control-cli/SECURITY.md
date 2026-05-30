@@ -4,7 +4,7 @@ The correct architecture is not a single shared localhost bearer token with clie
 The action-category model is primarily a safety and intent mechanism, not a hard security boundary against malicious same-user software. It lets a user, script, or agent intentionally request metadata-only, data-read, app-state mutation, metadata/configuration mutation, or underlying-data mutation access so it does not accidentally mutate state, expose sensitive content, or execute commands. It should not be described as strong access control against a process that can already run arbitrary commands as the user.
 `warpctrl` has two distinct authorization dimensions: local-control authority and authenticated scripting authority. Local-control authority proves the request is allowed to control the local app. Authenticated scripting authority proves the Warp user or automation identity that is allowed to act on user-authenticated data such as Warp Drive objects, AI conversation traces, synced settings, cloud-backed user state, and execution-underlying actions. Logged-out users should retain a smaller local-only control surface, but authenticated-user and high-risk underlying-data mutation actions require either a verified Warp-terminal grant tied to the selected app's logged-in user or an external Warp-issued API-key grant.
 ## Current foundation status
-The current foundation implementation stores a single local-control mode with three choices: disabled, enabled within Warp by default, and enabled everywhere including outside Warp. Verified inside-Warp invocation is specified as future work because the app-issued terminal-session proof broker, proof injection path, and session registry do not exist yet. Until those pieces land, `InvocationContext::InsideWarp` requests must be rejected with `execution_context_not_allowed`, implemented action metadata must not advertise inside-Warp support, and external requests must receive credentials only when the user selects the broadest mode.
+The current foundation implementation stores a single local-control mode with three choices: disabled by default, enabled within Warp, and enabled everywhere including outside Warp. Verified inside-Warp invocation is specified as future work because the app-issued terminal-session proof broker, proof injection path, and session registry do not exist yet. Until those pieces land, `InvocationContext::InsideWarp` requests must be rejected with `execution_context_not_allowed`, implemented action metadata must not advertise inside-Warp support, and external requests must receive credentials only when the user selects the broadest mode.
 ## Security goals
 - Allow trusted local users and approved automation to control a running Warp instance through a stable, scriptable interface.
 - Prevent unauthenticated localhost clients from invoking read or mutating control actions.
@@ -12,7 +12,7 @@ The current foundation implementation stores a single local-control mode with th
 - Support multiple running Warp processes without a shared global mutating port or global credential.
 - Separate discovery metadata from control authority so enumerating an instance does not automatically grant full control.
 - Require explicit in-app user enablement before local control scripting from outside Warp can issue credentials or accept control requests.
-- Allow local control scripting from verified Warp-managed terminal sessions by default once proof verification exists, subject to the selected local-control mode and action policy.
+- Allow local control scripting from verified Warp-managed terminal sessions once proof verification exists and the user selects a mode that permits that context, subject to action policy.
 - Store the authoritative local-control mode in protected local storage so external apps cannot enable outside-Warp control by editing ordinary settings.
 - Keep raw credential material out of plaintext discovery records and protect it with platform secure storage where available.
 - Distinguish verified `warpctrl` invocations that originate from a Warp-managed terminal session from external same-user invocations.
@@ -91,8 +91,8 @@ Compared with these systems, `warpctrl` should combine:
 The resulting architecture should not claim to solve arbitrary same-user malicious-app isolation. Its real value is preventing web-origin and other-user access, preventing unauthenticated direct localhost calls, keeping raw credentials out of plaintext discovery, giving honest scripts and agents narrow safety grants, and routing high-risk operations through local Warp app validation and user/policy approval.
 ## Authoritative enablement model
 Warp control has one top-level mode setting based on invocation context:
-- **Disabled:** no local-control invocation context can receive credentials.
-- **Enabled within Warp:** default. Controls `warpctrl` invocations from verified Warp-managed terminal sessions once proof verification exists.
+- **Disabled:** default. No local-control invocation context can receive credentials.
+- **Enabled within Warp:** controls `warpctrl` invocations from verified Warp-managed terminal sessions once proof verification exists.
 - **Enabled everywhere, including outside Warp:** controls verified Warp-managed terminal invocations and external terminals, scripts, launch agents, IDEs, or other same-user processes.
 The mode should live in a new top-level Settings pane page named **Scripting**. The Scripting page owns the user-facing controls for local scripting surfaces, including Warp control, and should explain the difference between commands run inside Warp and commands run from other apps.
 The visible UI setting is not enough by itself. The authoritative mode must be stored in the most secure local storage provider available for the platform, with read/write access limited to the Warp application or Warp-owned trusted helper code where the platform supports that restriction. On macOS this means Keychain or an equivalent protected store constrained to Warp-signed code, not ordinary UserDefaults; on Windows this means Credential Manager, DPAPI-backed protected storage, or an equivalent app-controlled protected store; on Linux this means the platform secret service where available, with any owner-only file fallback explicitly documented as weaker. This avoids turning outside-Warp control into a feature that any process can silently enable before invoking `warpctrl`.
@@ -102,7 +102,7 @@ Enablement requirements:
 - The implemented foundation setting must remain private and absent from user-visible settings files, generated schemas, local-control settings read/write commands, and any allowlisted settings mutation catalog.
 - Only the running Warp app, through the Settings > Scripting UI, should be able to change the authoritative mode.
 - `warpctrl`, shell scripts, config files, command-line flags, registry edits, defaults writes, and direct local-control protocol requests must not be able to enable or widen the mode.
-- The default mode may allow verified Warp-terminal invocations, but turning the mode to disabled should prevent verified Warp-terminal invocations from receiving local-control grants.
+- The enabled-within-Warp mode may allow verified Warp-terminal invocations once proof verification exists, but turning the mode to disabled should prevent verified Warp-terminal invocations from receiving local-control grants.
 - Outside-Warp control requires an intentional user gesture to select the broadest mode; the UI should explain that it allows scripts and automation from other apps to control Warp.
 - The mode should be easy to change from the same UI, and narrowing the mode should revoke or invalidate active local-control credentials for invocation contexts no longer allowed.
 - If enterprise or managed-device policy is added later, policy may force-disable the mode or force a narrower default, but policy should be separate from user-editable local settings.
@@ -180,9 +180,9 @@ A valid credential for one instance or target must not imply authority over anot
 - Kernel, hypervisor, or administrator-level compromise.
 - Security semantics for remote URL control endpoints. Remote control requires a separate transport and identity design before it can ship.
 ## Architecture overview
-The full security model has eight layers. The current foundation branch implements the single mode gate, allows outside-Warp credentials only in the broadest mode, and keeps the inside-Warp execution-context layer as a rejected future protocol concept until proof verification exists.
+The full security model has eight layers. The current foundation branch implements the single mode gate with disabled as the default, allows outside-Warp credentials only in the broadest mode, and keeps the inside-Warp execution-context layer as a rejected future protocol concept until proof verification exists.
 The security model has eight layers:
-1. **Protected enablement:** Use protected local storage for the single local-control mode, with inside-Warp allowed by default and outside-Warp off unless the broadest mode is selected.
+1. **Protected enablement:** Use protected local storage for the single local-control mode, with all contexts disabled by default, inside-Warp allowed only when the user selects the within-Warp or broadest mode after proof support lands, and outside-Warp off unless the broadest mode is selected.
 2. **Discovery:** Find compatible live Warp instances without granting broad authority.
 3. **Secure credential storage:** Store raw secrets outside plaintext discovery records and restrict access to trusted Warp-owned code where the platform supports it.
 4. **Execution context verification:** Distinguish verified Warp-terminal invocations from external same-user invocations without trusting caller-declared labels.
@@ -475,7 +475,7 @@ Important errors include:
 The app must not downgrade these failures into broader default actions, and the CLI must preserve structured server errors in both human-readable and JSON output.
 ## Required controls before full catalog expansion
 Before shipping each action family, verify that these controls are implemented for that family:
-- Local control scripting must be enabled for the request's invocation context before the action family can run; the default mode allows inside-Warp only once proof verification exists, and outside-Warp control requires the broadest mode.
+- Local control scripting must be enabled for the request's invocation context before the action family can run; disabled mode blocks all contexts, the within-Warp mode allows inside-Warp only once proof verification exists, and outside-Warp control requires the broadest mode.
 - The authoritative mode lives under Settings > Scripting, is protected from external writes, and is local-only rather than synced.
 - The action has a documented state/data category and required permission category.
 - The action has a documented `requires_authenticated_user` value. New actions default to `true` unless explicitly reviewed as logged-out-safe.
