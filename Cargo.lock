@@ -15089,7 +15089,7 @@ dependencies = [
  "warp_core",
  "warp_graphql",
  "warp_managed_secrets",
- "warpui",
+ "warpui_core",
  "warpui_extras",
 ]
 

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use warp_graphql::scalars::time::ServerTimestamp;
-use warpui::AppContext;
+use warpui_core::AppContext;
 use warpui_extras::secure_storage::{self, AppContextExt};
 
 use super::{AnonymousUserType, FirebaseAuthTokens, PersonalObjectLimits, UserMetadata};

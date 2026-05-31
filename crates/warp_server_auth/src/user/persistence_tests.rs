@@ -86,7 +86,7 @@ fn test_serialize_persisted_user() {
 fn test_windows_user_persistence() {
     use chrono::Local;
     use warp_core::channel::ChannelState;
-    use warpui::{App, SingletonEntity};
+    use warpui_core::App;
     use warpui_extras::secure_storage;
 
     App::test((), |mut app| async move {
