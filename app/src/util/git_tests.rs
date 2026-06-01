@@ -329,3 +329,116 @@ async fn detached_tag_display_returns_short_sha() {
         "expected {full_sha} to start with {result}"
     );
 }
+
+// ── GitHub permalink tests ──────────────────────────────────────────────────
+
+#[test]
+fn build_github_permalink_single_line() {
+    let url = super::build_github_permalink(
+        "warpdotdev",
+        "warp",
+        "abc123def456",
+        "app/src/util/git.rs",
+        10,
+        None,
+    );
+    assert_eq!(
+        url,
+        "https://github.com/warpdotdev/warp/blob/abc123def456/app/src/util/git.rs#L10"
+    );
+}
+
+#[test]
+fn build_github_permalink_same_start_and_end() {
+    let url = super::build_github_permalink(
+        "warpdotdev",
+        "warp",
+        "abc123def456",
+        "app/src/util/git.rs",
+        10,
+        Some(10),
+    );
+    assert_eq!(
+        url,
+        "https://github.com/warpdotdev/warp/blob/abc123def456/app/src/util/git.rs#L10"
+    );
+}
+
+#[test]
+fn build_github_permalink_multi_line() {
+    let url = super::build_github_permalink(
+        "warpdotdev",
+        "warp",
+        "abc123def456",
+        "app/src/util/git.rs",
+        4,
+        Some(8),
+    );
+    assert_eq!(
+        url,
+        "https://github.com/warpdotdev/warp/blob/abc123def456/app/src/util/git.rs#L4-L8"
+    );
+}
+
+#[test]
+fn parse_github_remote_url_https() {
+    let result = super::parse_github_remote_url("https://github.com/warpdotdev/warp.git");
+    assert_eq!(
+        result,
+        Some(("warpdotdev".to_string(), "warp".to_string()))
+    );
+}
+
+#[test]
+fn parse_github_remote_url_https_no_dot_git() {
+    let result = super::parse_github_remote_url("https://github.com/warpdotdev/warp");
+    assert_eq!(
+        result,
+        Some(("warpdotdev".to_string(), "warp".to_string()))
+    );
+}
+
+#[test]
+fn parse_github_remote_url_ssh() {
+    let result = super::parse_github_remote_url("git@github.com:warpdotdev/warp.git");
+    assert_eq!(
+        result,
+        Some(("warpdotdev".to_string(), "warp".to_string()))
+    );
+}
+
+#[test]
+fn parse_github_remote_url_ssh_no_dot_git() {
+    let result = super::parse_github_remote_url("git@github.com:warpdotdev/warp");
+    assert_eq!(
+        result,
+        Some(("warpdotdev".to_string(), "warp".to_string()))
+    );
+}
+
+#[test]
+fn parse_github_remote_url_ssh_scheme() {
+    let result = super::parse_github_remote_url("ssh://git@github.com/warpdotdev/warp.git");
+    assert_eq!(
+        result,
+        Some(("warpdotdev".to_string(), "warp".to_string()))
+    );
+}
+
+#[test]
+fn parse_github_remote_url_non_github() {
+    assert_eq!(
+        super::parse_github_remote_url("https://gitlab.com/owner/repo.git"),
+        None
+    );
+    assert_eq!(
+        super::parse_github_remote_url("git@bitbucket.org:owner/repo.git"),
+        None
+    );
+}
+
+#[test]
+fn parse_github_remote_url_trailing_whitespace() {
+    let result = super::parse_github_remote_url("  https://github.com/owner/repo.git\n  ");
+    assert_eq!(result, Some(("owner".to_string(), "repo".to_string())));
+}

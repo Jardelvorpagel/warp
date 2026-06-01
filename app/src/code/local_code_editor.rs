@@ -185,6 +185,7 @@ pub enum LocalCodeEditorAction {
     GotoDefinition,
     FindReferences,
     OpenContextMenu,
+    CopyGitHubPermalink,
     /// Lazily fetch find-references and show the card (triggered on cmd-click when at definition).
     /// This is the fallback when go-to-definition has no different location to navigate to.
     FetchAndShowFindReferences {
@@ -1948,16 +1949,144 @@ impl LocalCodeEditorView {
     }
 
     /// Creates menu items for the context menu
-    fn context_menu_items(&self) -> Vec<MenuItem<LocalCodeEditorAction>> {
-        vec![
-            MenuItemFields::new("Go to definition")
-                .with_on_select_action(LocalCodeEditorAction::GotoDefinition)
-                .into_item(),
-            MenuItemFields::new("Find references")
-                .with_on_select_action(LocalCodeEditorAction::FindReferences)
-                .into_item(),
-        ]
+    fn context_menu_items(&self, ctx: &AppContext) -> Vec<MenuItem<LocalCodeEditorAction>> {
+        let mut items = Vec::new();
+
+        // LSP actions are only available when an LSP server is running.
+        let lsp_available = self
+            .lsp_server
+            .as_ref()
+            .map(|server| server.as_ref(ctx).is_ready_for_requests())
+            .unwrap_or(false);
+        if lsp_available {
+            items.push(
+                MenuItemFields::new("Go to definition")
+                    .with_on_select_action(LocalCodeEditorAction::GotoDefinition)
+                    .into_item(),
+            );
+            items.push(
+                MenuItemFields::new("Find references")
+                    .with_on_select_action(LocalCodeEditorAction::FindReferences)
+                    .into_item(),
+            );
+        }
+
+        // GitHub permalink action — available when the file lives in a GitHub repo.
+        if self.can_build_github_permalink(ctx) {
+            items.push(
+                MenuItemFields::new("Copy GitHub permalink")
+                    .with_on_select_action(LocalCodeEditorAction::CopyGitHubPermalink)
+                    .into_item(),
+            );
+        }
+
+        items
     }
+
+    /// Returns `true` when we have enough context to build a GitHub permalink
+    /// for the currently open file (file path, GitHub remote, HEAD SHA).
+    #[cfg(feature = "local_fs")]
+    fn can_build_github_permalink(&self, ctx: &AppContext) -> bool {
+        let Some(file_path) = self.file_path() else {
+            return false;
+        };
+        let repo_root = self.repo_root_for_file(file_path, ctx);
+        let Some(repo_root) = repo_root else {
+            return false;
+        };
+        crate::util::git::get_github_remote_owner_repo_sync(&repo_root).is_some()
+            && crate::util::git::get_head_sha_sync(&repo_root).is_some()
+    }
+
+    #[cfg(not(feature = "local_fs"))]
+    fn can_build_github_permalink(&self, _ctx: &AppContext) -> bool {
+        false
+    }
+
+    /// Resolves the repository root for a given file path, reusing the same
+    /// detection logic as LSP server setup.
+    #[cfg(feature = "local_fs")]
+    fn repo_root_for_file(&self, file_path: &Path, ctx: &AppContext) -> Option<PathBuf> {
+        if let Some(workspace_root) =
+            PersistedWorkspace::as_ref(ctx).root_for_workspace(file_path)
+        {
+            return Some(workspace_root.to_path_buf());
+        }
+        match DetectedRepositories::as_ref(ctx)
+            .get_root_for_path(&LocalOrRemotePath::Local(file_path.to_path_buf()))
+            .and_then(|r| PathBuf::try_from(r).ok())
+        {
+            Some(root) => Some(root),
+            None => file_path.parent().map(|s| s.to_path_buf()),
+        }
+    }
+
+    #[cfg(not(feature = "local_fs"))]
+    fn repo_root_for_file(&self, _file_path: &Path, _ctx: &AppContext) -> Option<PathBuf> {
+        None
+    }
+
+    /// Copies a commit-pinned GitHub permalink for the current file and line(s)
+    /// to the system clipboard, then shows a success toast.
+    #[cfg(feature = "local_fs")]
+    fn copy_github_permalink(&mut self, ctx: &mut ViewContext<Self>) {
+        use crate::util::git::{build_github_permalink, get_github_remote_owner_repo_sync, get_head_sha_sync};
+        use warp_editor::model::CoreEditorModel;
+        use crate::view_components::DismissibleToast;
+        use crate::workspace::ToastStack;
+        use warpui::clipboard::ClipboardContent;
+
+        let Some(file_path) = self.file_path().map(|p| p.to_path_buf()) else {
+            return;
+        };
+        let Some(repo_root) = self.repo_root_for_file(&file_path, ctx) else {
+            return;
+        };
+        let Some((owner, repo)) = get_github_remote_owner_repo_sync(&repo_root) else {
+            return;
+        };
+        let Some(sha) = get_head_sha_sync(&repo_root) else {
+            return;
+        };
+
+        // Compute relative path from repo root.
+        let relative_path = file_path
+            .strip_prefix(&repo_root)
+            .unwrap_or(&file_path)
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        // Determine line range from the current selection.
+        let editor = self.editor().as_ref(ctx);
+        let selection = *editor.model.as_ref(ctx).selections(ctx).first();
+        let head_lsp = editor.offset_to_lsp_position(selection.head, ctx);
+        let tail_lsp = editor.offset_to_lsp_position(selection.tail, ctx);
+        // LSP lines are 0-indexed; GitHub uses 1-indexed.
+        let head_line = head_lsp.line + 1;
+        let tail_line = tail_lsp.line + 1;
+        let start_line = head_line.min(tail_line);
+        let end_line = head_line.max(tail_line);
+
+        let end_line_opt = if end_line != start_line {
+            Some(end_line)
+        } else {
+            None
+        };
+
+        let url = build_github_permalink(&owner, &repo, &sha, &relative_path, start_line, end_line_opt);
+
+        ctx.clipboard().write(ClipboardContent::plain_text(url));
+
+        // Show a success toast.
+        let window_id = ctx.window_id();
+        ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
+            let toast = DismissibleToast::success(String::from("Copied GitHub permalink"));
+            toast_stack.add_ephemeral_toast(toast, window_id, ctx);
+        });
+    }
+
+    #[cfg(not(feature = "local_fs"))]
+    fn copy_github_permalink(&mut self, _ctx: &mut ViewContext<Self>) {}
 
     /// Perform find references at the cursor position and show the references card.
     fn find_references_at_cursor(&mut self, ctx: &mut ViewContext<Self>) {
@@ -2334,16 +2463,20 @@ impl TypedActionView for LocalCodeEditorView {
                 self.find_references_at_cursor(ctx);
             }
             LocalCodeEditorAction::OpenContextMenu => {
-                // Only show context menu if LSP is available
-                if self.is_lsp_server_available(ctx) {
+                // Build menu items (conditionally includes LSP and GitHub actions).
+                let menu_items = self.context_menu_items(ctx);
+                if !menu_items.is_empty() {
                     self.context_menu_state.is_open = true;
-                    let menu_items = self.context_menu_items();
                     self.context_menu.update(ctx, move |menu, ctx| {
                         menu.set_items(menu_items, ctx);
                         ctx.notify();
                     });
                     ctx.notify();
                 }
+            }
+            LocalCodeEditorAction::CopyGitHubPermalink => {
+                self.context_menu_state.is_open = false;
+                self.copy_github_permalink(ctx);
             }
             LocalCodeEditorAction::FetchAndShowFindReferences {
                 lsp_position,

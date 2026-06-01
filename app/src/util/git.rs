@@ -1193,3 +1193,127 @@ fn count_lines_if_text_file(path: &Path) -> u32 {
     }
     bytecount::count(&content, b'\n') as u32
 }
+
+// ── GitHub permalink helpers ─────────────────────────────────────────────────
+
+/// Builds a commit-pinned GitHub permalink URL.
+///
+/// Returns a URL of the form:
+/// - `https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{start_line}` for a single line.
+/// - `https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{start_line}-L{end_line}` for a range.
+pub fn build_github_permalink(
+    github_owner: &str,
+    github_repo: &str,
+    commit_sha: &str,
+    repo_relative_path: &str,
+    start_line: usize,
+    end_line: Option<usize>,
+) -> String {
+    let base = format!(
+        "https://github.com/{}/{}/blob/{}/{}",
+        github_owner, github_repo, commit_sha, repo_relative_path
+    );
+    match end_line {
+        Some(end) if end != start_line => format!("{}#L{}-L{}", base, start_line, end),
+        _ => format!("{}#L{}", base, start_line),
+    }
+}
+
+/// Parses a GitHub remote URL (HTTPS or SSH) into `(owner, repo)`.
+///
+/// Handles:
+/// - `https://github.com/owner/repo.git`
+/// - `https://github.com/owner/repo`
+/// - `git@github.com:owner/repo.git`
+/// - `ssh://git@github.com/owner/repo.git`
+pub fn parse_github_remote_url(remote_url: &str) -> Option<(String, String)> {
+    let trimmed = remote_url.trim();
+
+    // SSH style: git@github.com:owner/repo.git
+    if let Some(rest) = trimmed.strip_prefix("git@github.com:") {
+        let rest = rest.strip_suffix(".git").unwrap_or(rest);
+        let parts: Vec<&str> = rest.splitn(2, '/').collect();
+        if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            return Some((parts[0].to_string(), parts[1].to_string()));
+        }
+        return None;
+    }
+
+    // HTTPS or SSH URL style
+    // e.g. https://github.com/owner/repo.git  or  ssh://git@github.com/owner/repo.git
+    let url_path = if let Some(rest) = trimmed.strip_prefix("https://github.com/") {
+        Some(rest)
+    } else if let Some(rest) = trimmed.strip_prefix("ssh://git@github.com/") {
+        Some(rest)
+    } else if let Some(rest) = trimmed.strip_prefix("http://github.com/") {
+        Some(rest)
+    } else {
+        None
+    };
+
+    if let Some(path) = url_path {
+        let path = path.strip_suffix(".git").unwrap_or(path);
+        let path = path.strip_suffix('/').unwrap_or(path);
+        let parts: Vec<&str> = path.splitn(2, '/').collect();
+        if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            return Some((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+
+    None
+}
+
+/// Synchronously runs `git remote get-url origin` and parses the result to
+/// extract `(owner, repo)` for GitHub remotes. Returns `None` if the remote
+/// is not a GitHub URL or the command fails.
+#[cfg(feature = "local_fs")]
+pub fn get_github_remote_owner_repo_sync(repo_path: &Path) -> Option<(String, String)> {
+    let output = command::blocking::Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(repo_path)
+        .stdout(command::Stdio::piped())
+        .stderr(command::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let url = String::from_utf8_lossy(&output.stdout);
+    parse_github_remote_url(&url)
+}
+
+#[cfg(not(feature = "local_fs"))]
+pub fn get_github_remote_owner_repo_sync(_repo_path: &Path) -> Option<(String, String)> {
+    None
+}
+
+/// Synchronously runs `git rev-parse HEAD` and returns the full SHA.
+/// Returns `None` if the command fails (not a git repo, empty repo, etc.).
+#[cfg(feature = "local_fs")]
+pub fn get_head_sha_sync(repo_path: &Path) -> Option<String> {
+    let output = command::blocking::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_path)
+        .stdout(command::Stdio::piped())
+        .stderr(command::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        None
+    } else {
+        Some(sha)
+    }
+}
+
+#[cfg(not(feature = "local_fs"))]
+pub fn get_head_sha_sync(_repo_path: &Path) -> Option<String> {
+    None
+}
