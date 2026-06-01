@@ -247,6 +247,12 @@ fn get_supported_tools(params: &RequestParams) -> Vec<api::ToolType> {
             supported_tools.push(api::ToolType::RunAgents);
         }
         supported_tools.push(api::ToolType::SendMessageToAgent);
+        // QUALITY-780: declare support for the public client-handled
+        // `wait_for_events` variant so the server can safely emit it instead
+        // of the legacy opaque server-handled fallback. Without this
+        // declaration, the server falls back to the legacy emission to
+        // protect older clients.
+        supported_tools.push(api::ToolType::WaitForEvents);
     }
 
     if FeatureFlag::AskUserQuestion.is_enabled() && params.ask_user_question_enabled {
