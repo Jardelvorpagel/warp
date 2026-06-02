@@ -15,11 +15,15 @@ use warp_editor::render::model::{
     BlockSpacing, EmbeddedItem, EmbeddedItemHTMLRepresentation, EmbeddedItemRichFormat,
     LaidOutEmbeddedItem, RenderState,
 };
+use warpui::elements::ChildView;
 use warpui::event::DispatchedEvent;
 use warpui::units::Pixels;
-use warpui::{AppContext, EntityId, EventContext, LayoutContext, ViewHandle, WindowId};
+use warpui::{
+    AppContext, Element, EntityId, EventContext, LayoutContext, SizeConstraint, ViewHandle,
+    WindowId,
+};
 
-use crate::code::editor::comment_editor::CommentEditor;
+use crate::code::editor::comment_editor::{CommentEditor, MAX_COMMENT_HEIGHT};
 use crate::code_review::comments::CommentId;
 
 const COMMENT_ID_MAPPING_KEY: &str = "comment_id";
@@ -70,7 +74,11 @@ impl EmbeddedItem for EmbeddedCommentSpace {
                 Vector2F::new(100.0, 24.0)
             });
 
-        Box::new(LaidOutEmbeddedCommentSpace { size })
+        Box::new(LaidOutEmbeddedCommentSpace::new(
+            self.editor_entity_id,
+            self.window_id,
+            size,
+        ))
     }
 
     fn hashed_id(&self) -> &str {
@@ -109,6 +117,22 @@ impl EmbeddedItem for EmbeddedCommentSpace {
 #[derive(Debug)]
 pub struct LaidOutEmbeddedCommentSpace {
     pub size: Vector2F,
+    editor_entity_id: EntityId,
+    window_id: WindowId,
+}
+
+impl LaidOutEmbeddedCommentSpace {
+    pub fn new(editor_entity_id: EntityId, window_id: WindowId, size: Vector2F) -> Self {
+        Self {
+            size,
+            editor_entity_id,
+            window_id,
+        }
+    }
+
+    fn comment_editor(&self, app: &AppContext) -> Option<ViewHandle<CommentEditor>> {
+        app.view_with_id::<CommentEditor>(self.window_id, self.editor_entity_id)
+    }
 }
 
 impl LaidOutEmbeddedItem for LaidOutEmbeddedCommentSpace {
@@ -129,10 +153,23 @@ impl LaidOutEmbeddedItem for LaidOutEmbeddedCommentSpace {
         _state: &RenderState,
         viewport_item: ViewportItem,
         _model: Option<&dyn EmbeddedItemModel>,
-        _ctx: &AppContext,
+        ctx: &AppContext,
     ) -> Box<dyn RenderableBlock> {
-        // Just create a spacer - no child view rendering here
-        Box::new(RenderableEmbeddedCommentSpace::new(viewport_item))
+        // Host the comment editor's element in-tree so it occupies real vertical space at its line
+        // and scrolls with the surrounding content. If the editor handle can't be resolved, fall
+        // back to a no-op spacer that still reserves the block's height.
+        match self.comment_editor(ctx) {
+            Some(editor) => {
+                let child = ChildView::new(&editor).finish();
+                Box::new(RenderableInlineComment::new(
+                    viewport_item,
+                    child,
+                    self.editor_entity_id,
+                    self.window_id,
+                ))
+            }
+            None => Box::new(RenderableEmbeddedCommentSpace::new(viewport_item)),
+        }
     }
 
     fn spacing(&self) -> BlockSpacing {
@@ -141,6 +178,81 @@ impl LaidOutEmbeddedItem for LaidOutEmbeddedCommentSpace {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+/// Hosts a [`CommentEditor`]'s element inside a per-view inline comment block. It lays out the
+/// child against the block's content width (capped at [`MAX_COMMENT_HEIGHT`]), writes the measured
+/// size back to the editor so the next layout reserves exactly the child's height, and paints and
+/// routes events to the child in content space (so it scrolls with its anchored line).
+pub struct RenderableInlineComment {
+    viewport_item: ViewportItem,
+    child: Box<dyn Element>,
+    editor_entity_id: EntityId,
+    window_id: WindowId,
+}
+
+impl RenderableInlineComment {
+    fn new(
+        viewport_item: ViewportItem,
+        child: Box<dyn Element>,
+        editor_entity_id: EntityId,
+        window_id: WindowId,
+    ) -> Self {
+        Self {
+            viewport_item,
+            child,
+            editor_entity_id,
+            window_id,
+        }
+    }
+}
+
+impl RenderableBlock for RenderableInlineComment {
+    fn viewport_item(&self) -> &ViewportItem {
+        &self.viewport_item
+    }
+
+    fn layout(&mut self, _model: &RenderState, ctx: &mut LayoutContext, app: &AppContext) {
+        let width = self.viewport_item.content_size.x();
+        let measured = self.child.layout(
+            SizeConstraint::new(vec2f(0., 0.), vec2f(width, MAX_COMMENT_HEIGHT)),
+            ctx,
+            app,
+        );
+
+        // Feed the measured size back so the reserved block height tracks the editor's content as
+        // the draft grows or shrinks (honoring the max-height cap).
+        if let Some(editor) =
+            app.view_with_id::<CommentEditor>(self.window_id, self.editor_entity_id)
+        {
+            editor.read(app, |editor, _| editor.set_laid_out_size(measured));
+        }
+    }
+
+    fn paint(&mut self, _model: &RenderState, ctx: &mut RenderContext, app: &AppContext) {
+        let content_rect = self.viewport_item.content_bounds(ctx);
+        ctx.paint.scene.start_layer(warpui::ClipBounds::ActiveLayer);
+        self.child.paint(content_rect.origin(), ctx.paint, app);
+        ctx.paint.scene.stop_layer();
+    }
+
+    fn after_layout(&mut self, ctx: &mut warpui::AfterLayoutContext, app: &AppContext) {
+        self.child.after_layout(ctx, app);
+    }
+
+    fn dispatch_event(
+        &mut self,
+        _model: &RenderState,
+        event: &DispatchedEvent,
+        ctx: &mut EventContext,
+        app: &AppContext,
+    ) -> bool {
+        self.child.dispatch_event(event, ctx, app)
+    }
+
+    fn is_embedded_comment(&self) -> bool {
+        true
     }
 }
 

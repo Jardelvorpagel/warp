@@ -1089,6 +1089,7 @@ impl TypedActionView for CodeEditorView {
                     self.model.update(ctx, |model: &mut CodeEditorModel, ctx| {
                         model.open_comment_line(line_info, ctx);
                     });
+                    self.sync_inline_comment_composer(ctx);
                     ctx.emit(CodeEditorEvent::CommentEditorOpened);
 
                     ctx.focus(&self.active_comment_editor);

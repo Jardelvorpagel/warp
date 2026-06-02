@@ -47,7 +47,7 @@ use warp_editor::editor::TextDecoration;
 use warp_editor::model::{CoreEditorModel, PlainTextEditorModel};
 use warp_editor::multiline::{AnyMultilineString, MultilineString, LF};
 use warp_editor::render::model::{
-    AutoScrollMode, BlockItem, Decoration, LineCount, LineDecoration, RenderEvent,
+    AutoScrollMode, BlockItem, CommentBlock, Decoration, LineCount, LineDecoration, RenderEvent,
     RenderLineLocation, RenderState, RichTextStyles, StyleUpdateAction,
     UpdateDecorationAfterLayout, WidthSetting,
 };
@@ -3848,6 +3848,22 @@ impl CodeEditorModel {
                 origin: origin.to_owned(),
             });
         });
+    }
+
+    /// Set or clear the per-view inline comment block on this view's [`RenderState`]. Passing
+    /// `Some(block)` reserves inline space at the block's anchor line; passing `None` removes any
+    /// inline comment block. This lives on the per-view render state only (never the shared
+    /// buffer), so it cannot leak into other views of the same file.
+    pub fn set_inline_comment_block(
+        &mut self,
+        block: Option<CommentBlock>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.render_state
+            .update(ctx, |render_state, _| match block {
+                Some(block) => render_state.set_comment_blocks(vec![block]),
+                None => render_state.clear_comment_blocks(),
+            });
     }
 }
 

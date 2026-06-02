@@ -5,6 +5,7 @@ use pathfinder_geometry::vector::Vector2F;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::Fill;
 use warp_editor::render::element::VerticalExpansionBehavior;
+use warp_editor::render::model::RenderState;
 use warpui::elements::{
     Border, ChildView, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Flex,
     MainAxisAlignment, MainAxisSize, ParentElement, Radius, Shrinkable, Text,
@@ -34,6 +35,16 @@ use crate::view_components::action_button::{
 
 /// Default width of the comment editor, in pixels.
 pub(crate) const DEFAULT_COMMENT_MAX_WIDTH: f32 = 750.0;
+
+/// Maximum height of the comment editor, in pixels. Past this height the editor scrolls its content
+/// internally instead of growing further.
+pub(crate) const MAX_COMMENT_HEIGHT: f32 = 200.0;
+
+/// Fixed vertical chrome around the inner markdown editor: the editor area's top/bottom padding
+/// (8 + 4), the footer's vertical padding and top border (8 + 1), the footer button row
+/// (`ButtonSize::Small` is 24px tall), and the outer container's top/bottom border (2). Slightly
+/// generous so the reserved inline block is never shorter than the painted composer.
+const COMPOSER_CHROME_HEIGHT: f32 = 48.0;
 
 #[derive(Debug)]
 pub enum CommentEditorEvent {
@@ -144,6 +155,27 @@ impl CommentEditor {
     #[cfg_attr(not(feature = "local_fs"), allow(unused))]
     pub fn comment_text(&self, app: &AppContext) -> String {
         self.editor.as_ref(app).model().as_ref(app).markdown(app)
+    }
+
+    /// The render state backing the inner markdown editor. Observing it lets a host re-measure the
+    /// composer's reserved inline height when its content (and therefore laid-out height) changes.
+    pub fn inner_render_state(&self, app: &AppContext) -> ModelHandle<RenderState> {
+        self.editor
+            .as_ref(app)
+            .model()
+            .as_ref(app)
+            .render_state()
+            .clone()
+    }
+
+    /// The height, in pixels, that this composer needs to render inline at its line: the inner
+    /// editor's laid-out content height plus fixed chrome, capped at [`MAX_COMMENT_HEIGHT`]. The
+    /// content height is current as soon as the inner render state finishes laying out, so a host
+    /// observing [`Self::inner_render_state`] can keep the reserved block height in sync as the
+    /// draft grows or shrinks.
+    pub fn inline_height(&self, app: &AppContext) -> Pixels {
+        let content_height = self.inner_render_state(app).as_ref(app).height().as_f32();
+        Pixels::new((content_height + COMPOSER_CHROME_HEIGHT).min(MAX_COMMENT_HEIGHT))
     }
 
     #[cfg_attr(not(feature = "local_fs"), allow(unused))]
@@ -431,7 +463,7 @@ impl View for CommentEditor {
                     )
                     .finish(),
             )
-            .with_max_height(200.)
+            .with_max_height(MAX_COMMENT_HEIGHT)
             .with_max_width(DEFAULT_COMMENT_MAX_WIDTH)
             .finish(),
         )
