@@ -22844,7 +22844,11 @@ impl TerminalView {
                     .finish(),
             );
         if can_retry {
-            content.add_child(ChildView::new(&self.failed_viewer_join_retry_button).finish());
+            content.add_child(
+                Container::new(ChildView::new(&self.failed_viewer_join_retry_button).finish())
+                    .with_margin_top(8.)
+                    .finish(),
+            );
         }
 
         SavePosition::new(
