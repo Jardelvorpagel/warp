@@ -510,8 +510,9 @@ impl CustomEndpointModal {
                 self.cancel(ctx);
             }
             EditorEvent::Edited(_) => {
-                self.validate_url_field(ctx);
-                ctx.notify();
+                if !self.validate_url_field(ctx) {
+                    ctx.notify();
+                }
             }
             _ => {}
         }
@@ -568,9 +569,6 @@ impl CustomEndpointModal {
             }
             EditorEvent::Escape => {
                 self.cancel(ctx);
-            }
-            EditorEvent::Edited(_) => {
-                ctx.notify();
             }
             _ => {}
         }
