@@ -14,6 +14,8 @@ use warpui::{App, TypedActionView, ViewHandle, WindowId};
 use super::{CodeEditorRenderOptions, CodeEditorView, CodeEditorViewAction};
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::code::editor::line::EditorLineLocation;
+use crate::code::editor::EditorReviewComment;
+use crate::code_review::comments::{CommentId, LineDiffContent};
 use crate::editor::InteractionState;
 use crate::features::FeatureFlag;
 use crate::notebooks::editor::keys::NotebookKeybindings;
@@ -74,6 +76,161 @@ fn current_line(line_number: usize) -> EditorLineLocation {
         line_number: LineCount::from(line_number),
         line_range: LineCount::from(line_number)..LineCount::from(line_number + 1),
     }
+}
+
+fn editor_comment(id: CommentId, line_number: usize, body: &str) -> EditorReviewComment {
+    EditorReviewComment::new_with_id(
+        id,
+        current_line(line_number),
+        LineDiffContent::default(),
+        body.to_string(),
+    )
+}
+
+/// VAL-SAVED-010: the editor's per-comment inline `ViewHandle` map reconciles create/update/drop
+/// exactly like `CommentListView::set_comments_internal`: a reused id keeps its handle's entity id
+/// stable (and refreshes its rendered body in place), a new id creates a handle, and a removed id
+/// drops its handle.
+#[test]
+fn test_inline_comment_views_reconcile_create_update_drop() {
+    App::test((), |mut app| async move {
+        let _embedded = FeatureFlag::EmbeddedCodeReviewComments.override_enabled(true);
+
+        let (_window, editor) = initialize_editor(&mut app);
+        editor.update(&mut app, |view, ctx| {
+            view.reset(InitialBufferState::plain_text(MULTILINE_CONTENT), ctx);
+        });
+
+        let id_a = CommentId::new();
+        let id_b = CommentId::new();
+
+        // (1) Feed [A]: one handle created for A.
+        editor.update(&mut app, |view, ctx| {
+            view.set_comment_locations(vec![editor_comment(id_a, 1, "alpha")].into_iter(), ctx);
+        });
+        let a_entity_first = app.read(|ctx| {
+            let view = editor.as_ref(ctx);
+            assert_eq!(view.inline_comments.len(), 1);
+            view.inline_comments.get(&id_a).map(|handle| handle.id())
+        });
+        assert!(a_entity_first.is_some(), "A should have a handle");
+
+        // (1 cont.) Feed [A, B]: A's handle entity id is stable, B is added.
+        editor.update(&mut app, |view, ctx| {
+            view.set_comment_locations(
+                vec![
+                    editor_comment(id_a, 1, "alpha"),
+                    editor_comment(id_b, 2, "beta"),
+                ]
+                .into_iter(),
+                ctx,
+            );
+        });
+        let a_entity_second = app.read(|ctx| {
+            let view = editor.as_ref(ctx);
+            assert_eq!(view.inline_comments.len(), 2);
+            assert!(
+                view.inline_comments.contains_key(&id_b),
+                "B should be added"
+            );
+            view.inline_comments.get(&id_a).map(|handle| handle.id())
+        });
+        assert_eq!(
+            a_entity_first, a_entity_second,
+            "A's handle must be reused (entity id stable) when fed again"
+        );
+
+        // (2) Feed [A] with a changed body: A's handle stays stable while its rendered body updates.
+        editor.update(&mut app, |view, ctx| {
+            view.set_comment_locations(
+                vec![editor_comment(id_a, 1, "alpha edited")].into_iter(),
+                ctx,
+            );
+        });
+        let (a_entity_third, a_body) = app.read(|ctx| {
+            let view = editor.as_ref(ctx);
+            let handle = view.inline_comments.get(&id_a).expect("A still present");
+            (handle.id(), handle.as_ref(ctx).rendered_body(ctx))
+        });
+        assert_eq!(
+            a_entity_first,
+            Some(a_entity_third),
+            "A's handle must NOT be recreated on update"
+        );
+        assert_eq!(
+            a_body.trim(),
+            "alpha edited",
+            "A's rendered body must reflect the updated content"
+        );
+
+        // (3) B is dropped now that it is no longer in the fed set.
+        app.read(|ctx| {
+            let view = editor.as_ref(ctx);
+            assert_eq!(view.inline_comments.len(), 1);
+            assert!(
+                !view.inline_comments.contains_key(&id_b),
+                "B's handle must be dropped when removed from the set"
+            );
+        });
+    });
+}
+
+/// VAL-ISOLATION-004 (saved-comment half): with the flag OFF, pushing saved comments via
+/// `set_comment_locations` creates NO inline comment views (only the gutter markers persist).
+#[test]
+fn test_inline_comment_views_not_created_when_flag_off() {
+    App::test((), |mut app| async move {
+        let _embedded = FeatureFlag::EmbeddedCodeReviewComments.override_enabled(false);
+
+        let (_window, editor) = initialize_editor(&mut app);
+        editor.update(&mut app, |view, ctx| {
+            view.reset(InitialBufferState::plain_text(MULTILINE_CONTENT), ctx);
+        });
+
+        let id_a = CommentId::new();
+        editor.update(&mut app, |view, ctx| {
+            view.set_comment_locations(vec![editor_comment(id_a, 1, "alpha")].into_iter(), ctx);
+        });
+
+        app.read(|ctx| {
+            let view = editor.as_ref(ctx);
+            assert_eq!(
+                view.comment_locations.len(),
+                1,
+                "gutter markers should still be set while the flag is off"
+            );
+            assert!(
+                view.inline_comments.is_empty(),
+                "no inline comment views should be created while the flag is off"
+            );
+        });
+    });
+}
+
+/// `clear_comment_locations` tears down both the gutter markers and the inline views.
+#[test]
+fn test_clear_comment_locations_drops_inline_views() {
+    App::test((), |mut app| async move {
+        let _embedded = FeatureFlag::EmbeddedCodeReviewComments.override_enabled(true);
+
+        let (_window, editor) = initialize_editor(&mut app);
+        editor.update(&mut app, |view, ctx| {
+            view.reset(InitialBufferState::plain_text(MULTILINE_CONTENT), ctx);
+        });
+
+        let id_a = CommentId::new();
+        editor.update(&mut app, |view, ctx| {
+            view.set_comment_locations(vec![editor_comment(id_a, 1, "alpha")].into_iter(), ctx);
+        });
+        app.read(|ctx| assert_eq!(editor.as_ref(ctx).inline_comments.len(), 1));
+
+        editor.update(&mut app, |view, ctx| view.clear_comment_locations(ctx));
+        app.read(|ctx| {
+            let view = editor.as_ref(ctx);
+            assert!(view.comment_locations.is_empty());
+            assert!(view.inline_comments.is_empty());
+        });
+    });
 }
 
 /// Pump the executor until both the inner composer editor and the outer code editor have finished

@@ -67,6 +67,7 @@ use crate::code::editor::element::{
 use crate::code::editor::embedded_comment::LaidOutEmbeddedCommentSpace;
 use crate::code::editor::find::view::{CodeEditorFind as Find, Event as FindViewEvent};
 use crate::code::editor::goto_line::view::{Event as GoToLineEvent, GoToLineView};
+use crate::code::editor::inline_comment_view::InlineCommentView;
 use crate::code::editor::line::EditorLineLocation;
 use crate::code::editor::model::{
     CodeEditorModel, CodeEditorModelEvent, HoverableLink, LineBound, StableEditorLine,
@@ -281,6 +282,12 @@ pub struct CodeEditorView {
     active_comment_editor: ViewHandle<CommentEditor>,
     /// TODO: maybe turn into a map for fast UUID or range lookup
     comment_locations: Vec<SavedComment>,
+    /// Per-comment inline saved-comment views, keyed by comment id and reconciled from the
+    /// `ReviewCommentBatch` source of truth via `set_comment_locations` (create new, update changed
+    /// in place, drop removed). Only populated for line-targeted, non-outdated comments while the
+    /// `EmbeddedCodeReviewComments` flag is enabled; the views are hosted inline by the per-view
+    /// render state. Created and destroyed only in `&mut self`, never in `render`.
+    inline_comments: HashMap<CommentId, ViewHandle<InlineCommentView>>,
     /// Save position of the comment button rendered within this code editor view.
     comment_save_position_id: String,
     /// Save position of the flag-OFF floating comment composer overlay, so its painted presence and
@@ -405,6 +412,7 @@ impl CodeEditorView {
             self_handle: ctx.handle(),
             nav_bar,
             comment_locations: Vec::new(),
+            inline_comments: HashMap::new(),
             display_options: CodeEditorViewDisplayOptions {
                 vertical_expansion_behavior: render_options.vertical_expansion_behavior,
                 can_show_diff_ui: true,
@@ -1247,25 +1255,55 @@ impl CodeEditorView {
     }
 
     /// Update all comment locations in this editor.
+    ///
+    /// Besides the gutter markers (`comment_locations`), this retains the full
+    /// [`EditorReviewComment`] data for each comment by reconciling a per-comment
+    /// `HashMap<CommentId, ViewHandle<InlineCommentView>>` against the incoming set, mirroring how
+    /// `CommentListView::set_comments_internal` reconciles its cards: existing ids reuse (and
+    /// update in place) their handle, new ids create one, and removed ids are dropped. The inline
+    /// views are only created behind the `EmbeddedCodeReviewComments` flag (when off, the map stays
+    /// empty so no inline blocks are rendered and there is no flag-off regression). View handles
+    /// are created/destroyed here in `&mut self`, never in `render`.
     pub fn set_comment_locations(
         &mut self,
         comments: impl Iterator<Item = EditorReviewComment>,
         ctx: &mut ViewContext<Self>,
     ) {
         self.comment_locations.clear();
+
+        let inline_enabled = FeatureFlag::EmbeddedCodeReviewComments.is_enabled();
+        let mut new_inline_comments: HashMap<CommentId, ViewHandle<InlineCommentView>> =
+            HashMap::new();
+
         for comment in comments {
+            let id = comment.id;
             self.comment_locations.push(SavedComment {
-                uuid: comment.id,
+                uuid: id,
                 location: comment.line.clone(),
                 mouse_state: MouseStateHandle::default(),
             });
+
+            if inline_enabled {
+                let view = if let Some(existing) = self.inline_comments.remove(&id) {
+                    existing.update(ctx, |view, ctx| view.update_source(comment, ctx));
+                    existing
+                } else {
+                    ctx.add_view(|ctx| InlineCommentView::new(comment, ctx))
+                };
+                new_inline_comments.insert(id, view);
+            }
         }
+
+        // Any handles still left in `self.inline_comments` correspond to removed comments and are
+        // dropped here.
+        self.inline_comments = new_inline_comments;
         ctx.notify();
     }
 
     /// Clear all comment locations in this editor.
     pub fn clear_comment_locations(&mut self, ctx: &mut ViewContext<Self>) {
         self.comment_locations.clear();
+        self.inline_comments.clear();
         ctx.notify();
     }
 

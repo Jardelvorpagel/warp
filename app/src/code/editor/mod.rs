@@ -7,6 +7,7 @@ mod element;
 pub mod embedded_comment;
 pub mod find;
 pub mod goto_line;
+pub mod inline_comment_view;
 pub mod line;
 mod line_iterator;
 pub mod model;
