@@ -110,6 +110,7 @@ pub struct LlmInfo {
 #[derive(cynic::QueryFragment, Debug)]
 pub struct LlmPricing {
     pub discount_percentage: Option<f64>,
+    pub long_context_token_threshold: Option<crate::scalars::Uint32>,
 }
 
 #[derive(cynic::Enum, Clone, Debug)]

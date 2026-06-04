@@ -75,6 +75,7 @@ fn llm_info_deserializes_without_base_model_name() {
     let info: LLMInfo = serde_json::from_str(raw).expect("should deserialize");
     assert_eq!(info.display_name, "gpt-4o");
     assert_eq!(info.base_model_name, "gpt-4o");
+    assert_eq!(info.long_context_token_threshold, None);
 }
 
 #[test]
@@ -120,6 +121,7 @@ fn llm_info_round_trip_serializes_and_deserializes() {
             "description": "A powerful model",
             "vision_supported": true,
             "provider": "Anthropic",
+            "long_context_token_threshold": 272000,
             "host_configs": [
                 { "enabled": true, "model_routing_host": "DirectApi" }
             ]
@@ -127,6 +129,7 @@ fn llm_info_round_trip_serializes_and_deserializes() {
 
     // Deserialize from wire format
     let info: LLMInfo = serde_json::from_str(wire_json).expect("should deserialize");
+    assert_eq!(info.long_context_token_threshold, Some(272_000));
 
     // Serialize (produces HashMap format)
     let serialized = serde_json::to_string(&info).expect("should serialize");

@@ -168,6 +168,7 @@ pub struct LLMInfo {
     pub provider: LLMProvider,
     pub host_configs: HashMap<LLMModelHost, RoutingHostConfig>,
     pub discount_percentage: Option<f32>,
+    pub long_context_token_threshold: Option<u32>,
     pub context_window: LLMContextWindow,
 }
 
@@ -215,6 +216,8 @@ impl<'de> Deserialize<'de> for LLMInfo {
             #[serde(default)]
             discount_percentage: Option<f32>,
             #[serde(default)]
+            long_context_token_threshold: Option<u32>,
+            #[serde(default)]
             context_window: LLMContextWindow,
         }
 
@@ -250,6 +253,7 @@ impl<'de> Deserialize<'de> for LLMInfo {
             spec: wire.spec,
             host_configs,
             discount_percentage: wire.discount_percentage,
+            long_context_token_threshold: wire.long_context_token_threshold,
             context_window: wire.context_window,
         })
     }
@@ -317,6 +321,7 @@ impl LLMInfo {
             provider: LLMProvider::Unknown,
             host_configs: HashMap::new(),
             discount_percentage: None,
+            long_context_token_threshold: None,
             context_window: LLMContextWindow::default(),
         }
     }
@@ -454,6 +459,7 @@ fn default_computer_use_llms() -> AvailableLLMs {
             provider: LLMProvider::Unknown,
             host_configs: HashMap::new(),
             discount_percentage: None,
+            long_context_token_threshold: None,
             context_window: LLMContextWindow::default(),
         }],
         preferred_codex_model_id: None,
@@ -481,6 +487,7 @@ impl Default for ModelsByFeature {
                     provider: LLMProvider::Unknown,
                     host_configs: HashMap::new(),
                     discount_percentage: None,
+                    long_context_token_threshold: None,
                     context_window: LLMContextWindow::default(),
                 }],
                 preferred_codex_model_id: None,
@@ -503,6 +510,7 @@ impl Default for ModelsByFeature {
                     provider: LLMProvider::Unknown,
                     host_configs: HashMap::new(),
                     discount_percentage: None,
+                    long_context_token_threshold: None,
                     context_window: LLMContextWindow::default(),
                 }],
                 preferred_codex_model_id: None,
@@ -525,6 +533,7 @@ impl Default for ModelsByFeature {
                     provider: LLMProvider::Unknown,
                     host_configs: HashMap::new(),
                     discount_percentage: None,
+                    long_context_token_threshold: None,
                     context_window: LLMContextWindow::default(),
                 }],
                 preferred_codex_model_id: None,
@@ -1348,6 +1357,7 @@ fn custom_llm_info_from(endpoint: &CustomEndpoint, model: &CustomEndpointModel) 
         provider: LLMProvider::Unknown,
         host_configs: HashMap::new(),
         discount_percentage: None,
+        long_context_token_threshold: None,
         context_window: LLMContextWindow::default(),
     }
 }

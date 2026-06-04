@@ -2092,6 +2092,7 @@ type LlmOnboardingInfo {
 
 type LlmPricing {
   discountPercentage: Float
+  longContextTokenThreshold: Uint
 }
 
 enum LlmProvider {
