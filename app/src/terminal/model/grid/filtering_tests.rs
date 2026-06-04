@@ -2314,3 +2314,211 @@ pub fn test_lines_range_right_no_context_available() {
     let right_range = blockgrid.grid_handler().lines_range_right(5, 3, None);
     assert_eq!(right_range, None);
 }
+
+// ---------------------------------------------------------------------------
+// Regression tests: filtering on remote / SSH command output
+// ---------------------------------------------------------------------------
+
+/// Simulates filtering output typical of a remote `ls` over SSH, where only
+/// some lines match the filter term.
+#[test]
+pub fn test_filter_lines_remote_output() {
+    let mut blockgrid = mock_blockgrid(
+        "\
+        README.md\r\n\
+        Cargo.toml\r\n\
+        src\r\n\
+        target\r\n\
+        Cargo.lock\r\n\
+        ",
+    );
+    blockgrid.finish();
+
+    let dfas = Arc::new(RegexDFAs::new("Cargo").unwrap());
+    blockgrid.grid_handler_mut().filter_lines(dfas, 0, false);
+
+    let num_matched = blockgrid
+        .grid_handler()
+        .filter_state
+        .as_ref()
+        .unwrap()
+        .num_matched_lines;
+    assert_eq!(num_matched, 2);
+
+    let displayed_height = blockgrid
+        .grid_handler()
+        .displayed_output
+        .as_ref()
+        .unwrap()
+        .height();
+    assert_eq!(displayed_height, 2);
+}
+
+/// Filtering with context lines on remote-style output should include
+/// surrounding non-matching lines.
+#[test]
+pub fn test_filter_lines_remote_output_with_context() {
+    let mut blockgrid = mock_blockgrid(
+        "\
+        drwxr-xr-x user group src\r\n\
+        -rw-r--r-- user group Makefile\r\n\
+        -rw-r--r-- user group README.md\r\n\
+        drwxr-xr-x user group tests\r\n\
+        -rw-r--r-- user group config.yaml\r\n\
+        ",
+    );
+    blockgrid.finish();
+
+    let dfas = Arc::new(RegexDFAs::new("README").unwrap());
+    blockgrid.grid_handler_mut().filter_lines(dfas, 1, false);
+
+    // 1 matched line + 1 context above + 1 context below = 3 displayed lines.
+    let displayed_height = blockgrid
+        .grid_handler()
+        .displayed_output
+        .as_ref()
+        .unwrap()
+        .height();
+    assert_eq!(displayed_height, 3);
+
+    assert_eq!(
+        blockgrid
+            .grid_handler()
+            .filter_state
+            .as_ref()
+            .unwrap()
+            .num_matched_lines,
+        1
+    );
+}
+
+/// Inverted filter on remote output should show only non-matching lines.
+#[test]
+pub fn test_filter_lines_remote_output_inverted() {
+    let mut blockgrid = mock_blockgrid(
+        "\
+        error: connection refused\r\n\
+        info: retrying\r\n\
+        error: timeout\r\n\
+        info: connected\r\n\
+        info: done\r\n\
+        ",
+    );
+    blockgrid.finish();
+
+    let dfas = Arc::new(RegexDFAs::new("error").unwrap());
+    blockgrid.grid_handler_mut().filter_lines(dfas, 0, true);
+
+    // Inverted: 3 non-matching lines (the "info" lines).
+    let displayed_height = blockgrid
+        .grid_handler()
+        .displayed_output
+        .as_ref()
+        .unwrap()
+        .height();
+    assert_eq!(displayed_height, 3);
+}
+
+/// Clearing a filter restores all rows.
+#[test]
+pub fn test_clear_filter_restores_all_rows() {
+    let mut blockgrid = mock_blockgrid(
+        "\
+        line_a\r\n\
+        line_b\r\n\
+        line_c\r\n\
+        line_d\r\n\
+        ",
+    );
+    blockgrid.finish();
+
+    let dfas = Arc::new(RegexDFAs::new("line_b").unwrap());
+    blockgrid.grid_handler_mut().filter_lines(dfas, 0, false);
+    assert_eq!(
+        blockgrid
+            .grid_handler()
+            .displayed_output
+            .as_ref()
+            .unwrap()
+            .height(),
+        1
+    );
+
+    blockgrid.grid_handler_mut().clear_filter();
+    assert!(blockgrid.grid_handler().displayed_output.is_none());
+    assert!(blockgrid.grid_handler().filter_state.is_none());
+}
+
+/// Re-applying a different filter replaces the previous filter state.
+#[test]
+pub fn test_reapply_filter_replaces_previous() {
+    let mut blockgrid = mock_blockgrid(
+        "\
+        alpha\r\n\
+        bravo\r\n\
+        charlie\r\n\
+        delta\r\n\
+        ",
+    );
+    blockgrid.finish();
+
+    let dfas1 = Arc::new(RegexDFAs::new("alpha").unwrap());
+    blockgrid.grid_handler_mut().filter_lines(dfas1, 0, false);
+    assert_eq!(
+        blockgrid
+            .grid_handler()
+            .filter_state
+            .as_ref()
+            .unwrap()
+            .num_matched_lines,
+        1
+    );
+
+    // Apply a second filter that matches 2 lines.
+    let dfas2 = Arc::new(RegexDFAs::new("a").unwrap());
+    blockgrid.grid_handler_mut().filter_lines(dfas2, 0, false);
+    assert_eq!(
+        blockgrid
+            .grid_handler()
+            .filter_state
+            .as_ref()
+            .unwrap()
+            .num_matched_lines,
+        3 // alpha, charlie, delta all contain 'a'
+    );
+}
+
+/// No matches still produces valid empty displayed output.
+#[test]
+pub fn test_filter_no_matches_remote_output() {
+    let mut blockgrid = mock_blockgrid(
+        "\
+        foo\r\n\
+        bar\r\n\
+        baz\r\n\
+        ",
+    );
+    blockgrid.finish();
+
+    let dfas = Arc::new(RegexDFAs::new("zzz_nonexistent").unwrap());
+    blockgrid.grid_handler_mut().filter_lines(dfas, 0, false);
+
+    assert_eq!(
+        blockgrid
+            .grid_handler()
+            .filter_state
+            .as_ref()
+            .unwrap()
+            .num_matched_lines,
+        0
+    );
+    assert_eq!(
+        blockgrid
+            .grid_handler()
+            .displayed_output
+            .as_ref()
+            .unwrap()
+            .height(),
+        0
+    );
+}

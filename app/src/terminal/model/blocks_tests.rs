@@ -2168,3 +2168,93 @@ fn test_device_status_uses_active_block_if_no_typeahead() {
 
     assert_eq!(writer, "\x1b[1;21R".as_bytes());
 }
+
+// ---------------------------------------------------------------------------
+// Regression tests: block-level filter toggling for remote/SSH output
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_filter_block_output_active_query() {
+    use crate::terminal::block_filter::BlockFilterQuery;
+
+    let mut block_list =
+        new_bootstrapped_block_list(None, None, ChannelEventListener::new_for_test());
+    let idx = insert_block(
+        &mut block_list,
+        "ssh host ls\n",
+        "README.md\nCargo.toml\nsrc\nCargo.lock\n",
+    );
+
+    let query = BlockFilterQuery::new_for_test("Cargo".into());
+    block_list.filter_block_output(idx, query);
+
+    assert_eq!(block_list.num_matched_lines_in_filter_for_block(idx), Some(2));
+    assert!(block_list.filter_for_block(idx).is_some());
+}
+
+#[test]
+fn test_clear_filter_on_block_restores_output() {
+    use crate::terminal::block_filter::BlockFilterQuery;
+
+    let mut block_list =
+        new_bootstrapped_block_list(None, None, ChannelEventListener::new_for_test());
+    let idx = insert_block(
+        &mut block_list,
+        "ssh host ls\n",
+        "README.md\nCargo.toml\nsrc\nCargo.lock\n",
+    );
+
+    let query = BlockFilterQuery::new_for_test("Cargo".into());
+    block_list.filter_block_output(idx, query);
+    assert!(block_list.filter_for_block(idx).is_some());
+
+    block_list.clear_filter_on_block(idx);
+    assert!(block_list.filter_for_block(idx).is_none());
+    // After clearing, displayed_output_rows should be None (all rows visible).
+    assert!(block_list.block_at(idx).unwrap().displayed_output_rows().is_none());
+}
+
+#[test]
+fn test_filter_block_output_inactive_query_clears_filter() {
+    use crate::terminal::block_filter::BlockFilterQuery;
+
+    let mut block_list =
+        new_bootstrapped_block_list(None, None, ChannelEventListener::new_for_test());
+    let idx = insert_block(
+        &mut block_list,
+        "ssh host grep err logs\n",
+        "error: foo\ninfo: bar\nerror: baz\n",
+    );
+
+    // Apply active filter first.
+    let active_query = BlockFilterQuery::new_for_test("error".into());
+    block_list.filter_block_output(idx, active_query);
+    assert_eq!(block_list.num_matched_lines_in_filter_for_block(idx), Some(2));
+
+    // Toggle to inactive — should clear filter.
+    let mut inactive_query = BlockFilterQuery::new_for_test("error".into());
+    inactive_query.is_active = false;
+    block_list.filter_block_output(idx, inactive_query);
+
+    // Filter query is still stored but inactive; output rows show everything.
+    let filter = block_list.filter_for_block(idx).unwrap();
+    assert!(!filter.is_active);
+    assert!(block_list.block_at(idx).unwrap().displayed_output_rows().is_none());
+}
+
+#[test]
+fn test_filtered_blocks_tracks_active_filters() {
+    use crate::terminal::block_filter::BlockFilterQuery;
+
+    let mut block_list =
+        new_bootstrapped_block_list(None, None, ChannelEventListener::new_for_test());
+    let idx1 = insert_block(&mut block_list, "cmd1\n", "aaa\nbbb\n");
+    let idx2 = insert_block(&mut block_list, "cmd2\n", "ccc\nddd\n");
+
+    let query = BlockFilterQuery::new_for_test("aaa".into());
+    block_list.filter_block_output(idx1, query);
+
+    let filtered = block_list.filtered_blocks();
+    assert!(filtered.contains(&idx1));
+    assert!(!filtered.contains(&idx2));
+}
