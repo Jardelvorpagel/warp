@@ -36,7 +36,7 @@ pub fn ipynb_to_markdown(json: &str) -> Result<String, IpynbError>;
   - code cell → fenced block ` ```<lang> … ``` `.
   - raw cell → unhighlighted fenced block (its contents can't inject markdown).
   - `stream` / `execute_result["text/plain"]` / `error.traceback` → fenced text block (strip ANSI from tracebacks).
-  - `display_data`/`execute_result` with `image/png`|`image/jpeg` → `![output](data:image/png;base64,…)`.
+  - `display_data`/`execute_result` with `image/png`|`image/jpeg` → `![output](data:image/png;base64,…)`. The payload is validated as base64 first; invalid data renders an `[output image omitted: invalid base64 data]` message instead of being embedded (prevents broken images and Markdown-injection via metacharacters in the payload).
   - `text/html` and other rich MIME → skipped in v1 (see Follow-ups).
 - On parse failure, return `Err`; callers fall back to raw JSON (never blank).
 - Reuses `serde_json` and `base64` (already workspace deps).

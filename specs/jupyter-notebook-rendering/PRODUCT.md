@@ -27,7 +27,7 @@ Non-goals: running a kernel, executing or re-executing cells, editing cells or o
    - A `text/plain` result renders as preformatted text.
    - An error/traceback renders as preformatted text with terminal color/escape (ANSI) codes stripped, so it reads as plain text rather than showing raw escape sequences.
 
-7. Image outputs (`image/png`, `image/jpeg`) render as inline images using the data already embedded in the notebook — no network fetch. The user sees the rendered image, not its encoded data.
+7. Image outputs (`image/png`, `image/jpeg`) render as inline images using the data already embedded in the notebook — no network fetch. The user sees the rendered image, not its encoded data. If a cell's image data is not valid base64, the image is not shown and a short message indicating invalid image data appears in its place.
 
 8. Output types not supported in v1 (e.g. `text/html`, rich tables, LaTeX/MathJax, interactive widgets) are skipped: they are not rendered and do not appear as raw markup or encoded blobs. Their absence must never blank out or corrupt the surrounding cells — every other cell and output still renders.
 

@@ -11,6 +11,8 @@
 
 use std::collections::BTreeMap;
 
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine as _;
 use serde::Deserialize;
 
 /// The only nbformat major version this converter understands.
@@ -24,6 +26,11 @@ const MAX_TEXT_OUTPUT_CHARS: usize = 100_000;
 /// Larger images are replaced with a placeholder so the rest of the notebook
 /// still renders without freezing the UI.
 const MAX_IMAGE_DATA_CHARS: usize = 8 * 1024 * 1024;
+
+/// Maximum length of a code-fence language tag we will emit. Real language
+/// names are short; a longer value is treated as untrusted junk and dropped so
+/// it cannot bloat every code fence.
+const MAX_LANGUAGE_TAG_CHARS: usize = 32;
 
 /// Error produced when the input cannot be rendered as a supported notebook.
 #[derive(Debug, thiserror::Error)]
@@ -172,8 +179,11 @@ fn push_text_output(out: &mut String, text: &str) {
 }
 
 /// Append an embedded image output as a base64 data-URI image. The image data
-/// is already base64 in the notebook, so we only strip whitespace and bound the
-/// size.
+/// is already base64 in the notebook, so we strip whitespace, bound the size,
+/// and validate that it really is base64 before embedding it. Invalid data is
+/// not embedded — it would render as a broken image and could contain Markdown
+/// metacharacters (e.g. `)`) that break out of the image URL — and the user is
+/// shown a clear message in its place instead.
 fn push_image(out: &mut String, mime: &str, value: &serde_json::Value) {
     let base64: String = value_to_text(value)
         .chars()
@@ -184,6 +194,10 @@ fn push_image(out: &mut String, mime: &str, value: &serde_json::Value) {
     }
     if base64.len() > MAX_IMAGE_DATA_CHARS {
         push_text_output(out, "[output image omitted: exceeds size limit]");
+        return;
+    }
+    if BASE64_STANDARD.decode(base64.as_bytes()).is_err() {
+        push_text_output(out, "[output image omitted: invalid base64 data]");
         return;
     }
     out.push_str(&format!("![output](data:{mime};base64,{base64})\n\n"));
@@ -272,6 +286,29 @@ fn value_to_text(value: &serde_json::Value) -> String {
     }
 }
 
+/// Sanitize a notebook-declared language into a safe Markdown code-fence info
+/// string. Notebook metadata is untrusted: an arbitrary `language_info.name`
+/// could contain backticks, whitespace, or other info-string syntax that would
+/// break out of the opening fence and cause a code cell to render as Markdown
+/// instead of verbatim code. We therefore only keep values that look like a
+/// real language token — ASCII alphanumerics plus the few punctuation marks
+/// used in language names such as `c++`, `c#`, and `objective-c` — within a
+/// sane length. Anything else yields an empty tag (an unhighlighted, but safe,
+/// code block).
+fn sanitize_language(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let is_safe = !trimmed.is_empty()
+        && trimmed.chars().count() <= MAX_LANGUAGE_TAG_CHARS
+        && trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '#' | '-' | '_' | '.'));
+    if is_safe {
+        trimmed.to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// Top-level notebook structure (nbformat v4, only the fields we render).
 #[derive(Debug, Deserialize)]
 struct Notebook {
@@ -284,10 +321,13 @@ struct Notebook {
 }
 
 impl Notebook {
-    /// The code-fence language, derived from notebook metadata. Empty if the
-    /// notebook does not declare a language.
+    /// The code-fence language, derived from notebook metadata and sanitized to
+    /// a safe info-string token (see [`sanitize_language`]). Empty if the
+    /// notebook does not declare a language, or declares one that is not a safe
+    /// identifier.
     fn language(&self) -> String {
-        self.metadata
+        let raw = self
+            .metadata
             .language_info
             .as_ref()
             .and_then(|info| info.name.clone())
@@ -297,7 +337,8 @@ impl Notebook {
                     .as_ref()
                     .and_then(|spec| spec.language.clone())
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        sanitize_language(&raw)
     }
 }
 

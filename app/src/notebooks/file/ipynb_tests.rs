@@ -43,6 +43,51 @@ fn test_language_falls_back_to_kernelspec() {
 }
 
 #[test]
+fn test_language_with_backticks_is_sanitized() {
+    // A hostile language tag containing backticks (and a newline) must not be
+    // written onto the fence line, where it could break out of the fence and
+    // make the code cell render as Markdown.
+    let json = r#"{
+        "nbformat": 4,
+        "metadata": {"language_info": {"name": "py```\ninjected"}},
+        "cells": [{"cell_type": "code", "source": "x = 1"}]
+    }"#;
+
+    let md = ipynb_to_markdown(json).expect("should convert");
+    // The unsafe tag is dropped, leaving a plain (but safe) fenced block.
+    assert_eq!(md, "```\nx = 1\n```");
+}
+
+#[test]
+fn test_language_with_special_chars_is_preserved() {
+    // Legitimate language names containing `+`/`#`/`-` are kept verbatim.
+    let json = r#"{
+        "nbformat": 4,
+        "metadata": {"language_info": {"name": "c++"}},
+        "cells": [{"cell_type": "code", "source": "int x;"}]
+    }"#;
+
+    let md = ipynb_to_markdown(json).expect("should convert");
+    assert!(md.starts_with("```c++\n"), "got: {md}");
+}
+
+#[test]
+fn test_sanitize_language_accepts_and_rejects() {
+    // Identifier-like tokens (including the punctuation real language names use)
+    // are accepted and trimmed.
+    assert_eq!(sanitize_language("python"), "python");
+    assert_eq!(sanitize_language("C++"), "C++");
+    assert_eq!(sanitize_language("objective-c"), "objective-c");
+    assert_eq!(sanitize_language("  rust  "), "rust");
+    // Backticks, whitespace, other info-string syntax, and oversized values are
+    // rejected, yielding an empty (safe) tag.
+    assert_eq!(sanitize_language("py`thon"), "");
+    assert_eq!(sanitize_language("two words"), "");
+    assert_eq!(sanitize_language(""), "");
+    assert_eq!(sanitize_language(&"a".repeat(MAX_LANGUAGE_TAG_CHARS + 1)), "");
+}
+
+#[test]
 fn test_stream_output_renders_as_text_block() {
     let json = r#"{
         "nbformat": 4,
@@ -111,6 +156,35 @@ fn test_png_output_renders_as_data_uri_image() {
     assert!(
         md.contains("![output](data:image/png;base64,iVBORw0KGgo=)"),
         "got: {md}"
+    );
+}
+
+#[test]
+fn test_invalid_base64_image_shows_message() {
+    // A payload that is not valid base64 (and contains a Markdown-breaking
+    // char) must not be embedded; the user sees a clear message instead, and
+    // no payload content leaks into the rendered Markdown.
+    let json = r#"{
+        "nbformat": 4,
+        "cells": [
+            {"cell_type": "code", "source": "plot()", "outputs": [
+                {"output_type": "display_data", "data": {"image/png": "AAA)evil"}, "metadata": {}}
+            ]}
+        ]
+    }"#;
+
+    let md = ipynb_to_markdown(json).expect("should convert");
+    assert!(
+        md.contains("[output image omitted: invalid base64 data]"),
+        "expected invalid-image message, got: {md}"
+    );
+    assert!(
+        !md.contains("data:image/png;base64,"),
+        "invalid image must not be embedded as a data URI: {md}"
+    );
+    assert!(
+        !md.contains("evil"),
+        "invalid payload must not leak into the rendered Markdown: {md}"
     );
 }
 
