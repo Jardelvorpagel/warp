@@ -874,6 +874,12 @@ pub enum FeatureFlag {
 
     /// Gates the Grouped Tabs feature.
     GroupedTabs,
+
+    /// Enables editing `.ipynb` (Jupyter) notebooks in a cell-based view that
+    /// renders markdown and code cells as editable surfaces with read-only
+    /// outputs, and saves changes back to the notebook file. Edit-only: no
+    /// kernel or cell execution. See `specs/jupyter-notebook-rendering/tech_v1.md`.
+    JupyterNotebookEditing,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -941,6 +947,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::AsyncFind,
     FeatureFlag::GPTConfigurableContextWindow,
     FeatureFlag::RestorePromptOnInlineModelSelectorSearch,
+    FeatureFlag::JupyterNotebookEditing,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).

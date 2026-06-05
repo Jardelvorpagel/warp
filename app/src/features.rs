@@ -495,6 +495,8 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::RemoteCodeReview,
         #[cfg(feature = "custom_inference_endpoints")]
         FeatureFlag::CustomInferenceEndpoints,
+        #[cfg(feature = "jupyter_notebook_editing")]
+        FeatureFlag::JupyterNotebookEditing,
     ]);
 
     flags

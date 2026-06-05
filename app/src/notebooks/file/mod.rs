@@ -62,6 +62,10 @@ use crate::workflows::{WorkflowSource, WorkflowType};
 use crate::workspace::ActiveSession;
 use crate::{cmd_or_ctrl_shift, safe_warn, send_telemetry_from_ctx};
 
+/// Lossless, round-trippable model of a Jupyter `.ipynb` notebook, used by the
+/// editable cell-based notebook view.
+mod ipynb_model;
+
 /// Display mode for markdown files shown via the header segmented control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkdownDisplayMode {
