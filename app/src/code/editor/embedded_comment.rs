@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use pathfinder_geometry::vector::{vec2f, Vector2F};
+use pathfinder_geometry::vector::{Vector2F, vec2f};
 use serde_yaml::Mapping;
 use uuid::Uuid;
 use warp_editor::content::markdown::MarkdownStyle;
@@ -35,6 +35,13 @@ const SAVED_COMMENT_MAX_HEIGHT: f32 = 100_000.0;
 const COMMENT_ID_MAPPING_KEY: &str = "comment_id";
 const ENTITY_ID_MAPPING_KEY: &str = "entity_id";
 const WINDOW_ID_MAPPING_KEY: &str = "window_id";
+
+fn viewport_pinned_origin(viewport_item: &ViewportItem, ctx: &RenderContext) -> Vector2F {
+    let content_rect = viewport_item.content_bounds(ctx);
+    let mut origin = content_rect.origin();
+    origin.set_x(ctx.bounds.origin_x());
+    origin
+}
 
 #[derive(Debug)]
 pub struct EmbeddedCommentSpace {
@@ -246,9 +253,9 @@ impl RenderableBlock for RenderableInlineComment {
     }
 
     fn paint(&mut self, _model: &RenderState, ctx: &mut RenderContext, app: &AppContext) {
-        let content_rect = self.viewport_item.content_bounds(ctx);
+        let origin = viewport_pinned_origin(&self.viewport_item, ctx);
         ctx.paint.scene.start_layer(warpui::ClipBounds::ActiveLayer);
-        self.child.paint(content_rect.origin(), ctx.paint, app);
+        self.child.paint(origin, ctx.paint, app);
         ctx.paint.scene.stop_layer();
     }
 
@@ -445,9 +452,9 @@ impl RenderableBlock for RenderableSavedComment {
     }
 
     fn paint(&mut self, _model: &RenderState, ctx: &mut RenderContext, app: &AppContext) {
-        let content_rect = self.viewport_item.content_bounds(ctx);
+        let origin = viewport_pinned_origin(&self.viewport_item, ctx);
         ctx.paint.scene.start_layer(warpui::ClipBounds::ActiveLayer);
-        self.child.paint(content_rect.origin(), ctx.paint, app);
+        self.child.paint(origin, ctx.paint, app);
         ctx.paint.scene.stop_layer();
     }
 
