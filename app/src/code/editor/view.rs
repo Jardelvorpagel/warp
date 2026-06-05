@@ -1359,6 +1359,9 @@ impl CodeEditorView {
             } => {
                 self.open_existing_comment(id, line, comment_text, origin, ctx);
             }
+            InlineCommentViewEvent::RequestRemove { id } => {
+                ctx.emit(CodeEditorEvent::DeleteComment { id: *id });
+            }
         }
     }
 

@@ -7,7 +7,7 @@ use warp_core::ui::theme::Fill;
 use warp_editor::render::model::RenderState;
 use warpui::elements::{
     Border, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Flex,
-    MainAxisAlignment, ParentElement, Radius, Shrinkable, Text,
+    MainAxisAlignment, MainAxisSize, ParentElement, Radius, Shrinkable, Text,
 };
 use warpui::text_layout::ClipConfig;
 use warpui::units::Pixels;
@@ -27,17 +27,22 @@ use crate::notebooks::editor::view::RichTextEditorView;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
 use crate::util::time_format::human_readable_approx_duration;
-use crate::view_components::action_button::{ActionButton, ButtonSize, NakedTheme};
+use crate::view_components::action_button::{
+    ActionButton, ButtonSize, DangerNakedTheme, NakedTheme,
+};
 
-/// Fixed vertical chrome around the inner read-only body editor: the container's top/bottom padding
-/// (8 + 8), the metadata/affordance header row plus its spacing (~26). Slightly generous so the
-/// reserved inline block is never shorter than the painted card.
-const SAVED_CARD_CHROME_HEIGHT: f32 = 42.0;
+/// Fixed vertical chrome around the inner read-only body editor: the editor area's top/bottom
+/// padding (8 + 4), the footer's vertical padding and top border (8 + 1), the footer button row
+/// (`ButtonSize::Small` is 24px tall), and the outer container's top/bottom border (2). Slightly
+/// generous so the reserved inline block is never shorter than the painted card.
+const SAVED_CARD_CHROME_HEIGHT: f32 = 48.0;
 
 #[derive(Debug)]
 pub enum InlineCommentViewAction {
     /// The card's edit affordance was activated; open the inline composer for this comment.
     Edit,
+    /// The card's remove affordance was activated; delete this comment.
+    Remove,
 }
 
 #[derive(Debug)]
@@ -50,6 +55,8 @@ pub enum InlineCommentViewEvent {
         comment_text: String,
         origin: CommentOrigin,
     },
+    /// The user asked to remove this saved comment inline.
+    RequestRemove { id: CommentId },
 }
 
 /// A per-comment read-only view of a saved code-review comment, hosted inline in the diff editor.
@@ -60,14 +67,15 @@ pub enum InlineCommentViewEvent {
 /// `set_comment_locations`: the handle is reused (entity id preserved) and refreshed in place via
 /// [`Self::update_source`] when a comment's content changes, so the inline view never thrashes.
 ///
-/// Per the locked design decision the card shows the comment body, lightweight metadata (relative
-/// time + an imported-from-GitHub indicator), and an edit affordance — but NOT the redundant
-/// embedded diff snippet that the bottom-panel `CommentViewCard` renders (the comment already sits
-/// on its own diff line inline).
+/// Per the locked design decision the card shows the comment body plus a composer-style footer with
+/// lightweight metadata (relative time + an imported-from-GitHub indicator) and edit/remove
+/// affordances — but NOT the redundant embedded diff snippet that the bottom-panel
+/// `CommentViewCard` renders (the comment already sits on its own diff line inline).
 pub struct InlineCommentView {
     comment: EditorReviewComment,
     body_editor: ViewHandle<RichTextEditorView>,
     edit_button: ViewHandle<ActionButton>,
+    remove_button: ViewHandle<ActionButton>,
     laid_out_size: RefCell<Option<Vector2F>>,
 }
 
@@ -81,14 +89,19 @@ impl InlineCommentView {
         );
         let edit_button = ctx.add_typed_action_view(|_| {
             ActionButton::new("Edit", NakedTheme)
-                .with_icon(Icon::Pencil)
                 .with_size(ButtonSize::Small)
                 .on_click(|ctx| ctx.dispatch_typed_action(InlineCommentViewAction::Edit))
+        });
+        let remove_button = ctx.add_typed_action_view(|_| {
+            ActionButton::new("Remove", DangerNakedTheme)
+                .with_size(ButtonSize::Small)
+                .on_click(|ctx| ctx.dispatch_typed_action(InlineCommentViewAction::Remove))
         });
         Self {
             comment,
             body_editor,
             edit_button,
+            remove_button,
             laid_out_size: RefCell::new(None),
         }
     }
@@ -169,14 +182,9 @@ impl InlineCommentView {
         false
     }
 
-    fn render_metadata_row(&self, appearance: &Appearance, background: ColorU) -> Box<dyn Element> {
+    fn render_metadata(&self, appearance: &Appearance, background: ColorU) -> Box<dyn Element> {
         let theme = appearance.theme();
         let sub_text_color = theme.sub_text_color(Fill::Solid(background)).into_solid();
-
-        let mut row = Flex::row()
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
-            .with_spacing(4.);
 
         let mut leading = Flex::row()
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -210,10 +218,28 @@ impl InlineCommentView {
             .with_color(sub_text_color)
             .finish(),
         );
+        leading.finish()
+    }
 
-        row = row.with_child(Shrinkable::new(1., leading.finish()).finish());
-        row = row.with_child(ChildView::new(&self.edit_button).finish());
-        row.finish()
+    fn render_action_buttons(&self) -> Box<dyn Element> {
+        Flex::row()
+            .with_spacing(4.)
+            .with_children([
+                ChildView::new(&self.edit_button).finish(),
+                ChildView::new(&self.remove_button).finish(),
+            ])
+            .with_main_axis_alignment(MainAxisAlignment::End)
+            .finish()
+    }
+
+    fn render_footer_row(&self, appearance: &Appearance, background: ColorU) -> Box<dyn Element> {
+        Flex::row()
+            .with_main_axis_size(MainAxisSize::Max)
+            .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_child(Shrinkable::new(1., self.render_metadata(appearance, background)).finish())
+            .with_child(self.render_action_buttons())
+            .finish()
     }
 }
 
@@ -234,6 +260,11 @@ impl TypedActionView for InlineCommentView {
                     origin: self.comment.origin.clone(),
                 });
             }
+            InlineCommentViewAction::Remove => {
+                ctx.emit(InlineCommentViewEvent::RequestRemove {
+                    id: self.comment.id,
+                });
+            }
         }
     }
 }
@@ -248,16 +279,27 @@ impl View for InlineCommentView {
         let theme = appearance.theme();
         let background = blended_colors::neutral_2(theme);
         let border_color = blended_colors::neutral_4(theme);
+        let footer_row = self.render_footer_row(appearance, background);
 
         let column = Flex::column()
             .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_spacing(4.)
-            .with_child(self.render_metadata_row(appearance, background))
-            .with_child(ChildView::new(&self.body_editor).finish())
+            .with_child(
+                Container::new(ChildView::new(&self.body_editor).finish())
+                    .with_padding_bottom(4.)
+                    .with_padding_top(8.)
+                    .with_horizontal_padding(12.)
+                    .finish(),
+            )
+            .with_child(
+                Container::new(footer_row)
+                    .with_vertical_padding(4.)
+                    .with_horizontal_padding(12.)
+                    .with_border(Border::top(1.).with_border_fill(border_color))
+                    .finish(),
+            )
             .finish();
         ConstrainedBox::new(
             Container::new(column)
-                .with_uniform_padding(8.)
                 .with_background_color(background)
                 .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
                 .with_border(Border::all(1.).with_border_fill(border_color))
