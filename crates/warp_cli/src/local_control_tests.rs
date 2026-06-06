@@ -31,6 +31,29 @@ fn parses_first_slice_tab_create() {
     };
     assert_eq!(target.instance.as_deref(), Some("inst_123"));
 }
+#[test]
+fn rejects_conflicting_instance_selectors() {
+    let err = ControlArgs::try_parse_from([
+        "warpctrl",
+        "tab",
+        "create",
+        "--instance",
+        "inst_123",
+        "--pid",
+        "123",
+    ])
+    .expect_err("instance and pid conflict");
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+#[test]
+fn parses_pid_instance_selector() {
+    let args = ControlArgs::try_parse_from(["warpctrl", "app", "ping", "--pid", "123"])
+        .expect("pid selector parses");
+    let ControlCommand::App(AppCommand::Ping(target)) = args.command else {
+        panic!("expected app ping command");
+    };
+    assert_eq!(target.pid, Some(123));
+}
 
 #[test]
 fn parses_first_slice_instance_list() {
@@ -46,6 +69,156 @@ fn parses_first_slice_instance_list() {
 fn parses_first_slice_app_smoke_metadata_commands() {
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "ping"]).is_ok());
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "version"]).is_ok());
+}
+
+#[test]
+fn every_implemented_catalog_action_has_a_parser_route() {
+    let routes = [
+        (
+            local_control::protocol::ActionKind::InstanceList,
+            vec!["warpctrl", "instance", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::InstanceInspect,
+            vec!["warpctrl", "instance", "inspect"],
+        ),
+        (
+            local_control::protocol::ActionKind::AppPing,
+            vec!["warpctrl", "app", "ping"],
+        ),
+        (
+            local_control::protocol::ActionKind::AppVersion,
+            vec!["warpctrl", "app", "version"],
+        ),
+        (
+            local_control::protocol::ActionKind::AppActive,
+            vec!["warpctrl", "app", "active"],
+        ),
+        (
+            local_control::protocol::ActionKind::CapabilityList,
+            vec!["warpctrl", "capability", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::CapabilityInspect,
+            vec!["warpctrl", "capability", "inspect", "tab.create"],
+        ),
+        (
+            local_control::protocol::ActionKind::WindowList,
+            vec!["warpctrl", "window", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::WindowInspect,
+            vec!["warpctrl", "window", "inspect"],
+        ),
+        (
+            local_control::protocol::ActionKind::TabList,
+            vec!["warpctrl", "tab", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::TabInspect,
+            vec!["warpctrl", "tab", "inspect"],
+        ),
+        (
+            local_control::protocol::ActionKind::TabCreate,
+            vec!["warpctrl", "tab", "create"],
+        ),
+        (
+            local_control::protocol::ActionKind::PaneList,
+            vec!["warpctrl", "pane", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::PaneInspect,
+            vec!["warpctrl", "pane", "inspect"],
+        ),
+        (
+            local_control::protocol::ActionKind::SessionList,
+            vec!["warpctrl", "session", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::SessionInspect,
+            vec!["warpctrl", "session", "inspect"],
+        ),
+        (
+            local_control::protocol::ActionKind::BlockList,
+            vec!["warpctrl", "block", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::BlockInspect,
+            vec!["warpctrl", "block", "inspect", "block_1"],
+        ),
+        (
+            local_control::protocol::ActionKind::BlockOutput,
+            vec!["warpctrl", "block", "output", "block_1"],
+        ),
+        (
+            local_control::protocol::ActionKind::InputGet,
+            vec!["warpctrl", "input", "get"],
+        ),
+        (
+            local_control::protocol::ActionKind::HistoryList,
+            vec!["warpctrl", "history", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::ThemeList,
+            vec!["warpctrl", "theme", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::ThemeGet,
+            vec!["warpctrl", "theme", "get"],
+        ),
+        (
+            local_control::protocol::ActionKind::AppearanceGet,
+            vec!["warpctrl", "appearance", "get"],
+        ),
+        (
+            local_control::protocol::ActionKind::SettingList,
+            vec!["warpctrl", "setting", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::SettingGet,
+            vec!["warpctrl", "setting", "get", "theme"],
+        ),
+        (
+            local_control::protocol::ActionKind::KeybindingList,
+            vec!["warpctrl", "keybinding", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::KeybindingGet,
+            vec!["warpctrl", "keybinding", "get", "copy"],
+        ),
+        (
+            local_control::protocol::ActionKind::ActionList,
+            vec!["warpctrl", "action", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::ActionInspect,
+            vec!["warpctrl", "action", "inspect", "tab.create"],
+        ),
+        (
+            local_control::protocol::ActionKind::FileList,
+            vec!["warpctrl", "file", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::DriveList,
+            vec!["warpctrl", "drive", "list"],
+        ),
+        (
+            local_control::protocol::ActionKind::DriveInspect,
+            vec!["warpctrl", "drive", "inspect", "drive_1"],
+        ),
+    ];
+    let implemented = local_control::protocol::ActionKind::implemented_metadata()
+        .into_iter()
+        .map(|metadata| metadata.kind)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        implemented,
+        routes.iter().map(|(action, _)| *action).collect::<Vec<_>>()
+    );
+    for (_, args) in routes {
+        ControlArgs::try_parse_from(args).expect("implemented action parser route exists");
+    }
 }
 #[test]
 fn parses_control_mode_args_after_hidden_flag() {
@@ -113,7 +286,7 @@ fn parses_readonly_capability_and_target_commands() {
     assert!(ControlArgs::try_parse_from(["warpctrl", "theme", "get"]).is_ok());
     assert!(ControlArgs::try_parse_from(["warpctrl", "keybinding", "get", "copy"]).is_ok());
     assert!(ControlArgs::try_parse_from(["warpctrl", "file", "list"]).is_ok());
-    assert!(ControlArgs::try_parse_from(["warpctrl", "project", "active"]).is_ok());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "app", "active"]).is_ok());
     assert!(ControlArgs::try_parse_from(["warpctrl", "drive", "inspect", "drive_1"]).is_ok());
 }
 
@@ -145,6 +318,42 @@ fn structured_error_output_uses_stable_error_code() {
     );
 }
 
+#[test]
+fn renders_human_readable_tab_create_output() {
+    let rendered = render_human_readable_for_test(
+        local_control::protocol::ActionKind::TabCreate,
+        &json!({
+            "tab": {
+                "id": "tab_123",
+                "active_index": 2,
+                "count": 3
+            },
+            "window": {
+                "id": "window_123"
+            }
+        }),
+    );
+    assert_eq!(
+        rendered,
+        "Created tab tab_123 in window window_123 (active index 2, tab count 3)"
+    );
+}
+
+#[test]
+#[serial]
+fn instance_list_without_discovery_records_succeeds() {
+    let dir = std::env::temp_dir().join(format!(
+        "warpctrl-empty-discovery-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp discovery dir is created");
+    let previous = set_discovery_dir(&dir);
+    let args = ControlArgs::try_parse_from(["warpctrl", "instance", "list"])
+        .expect("instance list parses");
+    let result = run_inner(args);
+    restore_discovery_dir(previous);
+    result.expect("empty instance list succeeds");
+}
 #[test]
 #[serial]
 fn tab_create_without_discovery_records_reports_no_instance() {

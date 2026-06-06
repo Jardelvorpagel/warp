@@ -6,7 +6,7 @@ use uuid::Uuid;
 pub use crate::catalog::{
     ActionImplementationStatus, ActionKind, ActionMetadata, ActionParameterSpec, ActionResultSpec,
     AuthenticatedUserRequirement, ExecutionContextProof, InvocationContext, PROTOCOL_VERSION,
-    PermissionCategory, RiskTier, StateDataCategory, TargetScope,
+    TargetScope,
 };
 pub use crate::selectors::{
     PaneSelector, PaneTarget, SessionSelector, SessionTarget, TabSelector, TabTarget,
@@ -28,7 +28,9 @@ pub enum DriveObjectType {
     Prompt,
     Folder,
     AiFact,
+    AiRule,
     McpServer,
+    McpServerCollection,
     Space,
     Trash,
 }

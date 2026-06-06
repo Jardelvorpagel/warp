@@ -6,10 +6,8 @@ use ::local_control::{ActionKind, ControlError, ErrorCode};
 use serde_json::json;
 use warpui::{ModelContext, SingletonEntity};
 
-use crate::cloud_object::{
-    model::persistence::CloudModel, CloudObject, GenericStringObjectFormat, JsonObjectType,
-    ObjectType,
-};
+use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::{CloudObject, GenericStringObjectFormat, JsonObjectType, ObjectType};
 use crate::drive::folders::CloudFolder;
 use crate::env_vars::CloudEnvVarCollection;
 use crate::local_control::LocalControlBridge;
@@ -167,7 +165,9 @@ fn drive_object_content(object: &dyn CloudObject) -> Result<serde_json::Value, C
             }))
         }
         DriveObjectType::AiFact
+        | DriveObjectType::AiRule
         | DriveObjectType::McpServer
+        | DriveObjectType::McpServerCollection
         | DriveObjectType::Space
         | DriveObjectType::Trash => Err(drive_unsupported_type_error()),
     }
@@ -181,9 +181,11 @@ fn drive_object_type_rank(object_type: DriveObjectType) -> u8 {
         DriveObjectType::EnvVarCollection => 3,
         DriveObjectType::Folder => 4,
         DriveObjectType::AiFact => 5,
-        DriveObjectType::McpServer => 6,
-        DriveObjectType::Space => 7,
-        DriveObjectType::Trash => 8,
+        DriveObjectType::AiRule => 6,
+        DriveObjectType::McpServer => 7,
+        DriveObjectType::McpServerCollection => 8,
+        DriveObjectType::Space => 9,
+        DriveObjectType::Trash => 10,
     }
 }
 
