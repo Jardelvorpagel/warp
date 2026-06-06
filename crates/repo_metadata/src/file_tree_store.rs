@@ -7,7 +7,7 @@ use warp_util::standardized_path::StandardizedPath;
 use warpui_core::ModelHandle;
 
 use crate::file_tree_store::file_tree_state::FileTreeMapStore;
-use crate::{BuildTreeError, Entry, FileId, FileMetadata, Repository};
+use crate::{BuildTreeError, Entry, FileId, FileMetadata, ProjectSkillFileMetadata, Repository};
 
 #[derive(Debug, Clone)]
 pub struct FileTreeEntry {
@@ -361,32 +361,46 @@ pub struct FileTreeState {
     pub entry: FileTreeEntry,
     /// Gitignore rules applicable to this repository.
     pub gitignores: Vec<Gitignore>,
+    /// Project skill files discovered during the same walk as the canonical tree.
+    project_skill_files: Vec<ProjectSkillFileMetadata>,
 
     /// Handle to the backing repository (None for lazily-loaded standalone paths).
-    #[expect(unused)]
     repository: Option<ModelHandle<Repository>>,
 }
 
 impl FileTreeState {
+    pub(crate) fn project_skill_files(&self) -> &[ProjectSkillFileMetadata] {
+        &self.project_skill_files
+    }
+
+    pub(crate) fn project_skill_files_mut(&mut self) -> &mut Vec<ProjectSkillFileMetadata> {
+        &mut self.project_skill_files
+    }
     /// Creates a new FileTreeState.
     pub fn new(
         entry: Entry,
         gitignores: Vec<Gitignore>,
         repository: Option<ModelHandle<Repository>>,
+        project_skill_files: Vec<ProjectSkillFileMetadata>,
     ) -> Self {
         Self {
             entry: entry.into(),
             gitignores,
             repository,
+            project_skill_files,
         }
     }
 
     /// Creates a new FileTreeState for a lazily-loaded standalone path.
-    pub fn new_lazy_loaded(entry: Entry) -> Self {
+    pub fn new_lazy_loaded(
+        entry: Entry,
+        project_skill_files: Vec<ProjectSkillFileMetadata>,
+    ) -> Self {
         Self {
             entry: entry.into(),
             gitignores: vec![],
             repository: None,
+            project_skill_files,
         }
     }
 
@@ -399,7 +413,12 @@ impl FileTreeState {
             entry,
             gitignores: vec![],
             repository: None,
+            project_skill_files: Vec::new(),
         }
+    }
+
+    pub(crate) fn repository(&self) -> Option<&ModelHandle<Repository>> {
+        self.repository.as_ref()
     }
 }
 

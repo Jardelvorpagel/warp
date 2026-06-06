@@ -20,7 +20,9 @@ use crate::local_model::{
 };
 use crate::remote_model::{RemoteRepoMetadataModel, RemoteRepositoryMetadataEvent};
 use crate::repository_identifier::{RemoteRepositoryIdentifier, RepositoryIdentifier};
-use crate::{RepoMetadataError, StandingQueryResults, StandingQueryResultsDelta};
+use crate::{
+    ProjectSkillFileMetadata, RepoMetadataError, StandingQueryResults, StandingQueryResultsDelta,
+};
 
 /// Unified events emitted by the [`RepoMetadataModel`] wrapper.
 ///
@@ -46,6 +48,8 @@ pub enum RepoMetadataEvent {
         id: RepositoryIdentifier,
         delta: StandingQueryResultsDelta,
     },
+    /// Project skill files in the dedicated sidecar changed.
+    ProjectSkillFilesUpdated { id: RepositoryIdentifier },
     /// Updating a repository failed.
     UpdatingRepositoryFailed { id: RepositoryIdentifier },
     /// An incremental file tree update is ready to be sent to the remote
@@ -105,6 +109,11 @@ impl RepoMetadataModel {
         let unified = match event {
             RepositoryMetadataEvent::RepositoryUpdated { path } => {
                 RepoMetadataEvent::RepositoryUpdated {
+                    id: RepositoryIdentifier::local(path.clone()),
+                }
+            }
+            RepositoryMetadataEvent::ProjectSkillFilesUpdated { path } => {
+                RepoMetadataEvent::ProjectSkillFilesUpdated {
                     id: RepositoryIdentifier::local(path.clone()),
                 }
             }
@@ -201,6 +210,17 @@ impl RepoMetadataModel {
             RepositoryIdentifier::Remote(remote_id) => {
                 self.remote.as_ref(ctx).get_repository(remote_id)
             }
+        }
+    }
+
+    pub fn get_project_skills<'a>(
+        &self,
+        id: &RepositoryIdentifier,
+        ctx: &'a AppContext,
+    ) -> Option<&'a [ProjectSkillFileMetadata]> {
+        match id {
+            RepositoryIdentifier::Local(path) => self.local.as_ref(ctx).get_project_skills(path),
+            RepositoryIdentifier::Remote(_) => None,
         }
     }
 

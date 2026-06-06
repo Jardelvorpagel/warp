@@ -37,6 +37,7 @@ pub mod entry;
 pub mod file_tree_store;
 pub mod file_tree_update;
 pub mod local_model;
+pub mod project_skills;
 pub mod remote_model;
 pub mod repositories;
 pub mod repository;
@@ -73,6 +74,7 @@ pub fn is_in_repo(_path: &str, _app: &warpui_core::AppContext) -> bool {
 pub use file_tree_store::FileTreeEntry;
 pub use file_tree_update::{MetadataUpdateType, RepoMetadataUpdate};
 pub use local_model::{LocalRepoMetadataModel, RepoContent, RepoContents};
+pub use project_skills::ProjectSkillFileMetadata;
 pub use remote_model::RemoteRepoMetadataModel;
 pub use repository_identifier::{RemoteRepositoryIdentifier, RepositoryIdentifier};
 pub use standing_queries::{

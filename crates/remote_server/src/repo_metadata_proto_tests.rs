@@ -11,12 +11,6 @@ fn path(path: &str) -> StandardizedPath {
 
 fn standing_delta() -> StandingQueryResultsDelta {
     StandingQueryResultsDelta {
-        upserted_project_skills: vec![StandingQueryContent::file(path(
-            "/repo/.agents/skills/review/SKILL.md",
-        ))],
-        removed_project_skills: vec![StandingQueryContent::directory(path(
-            "/repo/.claude/skills",
-        ))],
         upserted_project_rules: vec![StandingQueryContent::file(path("/repo/WARP.md"))],
         removed_project_rules: vec![StandingQueryContent::file(path(
             "/repo/packages/api/AGENTS.md",

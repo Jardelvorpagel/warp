@@ -13,6 +13,7 @@ use notify_debouncer_full::notify::WatchFilter;
 use thiserror::Error;
 use warp_util::standardized_path::StandardizedPath;
 
+use crate::project_skills::ProjectSkillFileMetadata;
 use crate::standing_queries::{StandingQueryDefinitions, StandingQueryResults};
 
 /// Maximum file size allowed for treesitter parsing (3MB).
@@ -33,6 +34,14 @@ pub enum BuildTreeError {
     Symlink,
     #[error("Maximum directory depth exceeded")]
     MaxDepthExceeded,
+}
+fn is_project_skill_path_interest(
+    path: &Path,
+    standing_queries: &Option<&mut StandingQueryBuildState<'_>>,
+) -> bool {
+    standing_queries
+        .as_ref()
+        .is_some_and(|state| state.definitions.is_project_skill_path_interest(path))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +89,33 @@ pub(crate) struct BuildTreeOptions<'a> {
 }
 struct StandingQueryBuildState<'a> {
     results: &'a mut StandingQueryResults,
+    project_skill_files: &'a mut Vec<ProjectSkillFileMetadata>,
     definitions: &'a StandingQueryDefinitions,
+}
+
+impl StandingQueryBuildState<'_> {
+    fn record_path(&mut self, path: &Path, is_directory: bool) {
+        self.results
+            .record_path(path, is_directory, self.definitions);
+        if !is_directory && self.definitions.is_project_skill_file(path) {
+            self.project_skill_files
+                .push(ProjectSkillFileMetadata::from_path(path));
+        }
+    }
+
+    fn record_followed_project_skill_directory(&mut self, path: &Path) {
+        if !self
+            .definitions
+            .is_direct_project_skill_provider_child(path)
+        {
+            return;
+        }
+        let skill_file = path.join("SKILL.md");
+        if skill_file.is_file() {
+            self.project_skill_files
+                .push(ProjectSkillFileMetadata::from_path(&skill_file));
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
@@ -151,7 +186,9 @@ impl Entry {
             None,
         )
     }
-    /// Builds the materialized tree and standing results during the same filesystem traversal.
+    /// Builds the materialized tree, generic standing results, and dedicated project-skill
+    /// sidecar during the same filesystem traversal.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_tree_with_standing_queries(
         path: impl Into<PathBuf>,
         files: &mut Vec<FileMetadata>,
@@ -159,10 +196,12 @@ impl Entry {
         remaining_file_quota: Option<&mut usize>,
         options: BuildTreeOptions<'_>,
         standing_results: &mut StandingQueryResults,
+        project_skill_files: &mut Vec<ProjectSkillFileMetadata>,
         definitions: &StandingQueryDefinitions,
     ) -> Result<Self, BuildTreeError> {
         let mut standing_queries = StandingQueryBuildState {
             results: standing_results,
+            project_skill_files,
             definitions,
         };
         Self::build_tree_with_force_included_paths_and_ancestor(
@@ -255,9 +294,7 @@ impl Entry {
         // ignored/symlinked), a classification failure at the root propagates to
         // the caller, preserving existing error behavior.
         if let Some(state) = standing_queries.as_deref_mut() {
-            state
-                .results
-                .record_path(&root_path, root_path.is_dir(), state.definitions);
+            state.record_path(&root_path, root_path.is_dir());
         }
         match evaluate_entry(
             &root_path,
@@ -265,6 +302,7 @@ impl Entry {
             &options,
             options.current_depth,
             ancestor_is_ignored,
+            is_project_skill_path_interest(&root_path, &standing_queries),
         )? {
             EvaluatedEntry::File { ignored } => {
                 if quota == Some(0)
@@ -287,7 +325,7 @@ impl Entry {
                 let mut queue: VecDeque<DirJob> = VecDeque::new();
                 if !lazy {
                     queue.push_back(DirJob {
-                        index: 0,
+                        index: Some(0),
                         path: root_path,
                         depth: options.current_depth,
                         ignored,
@@ -311,6 +349,7 @@ impl Entry {
                                     &job.path,
                                     options.force_included_paths,
                                 )
+                                || is_project_skill_path_interest(&job.path, &standing_queries)
                         }
                     };
                     if !should_expand {
@@ -330,8 +369,10 @@ impl Entry {
                         }
                     };
 
-                    if let Some(NodeBuilder::Dir { loaded, .. }) = nodes[job.index].as_mut() {
-                        *loaded = true;
+                    if let Some(index) = job.index {
+                        if let Some(NodeBuilder::Dir { loaded, .. }) = nodes[index].as_mut() {
+                            *loaded = true;
+                        }
                     }
 
                     let child_depth = job.depth + 1;
@@ -341,16 +382,13 @@ impl Entry {
                         };
                         let entry_path = entry.path();
 
-                        // Do not materialize directory symlinks in the canonical tree. Standing
-                        // project-skill queries still follow eligible provider children locally
-                        // and retain their lexical paths in the result set.
+                        // Do not materialize directory symlinks in the canonical tree. Dedicated
+                        // project-skill discovery still follows eligible provider children locally
+                        // and retains their lexical paths in the sidecar.
                         let canonical_path = if entry_path.is_symlink() {
                             if entry_path.is_dir() {
                                 if let Some(state) = standing_queries.as_deref_mut() {
-                                    state.results.record_followed_project_skill_directory(
-                                        &entry_path,
-                                        state.definitions,
-                                    );
+                                    state.record_followed_project_skill_directory(&entry_path);
                                 }
                                 None
                             } else {
@@ -363,11 +401,7 @@ impl Entry {
                             continue;
                         };
                         if let Some(state) = standing_queries.as_deref_mut() {
-                            state.results.record_path(
-                                &child_path,
-                                child_path.is_dir(),
-                                state.definitions,
-                            );
+                            state.record_path(&child_path, child_path.is_dir());
                         }
 
                         match evaluate_entry(
@@ -376,8 +410,24 @@ impl Entry {
                             &options,
                             child_depth,
                             job.ignored,
+                            is_project_skill_path_interest(&child_path, &standing_queries),
                         ) {
                             Ok(EvaluatedEntry::File { ignored }) => {
+                                // Ignored project-skill paths are traversed so the sidecar can
+                                // retain them, but they must not leak into the canonical tree.
+                                let standing_only = ignored
+                                    && is_project_skill_path_interest(
+                                        &child_path,
+                                        &standing_queries,
+                                    )
+                                    && !matches_force_included_path(
+                                        &child_path,
+                                        options.force_included_paths,
+                                    );
+                                let Some(parent_index) = job.index.filter(|_| !standing_only)
+                                else {
+                                    continue;
+                                };
                                 if quota == Some(0)
                                     && options.budget_exceeded_behavior
                                         == BudgetExceededBehavior::FailFast
@@ -388,17 +438,29 @@ impl Entry {
                                     consume_file(&child_path, ignored, files, &mut quota);
                                 let child_index = nodes.len();
                                 nodes.push(Some(NodeBuilder::File(metadata)));
-                                push_child(&mut nodes, job.index, child_index);
+                                push_child(&mut nodes, parent_index, child_index);
                             }
                             Ok(EvaluatedEntry::Directory { ignored, lazy }) => {
-                                let child_index = nodes.len();
-                                nodes.push(Some(NodeBuilder::Dir {
-                                    path: child_path.clone(),
-                                    ignored,
-                                    loaded: false,
-                                    children: Vec::new(),
-                                }));
-                                push_child(&mut nodes, job.index, child_index);
+                                // An ignored project-skill branch is walked only for sidecar
+                                // discovery. Its descendants remain outside the canonical tree
+                                // even though project-skill interest keeps the traversal eager.
+                                let standing_only = ignored
+                                    && is_project_skill_path_interest(
+                                        &child_path,
+                                        &standing_queries,
+                                    );
+                                let child_index =
+                                    job.index.filter(|_| !standing_only).map(|parent_index| {
+                                        let child_index = nodes.len();
+                                        nodes.push(Some(NodeBuilder::Dir {
+                                            path: child_path.clone(),
+                                            ignored,
+                                            loaded: false,
+                                            children: Vec::new(),
+                                        }));
+                                        push_child(&mut nodes, parent_index, child_index);
+                                        child_index
+                                    });
                                 // Lazy directories (past max depth, or ignored
                                 // without a matching force-included path) stay
                                 // unloaded. Everything else is queued for
@@ -535,7 +597,9 @@ enum NodeBuilder {
 
 /// A directory queued for expansion during the breadth-first build.
 struct DirJob {
-    index: usize,
+    /// Arena node for materialized directories. `None` means this directory is traversed only
+    /// to update sidecar results and must remain outside the canonical tree.
+    index: Option<usize>,
     path: PathBuf,
     depth: usize,
     ignored: bool,
@@ -558,6 +622,7 @@ fn evaluate_entry(
     options: &BuildTreeOptions<'_>,
     current_depth: usize,
     ancestor_is_ignored: bool,
+    project_skill_interest: bool,
 ) -> Result<EvaluatedEntry, BuildTreeError> {
     let is_dir = curr_path.is_dir();
 
@@ -581,7 +646,8 @@ fn evaluate_entry(
             false, /* check_ancestors */
         );
 
-    let force_included = matches_force_included_path(curr_path, options.force_included_paths);
+    let force_included = matches_force_included_path(curr_path, options.force_included_paths)
+        || project_skill_interest;
 
     // If we've reached the max depth, force lazy-loading even of non-ignored folders unless the
     // folder is on the path to a force-included subtree.
@@ -691,7 +757,7 @@ pub fn is_git_internal_path(path: &Path) -> bool {
 /// `force_included_paths`. Each force-included path is a relative component
 /// sequence (e.g. `.agents/skills`) matched against the tail of `path`, so a
 /// match also holds for the ancestor prefixes leading to it.
-fn matches_force_included_path(path: &Path, force_included_paths: &[PathBuf]) -> bool {
+pub(crate) fn matches_force_included_path(path: &Path, force_included_paths: &[PathBuf]) -> bool {
     let path_components: Vec<_> = path
         .components()
         .filter_map(|component| match component {

@@ -50,16 +50,6 @@ impl From<&StandingQueryContent> for proto::StandingQueryContent {
 impl From<&StandingQueryResultsDelta> for proto::StandingQueryResultsDelta {
     fn from(delta: &StandingQueryResultsDelta) -> Self {
         Self {
-            upserted_project_skills: delta
-                .upserted_project_skills
-                .iter()
-                .map(proto::StandingQueryContent::from)
-                .collect(),
-            removed_project_skills: delta
-                .removed_project_skills
-                .iter()
-                .map(proto::StandingQueryContent::from)
-                .collect(),
             upserted_project_rules: delta
                 .upserted_project_rules
                 .iter()
@@ -222,16 +212,6 @@ fn proto_to_standing_results_delta(
     delta: &proto::StandingQueryResultsDelta,
 ) -> StandingQueryResultsDelta {
     StandingQueryResultsDelta {
-        upserted_project_skills: delta
-            .upserted_project_skills
-            .iter()
-            .filter_map(proto_to_standing_query_content)
-            .collect(),
-        removed_project_skills: delta
-            .removed_project_skills
-            .iter()
-            .filter_map(proto_to_standing_query_content)
-            .collect(),
         upserted_project_rules: delta
             .upserted_project_rules
             .iter()

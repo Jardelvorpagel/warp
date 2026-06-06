@@ -1546,12 +1546,6 @@ pub(crate) fn initialize_app(
             } else {
                 RepoMetadataModel::new(ctx)
             };
-            model.register_force_included_paths(
-                ::ai::skills::SKILL_PROVIDER_DEFINITIONS
-                    .iter()
-                    .map(|provider| provider.skills_path.clone()),
-                ctx,
-            );
             model.set_project_skill_provider_paths(
                 ::ai::skills::SKILL_PROVIDER_DEFINITIONS
                     .iter()

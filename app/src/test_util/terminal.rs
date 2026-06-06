@@ -132,12 +132,6 @@ pub fn initialize_app_for_terminal_view(app: &mut App) {
     #[cfg(feature = "local_fs")]
     app.add_singleton_model(|ctx| {
         let model = RepoMetadataModel::new(ctx);
-        model.register_force_included_paths(
-            SKILL_PROVIDER_DEFINITIONS
-                .iter()
-                .map(|provider| provider.skills_path.clone()),
-            ctx,
-        );
         model.set_project_skill_provider_paths(
             SKILL_PROVIDER_DEFINITIONS
                 .iter()

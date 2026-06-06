@@ -3,8 +3,6 @@ use std::fs;
 use ignore::gitignore::Gitignore;
 
 use super::{matches_gitignores, Entry, IgnoredPathStrategy};
-#[cfg(unix)]
-use crate::StandingQueryContent;
 use crate::{StandingQueryDefinitions, StandingQueryResults};
 #[test]
 fn test_git_path_filtering_allowlist() {
@@ -174,6 +172,46 @@ fn test_git_path_filtering_allowlist() {
             r"C:\Users\user\project\.git\index"
         )));
     }
+}
+
+#[test]
+fn standing_queries_preserve_unrelated_generic_force_included_paths() {
+    virtual_fs::VirtualFS::test(
+        "standing_queries_preserve_generic_force_included_paths",
+        |dirs, mut vfs| {
+            vfs.mkdir("repo/.cache/data")
+                .with_files(vec![virtual_fs::Stub::FileWithContent(
+                    "repo/.cache/data/value.txt",
+                    "value",
+                )]);
+            let repo = dirs.tests().join("repo");
+            std::fs::write(repo.join(".gitignore"), ".cache/\n").unwrap();
+
+            let mut files = Vec::new();
+            let mut gitignores = Vec::new();
+            let mut results = StandingQueryResults::default();
+            let mut project_skill_files = Vec::new();
+            let tree = Entry::build_tree_with_standing_queries(
+                &repo,
+                &mut files,
+                &mut gitignores,
+                None,
+                super::BuildTreeOptions {
+                    max_depth: 200,
+                    current_depth: 0,
+                    ignored_path_strategy: &IgnoredPathStrategy::IncludeLazy,
+                    force_included_paths: &[std::path::PathBuf::from(".cache/data")],
+                    budget_exceeded_behavior: super::BudgetExceededBehavior::StopAndLazyLoad,
+                },
+                &mut results,
+                &mut project_skill_files,
+                &StandingQueryDefinitions::default(),
+            )
+            .unwrap();
+
+            assert!(find_entry(&tree, &repo.join(".cache/data/value.txt")).is_some());
+        },
+    );
 }
 
 /// Writes a `.gitignore` with `content` at `root` and returns a [`Gitignore`]
@@ -380,6 +418,7 @@ fn standing_queries_report_skills_below_an_ignored_directory() {
         let mut files = Vec::new();
         let mut gitignores = Vec::new();
         let mut results = StandingQueryResults::default();
+        let mut project_skill_files = Vec::new();
         let mut definitions = StandingQueryDefinitions::default();
         definitions.set_project_skill_provider_paths([std::path::PathBuf::from(".agents/skills")]);
         let tree = Entry::build_tree_with_standing_queries(
@@ -391,25 +430,27 @@ fn standing_queries_report_skills_below_an_ignored_directory() {
                 max_depth: 200,
                 current_depth: 0,
                 ignored_path_strategy: &IgnoredPathStrategy::IncludeLazy,
-                force_included_paths: &[std::path::PathBuf::from(".agents/skills")],
+                force_included_paths: &[],
                 budget_exceeded_behavior: super::BudgetExceededBehavior::StopAndLazyLoad,
             },
             &mut results,
+            &mut project_skill_files,
             &definitions,
         )
         .unwrap();
 
-        let agents = find_entry(&tree, &repo.join(".agents")).expect(".agents should be present");
-        assert!(agents.loaded());
-        assert!(find_entry(&tree, &repo.join(".agents/skills/test/SKILL.md")).is_some());
+        assert!(
+            find_entry(&tree, &repo.join(".agents")).is_none(),
+            "ignored standing-query paths must remain outside the canonical tree"
+        );
 
         let skill_path = warp_util::standardized_path::StandardizedPath::try_from_local(
             &repo.join(".agents/skills/test/SKILL.md"),
         )
         .unwrap();
-        assert!(results
-            .project_skills()
-            .any(|content| content.path == skill_path && !content.is_directory));
+        assert!(project_skill_files
+            .iter()
+            .any(|content| content.path == skill_path));
     });
 }
 
@@ -433,6 +474,7 @@ fn standing_queries_report_symlinked_skills_without_materializing_symlinked_dire
             let mut files = Vec::new();
             let mut gitignores = Vec::new();
             let mut results = StandingQueryResults::default();
+            let mut project_skill_files = Vec::new();
             let mut definitions = StandingQueryDefinitions::default();
             definitions
                 .set_project_skill_provider_paths([std::path::PathBuf::from(".agents/skills")]);
@@ -449,19 +491,18 @@ fn standing_queries_report_symlinked_skills_without_materializing_symlinked_dire
                     budget_exceeded_behavior: super::BudgetExceededBehavior::StopAndLazyLoad,
                 },
                 &mut results,
+                &mut project_skill_files,
                 &definitions,
             )
             .unwrap();
 
             assert!(find_entry(&tree, &linked_directory).is_none());
-            assert!(results.project_skills().any(|content| {
-                content
-                    == &StandingQueryContent::file(
-                        warp_util::standardized_path::StandardizedPath::try_from_local(
-                            &linked_directory.join("SKILL.md"),
-                        )
-                        .unwrap(),
+            assert!(project_skill_files.iter().any(|content| {
+                content.path
+                    == warp_util::standardized_path::StandardizedPath::try_from_local(
+                        &linked_directory.join("SKILL.md"),
                     )
+                    .unwrap()
             }));
         },
     );
@@ -479,6 +520,7 @@ fn standing_queries_do_not_report_rules_below_an_unloaded_shallow_directory() {
         let mut files = Vec::new();
         let mut gitignores = Vec::new();
         let mut results = StandingQueryResults::default();
+        let mut project_skill_files = Vec::new();
         let tree = Entry::build_tree_with_standing_queries(
             &repo,
             &mut files,
@@ -492,6 +534,7 @@ fn standing_queries_do_not_report_rules_below_an_unloaded_shallow_directory() {
                 budget_exceeded_behavior: super::BudgetExceededBehavior::StopAndLazyLoad,
             },
             &mut results,
+            &mut project_skill_files,
             &StandingQueryDefinitions::default(),
         )
         .unwrap();
@@ -529,6 +572,7 @@ fn shallow_tree_expands_force_included_skill_branch_only() {
         let mut files = Vec::new();
         let mut gitignores = Vec::new();
         let mut results = StandingQueryResults::default();
+        let mut project_skill_files = Vec::new();
         let mut definitions = StandingQueryDefinitions::default();
         definitions.set_project_skill_provider_paths([std::path::PathBuf::from(".agents/skills")]);
         let tree = Entry::build_tree_with_standing_queries(
@@ -544,6 +588,7 @@ fn shallow_tree_expands_force_included_skill_branch_only() {
                 budget_exceeded_behavior: super::BudgetExceededBehavior::StopAndLazyLoad,
             },
             &mut results,
+            &mut project_skill_files,
             &definitions,
         )
         .unwrap();
@@ -562,9 +607,9 @@ fn shallow_tree_expands_force_included_skill_branch_only() {
             warp_util::standardized_path::StandardizedPath::try_from_local(&skill_path).unwrap();
         let rule_path =
             warp_util::standardized_path::StandardizedPath::try_from_local(&rule_path).unwrap();
-        assert!(results
-            .project_skills()
-            .any(|content| content.path == skill_path && !content.is_directory));
+        assert!(project_skill_files
+            .iter()
+            .any(|content| content.path == skill_path));
         assert!(!results
             .project_rules()
             .any(|content| content.path == rule_path));

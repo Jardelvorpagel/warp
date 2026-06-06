@@ -91,7 +91,7 @@ fn build_repo_state(repo_root: &std::path::Path) -> FileTreeState {
         ignored: false,
         loaded: true,
     });
-    FileTreeState::new(root, vec![], None)
+    FileTreeState::new(root, vec![], None, vec![])
 }
 
 fn build_repo_state_with_unloaded_directory(repo_root: &std::path::Path) -> FileTreeState {
@@ -110,7 +110,7 @@ fn build_repo_state_with_unloaded_directory(repo_root: &std::path::Path) -> File
         ignored: false,
         loaded: true,
     });
-    FileTreeState::new(root, vec![], None)
+    FileTreeState::new(root, vec![], None, vec![])
 }
 
 fn flattened_paths(

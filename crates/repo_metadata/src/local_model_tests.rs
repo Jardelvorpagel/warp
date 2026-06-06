@@ -25,9 +25,7 @@ use crate::local_model::{
 };
 use crate::repositories::DetectedRepositories;
 use crate::watcher::DirectoryWatcher;
-#[cfg(all(unix, feature = "local_fs"))]
-use crate::StandingQueryResults;
-use crate::{RepoMetadataError, StandingQueryContent, StandingQueryDefinitions};
+use crate::{RepoMetadataError, StandingQueryDefinitions};
 
 impl LocalRepoMetadataModel {
     fn new_for_test() -> Self {
@@ -48,6 +46,185 @@ impl LocalRepoMetadataModel {
     }
 }
 
+#[cfg(feature = "local_fs")]
+#[test]
+fn gitignore_change_reclassifies_project_skills_without_leaking_ignored_paths_into_tree() {
+    VirtualFS::test("gitignore_reclassifies_project_skills", |dirs, mut vfs| {
+        vfs.mkdir("repo/.agents/skills/review").with_files(vec![
+            Stub::FileWithContent("repo/.gitignore", ""),
+            Stub::FileWithContent("repo/.agents/skills/review/SKILL.md", "name: review"),
+        ]);
+
+        let repo = dirs.tests().join("repo");
+        let gitignore = repo.join(".gitignore");
+        let skill = repo.join(".agents/skills/review/SKILL.md");
+        App::test((), |mut app| async move {
+            let directory_watcher = app.add_singleton_model(DirectoryWatcher::new_for_testing);
+            let repository = directory_watcher.update(&mut app, |watcher, ctx| {
+                watcher
+                    .add_directory(
+                        StandardizedPath::from_local_canonicalized(&repo).unwrap(),
+                        ctx,
+                    )
+                    .unwrap()
+            });
+            let model_handle = app.add_model(|_| {
+                let mut model = LocalRepoMetadataModel::new_for_test();
+                model.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
+                model
+            });
+            let repo_path = StandardizedPath::from_local_canonicalized(&repo).unwrap();
+            let agents_path = StandardizedPath::try_from_local(&repo.join(".agents")).unwrap();
+            let skill_path = StandardizedPath::try_from_local(&skill).unwrap();
+
+            let indexed = model_handle.update(&mut app, |model, ctx| {
+                model.index_directory(repository.clone(), ctx).unwrap();
+                model.repository_indexed(&repo_path)
+            });
+            indexed.await;
+            model_handle.read(&app, |model, _ctx| {
+                assert!(model
+                    .get_project_skills(&repo_path)
+                    .unwrap()
+                    .iter()
+                    .any(|content| content.path == skill_path));
+            });
+
+            std::fs::write(&gitignore, ".agents/\n").unwrap();
+            let reindexed = model_handle.update(&mut app, |model, ctx| {
+                model.handle_watcher_event(
+                    &BulkFilesystemWatcherEvent {
+                        modified: std::collections::HashSet::from([gitignore.clone()]),
+                        ..Default::default()
+                    },
+                    ctx,
+                );
+                model.repository_indexed(&repo_path)
+            });
+            reindexed.await;
+            model_handle.read(&app, |model, _ctx| {
+                let state = model.get_repository(&repo_path).unwrap();
+                assert!(!state.entry.contains(&agents_path));
+                assert!(!state.entry.contains(&skill_path));
+                assert!(model
+                    .get_project_skills(&repo_path)
+                    .unwrap()
+                    .iter()
+                    .any(|content| content.path == skill_path));
+                assert!(model
+                    .get_repo_contents(
+                        &repo_path,
+                        GetContentsArgs::default()
+                            .include_ignored()
+                            .exclude_folders(),
+                    )
+                    .unwrap()
+                    .contents
+                    .iter()
+                    .all(|content| match content {
+                        crate::RepoContent::File(file) => file.path.as_ref() != &skill_path,
+                        crate::RepoContent::Directory(directory) => {
+                            directory.path.as_ref() != &skill_path
+                        }
+                    }));
+            });
+
+            std::fs::write(&gitignore, "").unwrap();
+            let reindexed = model_handle.update(&mut app, |model, ctx| {
+                model.handle_watcher_event(
+                    &BulkFilesystemWatcherEvent {
+                        modified: std::collections::HashSet::from([gitignore]),
+                        ..Default::default()
+                    },
+                    ctx,
+                );
+                model.repository_indexed(&repo_path)
+            });
+            reindexed.await;
+            model_handle.read(&app, |model, _ctx| {
+                let state = model.get_repository(&repo_path).unwrap();
+                assert!(state.entry.contains(&skill_path));
+                assert!(model
+                    .get_project_skills(&repo_path)
+                    .unwrap()
+                    .iter()
+                    .any(|content| content.path == skill_path));
+            });
+        });
+    });
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn gitignore_change_reclassifies_project_skills_for_lazy_root() {
+    VirtualFS::test(
+        "gitignore_reclassifies_lazy_project_skills",
+        |dirs, mut vfs| {
+            vfs.mkdir("workspace/.agents/skills/review")
+                .with_files(vec![
+                    Stub::FileWithContent("workspace/.gitignore", ".agents/\n"),
+                    Stub::FileWithContent(
+                        "workspace/.agents/skills/review/SKILL.md",
+                        "name: review",
+                    ),
+                ]);
+
+            let workspace = dirs.tests().join("workspace");
+            let gitignore = workspace.join(".gitignore");
+            let skill =
+                StandardizedPath::try_from_local(&workspace.join(".agents/skills/review/SKILL.md"))
+                    .unwrap();
+            App::test((), |mut app| async move {
+                let model_handle = app.add_model(|_| {
+                    let mut model = LocalRepoMetadataModel::new_for_test();
+                    model.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
+                    model
+                });
+                let workspace_path =
+                    StandardizedPath::from_local_canonicalized(&workspace).unwrap();
+                model_handle.update(&mut app, |model, ctx| {
+                    model.index_lazy_loaded_path(&workspace_path, ctx).unwrap();
+                });
+                model_handle.read(&app, |model, _ctx| {
+                    assert!(!model
+                        .get_repository(&workspace_path)
+                        .unwrap()
+                        .entry
+                        .contains(&skill));
+                    assert!(model
+                        .get_project_skills(&workspace_path)
+                        .unwrap()
+                        .iter()
+                        .any(|content| content.path == skill));
+                });
+
+                std::fs::write(&gitignore, "").unwrap();
+                model_handle.update(&mut app, |model, ctx| {
+                    model.handle_watcher_event(
+                        &BulkFilesystemWatcherEvent {
+                            modified: std::collections::HashSet::from([gitignore]),
+                            ..Default::default()
+                        },
+                        ctx,
+                    );
+                });
+                model_handle.read(&app, |model, _ctx| {
+                    assert!(model
+                        .get_repository(&workspace_path)
+                        .unwrap()
+                        .entry
+                        .contains(&skill));
+                    assert!(model
+                        .get_project_skills(&workspace_path)
+                        .unwrap()
+                        .iter()
+                        .any(|content| content.path == skill));
+                });
+            });
+        },
+    );
+}
+
 #[test]
 #[should_panic(expected = "force-included paths must be repository-relative")]
 fn force_included_paths_must_be_relative() {
@@ -61,7 +238,7 @@ fn empty_repo_state(repo_path: &StandardizedPath) -> FileTreeState {
         ignored: false,
         loaded: true,
     });
-    FileTreeState::new(root, Vec::new(), None)
+    FileTreeState::new(root, Vec::new(), None, Vec::new())
 }
 
 #[test]
@@ -271,7 +448,7 @@ fn test_get_repo_contents() {
                     )
                     .unwrap()
             });
-            let state = FileTreeState::new(root, vec![gitignore], Some(repo_handle));
+            let state = FileTreeState::new(root, vec![gitignore], Some(repo_handle), Vec::new());
 
             let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
 
@@ -335,7 +512,7 @@ fn test_get_repo_contents_truncates_to_max_results() {
         ignored: false,
         loaded: true,
     });
-    let state = FileTreeState::new(root, Vec::new(), None);
+    let state = FileTreeState::new(root, Vec::new(), None, Vec::new());
 
     let mut model = LocalRepoMetadataModel::new_for_test();
     model
@@ -474,7 +651,6 @@ fn test_lazy_loaded_path_discovers_force_included_skills_and_emits_watcher_delta
         App::test((), |mut app| async move {
             let model_handle = app.add_model(|_| {
                 let mut model = LocalRepoMetadataModel::new_for_test();
-                model.register_force_included_paths([PathBuf::from(".agents/skills")]);
                 model.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
                 model
             });
@@ -499,12 +675,14 @@ fn test_lazy_loaded_path_discovers_force_included_skills_and_emits_watcher_delta
                 );
                 assert!(!state.entry.contains(&rule_path));
 
+                assert!(model
+                    .get_project_skills(&workspace_path)
+                    .unwrap()
+                    .iter()
+                    .any(|content| content.path == skill_path));
                 let results = model
                     .standing_query_results(&workspace_path)
                     .expect("lazy indexed paths should retain standing results");
-                assert!(results
-                    .project_skills()
-                    .any(|content| content.path == skill_path && !content.is_directory));
                 assert!(!results
                     .project_rules()
                     .any(|content| content.path == rule_path));
@@ -514,17 +692,10 @@ fn test_lazy_loaded_path_discovers_force_included_skills_and_emits_watcher_delta
             let received_delta = Rc::new(RefCell::new(Some(tx)));
             let received_delta_for_event = received_delta.clone();
             let workspace_path_for_event = workspace_path.clone();
-            let skill_path_for_event = skill_path.clone();
             app.update(|ctx| {
                 ctx.subscribe_to_model(&model_handle, move |_, event, _ctx| {
-                    if let RepositoryMetadataEvent::StandingQueryResultsUpdated { path, delta } =
-                        event
-                    {
-                        if path == &workspace_path_for_event
-                            && delta.upserted_project_skills.iter().any(|content| {
-                                content.path == skill_path_for_event && !content.is_directory
-                            })
-                        {
+                    if let RepositoryMetadataEvent::ProjectSkillFilesUpdated { path } = event {
+                        if path == &workspace_path_for_event {
                             if let Some(tx) = received_delta_for_event.borrow_mut().take() {
                                 let _ = tx.send(());
                             }
@@ -719,7 +890,7 @@ fn test_get_repo_contents_include_ignored() {
                     )
                     .unwrap()
             });
-            let state = FileTreeState::new(root, vec![gitignore], Some(repo_handle));
+            let state = FileTreeState::new(root, vec![gitignore], Some(repo_handle), Vec::new());
 
             let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
 
@@ -915,7 +1086,7 @@ fn test_update_file_tree_entry_respects_gitignore() {
 
         // Compute mutations on the "background thread" then apply on the "main thread".
         let standing_query_definitions = Default::default();
-        let (mutations, _, _) = block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
+        let (mutations, _, _, _) = block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
             &update,
             &gitignores,
             &[],
@@ -1394,7 +1565,7 @@ fn added_symlinked_skill_directory_refreshes_provider_without_canonical_tree_mut
             added: vec![linked_skill.clone()],
             ..Default::default()
         };
-        let (mutations, discovered, removed_roots) =
+        let (mutations, _, discovered_skills, removed_roots) =
             block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
                 &update,
                 &[],
@@ -1405,18 +1576,51 @@ fn added_symlinked_skill_directory_refreshes_provider_without_canonical_tree_mut
 
         assert!(mutations.is_empty());
         assert!(removed_roots.is_empty());
-        assert!(discovered.project_skills().any(|content| {
-            content
-                == &StandingQueryContent::directory(
-                    StandardizedPath::try_from_local(&provider).unwrap(),
-                )
-        }));
-        assert!(discovered.project_skills().any(|content| {
-            content
-                == &StandingQueryContent::file(
-                    StandardizedPath::try_from_local(&linked_skill.join("SKILL.md")).unwrap(),
-                )
-        }));
+        assert_eq!(
+            discovered_skills,
+            vec![crate::ProjectSkillFileMetadata {
+                path: StandardizedPath::try_from_local(&linked_skill.join("SKILL.md")).unwrap(),
+            }]
+        );
+    });
+}
+#[test]
+fn lazy_root_added_skill_directory_is_discovered_eagerly() {
+    VirtualFS::test("lazy_root_added_skill_directory", |dirs, mut vfs| {
+        vfs.mkdir("repo/.agents/skills/review")
+            .with_files(vec![Stub::FileWithContent(
+                "repo/.agents/skills/review/SKILL.md",
+                "review",
+            )]);
+        let skill_directory = dirs.tests().join("repo/.agents/skills/review");
+        let skill_file = skill_directory.join("SKILL.md");
+
+        let mut definitions = StandingQueryDefinitions::default();
+        definitions.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
+        let update = RepoUpdate {
+            added: vec![skill_directory.clone()],
+            ..Default::default()
+        };
+        let (mutations, _, discovered_skills, _) =
+            block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
+                &update,
+                &[],
+                &[],
+                &definitions,
+                true,
+            ));
+
+        assert!(matches!(
+            mutations.as_slice(),
+            [crate::local_model::FileTreeMutation::AddDirectorySubtree { dir_path, .. }]
+                if dir_path == &skill_directory
+        ));
+        assert_eq!(
+            discovered_skills,
+            vec![crate::ProjectSkillFileMetadata {
+                path: StandardizedPath::try_from_local(&skill_file).unwrap(),
+            }]
+        );
     });
 }
 
@@ -1437,15 +1641,16 @@ fn unrelated_skill_support_file_does_not_refresh_project_skills() {
             added: vec![support_file],
             ..Default::default()
         };
-        let (_, discovered, _) = block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
-            &update,
-            &[],
-            &[],
-            &definitions,
-            false,
-        ));
+        let (_, _, discovered_skills, _) =
+            block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
+                &update,
+                &[],
+                &[],
+                &definitions,
+                false,
+            ));
 
-        assert!(discovered.project_skills().next().is_none());
+        assert!(discovered_skills.is_empty());
     });
 }
 
@@ -1461,20 +1666,20 @@ fn removed_direct_skill_child_refreshes_provider_for_possible_symlink_removal() 
             deleted: vec![provider.join("removed-skill")],
             ..Default::default()
         };
-        let (_, discovered, _) = block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
-            &update,
-            &[],
-            &[],
-            &definitions,
-            false,
-        ));
+        let (_, _, discovered_skills, removed_roots) =
+            block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
+                &update,
+                &[],
+                &[],
+                &definitions,
+                false,
+            ));
 
-        assert!(discovered.project_skills().any(|content| {
-            content
-                == &StandingQueryContent::directory(
-                    StandardizedPath::try_from_local(&provider).unwrap(),
-                )
-        }));
+        assert!(discovered_skills.is_empty());
+        assert_eq!(
+            removed_roots,
+            vec![StandardizedPath::try_from_local(&provider.join("removed-skill")).unwrap()]
+        );
     });
 }
 #[cfg(all(unix, feature = "local_fs"))]
@@ -1497,7 +1702,6 @@ fn added_external_target_skill_symlink_routes_to_lexical_repository() {
 
             App::test((), |mut app| async move {
                 let repo_path = StandardizedPath::from_local_canonicalized(&repo).unwrap();
-                let provider_path = StandardizedPath::try_from_local(&provider).unwrap();
                 let model_handle = app.add_model(|_| {
                     let mut model = LocalRepoMetadataModel::new_for_test();
                     model.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
@@ -1514,22 +1718,10 @@ fn added_external_target_skill_symlink_routes_to_lexical_repository() {
                 let received_delta = Rc::new(RefCell::new(Some(tx)));
                 let received_delta_for_event = received_delta.clone();
                 let repo_path_for_event = repo_path.clone();
-                let provider_path_for_event = provider_path.clone();
                 app.update(|ctx| {
                     ctx.subscribe_to_model(&model_handle, move |_, event, _ctx| {
-                        if let RepositoryMetadataEvent::StandingQueryResultsUpdated {
-                            path,
-                            delta,
-                        } = event
-                        {
-                            if path == &repo_path_for_event
-                                && delta.upserted_project_skills.iter().any(|content| {
-                                    content
-                                        == &StandingQueryContent::directory(
-                                            provider_path_for_event.clone(),
-                                        )
-                                })
-                            {
+                        if let RepositoryMetadataEvent::ProjectSkillFilesUpdated { path } = event {
+                            if path == &repo_path_for_event {
                                 if let Some(tx) = received_delta_for_event.borrow_mut().take() {
                                     let _ = tx.send(());
                                 }
@@ -1554,11 +1746,14 @@ fn added_external_target_skill_symlink_routes_to_lexical_repository() {
 
                 model_handle.read(&app, |model, _ctx| {
                     assert!(model
-                        .standing_query_results(&repo_path)
-                        .expect("standing results should be retained for the repository")
-                        .project_skills()
-                        .any(|content| content
-                            == &StandingQueryContent::directory(provider_path.clone())));
+                        .get_project_skills(&repo_path)
+                        .expect("project skills should be retained for the repository")
+                        .iter()
+                        .any(|content| content.path
+                            == StandardizedPath::try_from_local(
+                                &provider.join("linked-skill/SKILL.md")
+                            )
+                            .unwrap()));
                 });
             });
         },
@@ -1578,7 +1773,6 @@ fn modified_external_symlink_target_upserts_lexical_project_skill() {
                 )]);
             let repo = dirs.tests().join("repo");
             let logical_skill_dir = repo.join(".agents/skills/linked-skill");
-            let logical_skill_path = logical_skill_dir.join("SKILL.md");
             let target_skill_path = dirs.tests().join("outside/linked-skill/SKILL.md");
             std::os::unix::fs::symlink(
                 dirs.tests().join("outside/linked-skill"),
@@ -1588,43 +1782,25 @@ fn modified_external_symlink_target_upserts_lexical_project_skill() {
 
             App::test((), |mut app| async move {
                 let repo_path = StandardizedPath::from_local_canonicalized(&repo).unwrap();
-                let logical_skill_path =
-                    StandardizedPath::try_from_local(&logical_skill_path).unwrap();
                 let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
                 model_handle.update(&mut app, |model, ctx| {
                     model.set_emit_incremental_updates(true);
-                    model.register_force_included_paths([PathBuf::from(".agents/skills")]);
                     model.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
                     model.repositories.insert(
                         repo_path.clone(),
                         IndexedRepoState::Indexed(empty_repo_state(&repo_path)),
                     );
-                    let mut results = StandingQueryResults::default();
-                    results.insert_project_skill(StandingQueryContent::file(
-                        logical_skill_path.clone(),
-                    ));
-                    model.standing_results.insert(repo_path.clone(), results);
                     model.refresh_symlink_targets(&repo_path, ctx);
                 });
 
                 let (tx, rx) = oneshot::channel();
                 let received_delta = Rc::new(RefCell::new(Some(tx)));
                 let received_delta_for_event = received_delta.clone();
-                let logical_skill_path_for_event = logical_skill_path.clone();
+                let repo_path_for_event = repo_path.clone();
                 app.update(|ctx| {
                     ctx.subscribe_to_model(&model_handle, move |_, event, _ctx| {
-                        if let RepositoryMetadataEvent::IncrementalUpdateReady { update } = event {
-                            if update
-                                .standing_results_delta
-                                .upserted_project_skills
-                                .iter()
-                                .any(|content| {
-                                    content
-                                        == &StandingQueryContent::file(
-                                            logical_skill_path_for_event.clone(),
-                                        )
-                                })
-                            {
+                        if let RepositoryMetadataEvent::ProjectSkillFilesUpdated { path } = event {
+                            if path == &repo_path_for_event {
                                 if let Some(tx) = received_delta_for_event.borrow_mut().take() {
                                     let _ = tx.send(());
                                 }
@@ -1681,36 +1857,27 @@ fn removed_then_recreated_external_symlink_target_refreshes_lexical_project_skil
                 let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
                 model_handle.update(&mut app, |model, ctx| {
                     model.set_emit_incremental_updates(true);
-                    model.register_force_included_paths([PathBuf::from(".agents/skills")]);
                     model.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
-                    model.repositories.insert(
-                        repo_path.clone(),
-                        IndexedRepoState::Indexed(empty_repo_state(&repo_path)),
-                    );
-                    let mut results = StandingQueryResults::default();
-                    results.insert_project_skill(StandingQueryContent::file(
-                        logical_skill_path.clone(),
-                    ));
-                    model.standing_results.insert(repo_path.clone(), results);
+                    let mut state = empty_repo_state(&repo_path);
+                    state
+                        .project_skill_files_mut()
+                        .push(crate::ProjectSkillFileMetadata {
+                            path: logical_skill_path.clone(),
+                        });
+                    model
+                        .repositories
+                        .insert(repo_path.clone(), IndexedRepoState::Indexed(state));
                     model.refresh_symlink_targets(&repo_path, ctx);
                 });
 
                 let (tx, rx) = oneshot::channel();
                 let received_delta = Rc::new(RefCell::new(Some(tx)));
                 let received_delta_for_event = received_delta.clone();
-                let logical_skill_path_for_event = logical_skill_path.clone();
+                let repo_path_for_event = repo_path.clone();
                 app.update(|ctx| {
                     ctx.subscribe_to_model(&model_handle, move |_, event, _ctx| {
-                        if let RepositoryMetadataEvent::StandingQueryResultsUpdated {
-                            delta, ..
-                        } = event
-                        {
-                            if delta.removed_project_skills.iter().any(|content| {
-                                content
-                                    == &StandingQueryContent::file(
-                                        logical_skill_path_for_event.clone(),
-                                    )
-                            }) {
+                        if let RepositoryMetadataEvent::ProjectSkillFilesUpdated { path } = event {
+                            if path == &repo_path_for_event {
                                 if let Some(tx) = received_delta_for_event.borrow_mut().take() {
                                     let _ = tx.send(());
                                 }
@@ -1736,29 +1903,20 @@ fn removed_then_recreated_external_symlink_target_refreshes_lexical_project_skil
                     .expect("symlink target removal sender dropped");
                 model_handle.read(&app, |model, _ctx| {
                     assert!(model
-                        .standing_query_results(&repo_path)
-                        .expect("standing results should remain tracked")
-                        .project_skills()
-                        .all(|content| content
-                            != &StandingQueryContent::file(logical_skill_path.clone())));
+                        .get_project_skills(&repo_path)
+                        .expect("project skills should remain tracked")
+                        .iter()
+                        .all(|content| content.path != logical_skill_path));
                 });
 
                 let (tx, rx) = oneshot::channel();
                 let received_delta = Rc::new(RefCell::new(Some(tx)));
                 let received_delta_for_event = received_delta.clone();
-                let logical_skill_path_for_event = logical_skill_path.clone();
+                let repo_path_for_event = repo_path.clone();
                 app.update(|ctx| {
                     ctx.subscribe_to_model(&model_handle, move |_, event, _ctx| {
-                        if let RepositoryMetadataEvent::StandingQueryResultsUpdated {
-                            delta, ..
-                        } = event
-                        {
-                            if delta.upserted_project_skills.iter().any(|content| {
-                                content
-                                    == &StandingQueryContent::file(
-                                        logical_skill_path_for_event.clone(),
-                                    )
-                            }) {
+                        if let RepositoryMetadataEvent::ProjectSkillFilesUpdated { path } = event {
+                            if path == &repo_path_for_event {
                                 if let Some(tx) = received_delta_for_event.borrow_mut().take() {
                                     let _ = tx.send(());
                                 }
@@ -1808,7 +1966,7 @@ fn symlink_targets_retain_aliases_and_clear_for_removed_or_failed_repositories()
                 let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
                 model_handle.update(&mut app, |model, ctx| {
                     model.set_emit_incremental_updates(true);
-                    model.register_force_included_paths([PathBuf::from(".agents/skills")]);
+                    model.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
                     model.repositories.insert(
                         repo_path.clone(),
                         IndexedRepoState::Indexed(empty_repo_state(&repo_path)),
@@ -1878,7 +2036,7 @@ fn removed_external_symlink_target_directory_queues_lexical_removal_and_clears_m
                 let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
                 model_handle.update(&mut app, |model, ctx| {
                     model.set_emit_incremental_updates(true);
-                    model.register_force_included_paths([PathBuf::from(".agents/skills")]);
+                    model.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
                     model.repositories.insert(
                         repo_path.clone(),
                         IndexedRepoState::Indexed(empty_repo_state(&repo_path)),
@@ -2033,7 +2191,8 @@ fn test_repository_operations_with_standardized_paths() {
                         )
                         .unwrap()
                 });
-                let state = FileTreeState::new(root, vec![gitignore], Some(repo_handle));
+                let state =
+                    FileTreeState::new(root, vec![gitignore], Some(repo_handle), Vec::new());
 
                 // Test adding repository using different path representations
                 model_handle.update(&mut app, |model, ctx| {
@@ -2167,6 +2326,59 @@ fn index_lazy_loaded_path_tracks_only_root() {
     });
 }
 
+#[cfg(feature = "local_fs")]
+#[test]
+fn lazy_root_tracks_existing_project_skill_directories() {
+    VirtualFS::test("lazy_root_project_skill_tracking", |dirs, mut vfs| {
+        vfs.mkdir("workspace/.agents/skills/review")
+            .with_files(vec![Stub::FileWithContent(
+                "workspace/.agents/skills/review/SKILL.md",
+                "review",
+            )]);
+        let root =
+            StandardizedPath::from_local_canonicalized(&dirs.tests().join("workspace")).unwrap();
+        let agents =
+            StandardizedPath::from_local_canonicalized(&dirs.tests().join("workspace/.agents"))
+                .unwrap();
+        let provider = StandardizedPath::from_local_canonicalized(
+            &dirs.tests().join("workspace/.agents/skills"),
+        )
+        .unwrap();
+        let skill_directory = StandardizedPath::from_local_canonicalized(
+            &dirs.tests().join("workspace/.agents/skills/review"),
+        )
+        .unwrap();
+
+        App::test((), |mut app| async move {
+            let model_handle = app.add_model(|_| {
+                let mut model = LocalRepoMetadataModel::new_for_test();
+                model.set_project_skill_provider_paths([PathBuf::from(".agents/skills")]);
+                model
+            });
+            model_handle.update(&mut app, |model, ctx| {
+                model
+                    .index_lazy_loaded_path(&root, ctx)
+                    .expect("should index lazy path");
+            });
+
+            model_handle.read(&app, |model, _ctx| {
+                let repo_watch = model
+                    .repo_watches
+                    .get(&root)
+                    .expect("watch should be recorded");
+                if cfg!(target_os = "linux") {
+                    assert_eq!(repo_watch.root_mode, RootWatchMode::NonRecursive);
+                    assert!(repo_watch.extra_dirs.contains(&agents));
+                    assert!(repo_watch.extra_dirs.contains(&provider));
+                    assert!(repo_watch.extra_dirs.contains(&skill_directory));
+                } else {
+                    assert_eq!(repo_watch.root_mode, RootWatchMode::Recursive);
+                    assert!(repo_watch.extra_dirs.is_empty());
+                }
+            });
+        });
+    });
+}
 /// Expanding a subdirectory of a lazy root should add a per-directory watch for
 /// it on Linux (so its children stay fresh) while leaving non-Linux untouched.
 #[cfg(feature = "local_fs")]
@@ -2273,7 +2485,7 @@ fn load_directory_watches_expanded_gitignored_dir_for_git_repo() {
                 ignored: false,
                 loaded: true,
             });
-            let state = FileTreeState::new(root, vec![gitignore], None);
+            let state = FileTreeState::new(root, vec![gitignore], None, Vec::new());
 
             model_handle.update(&mut app, |model, ctx| {
                 model
@@ -2331,7 +2543,7 @@ fn remove_repository_clears_extra_dir_watches() {
                 ignored: false,
                 loaded: true,
             });
-            let state = FileTreeState::new(root, vec![gitignore], None);
+            let state = FileTreeState::new(root, vec![gitignore], None, Vec::new());
 
             model_handle.update(&mut app, |model, ctx| {
                 model
@@ -2508,13 +2720,14 @@ fn lazy_root_created_directory_inserted_as_placeholder() {
         // Lazy root: the new directory is an unloaded placeholder and its
         // subtree is not materialized.
         let mut lazy_root = make_root();
-        let (lazy_mutations, _, _) = block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
-            &update,
-            &[],
-            &[],
-            &definitions,
-            true,
-        ));
+        let (lazy_mutations, _, _, _) =
+            block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
+                &update,
+                &[],
+                &[],
+                &definitions,
+                true,
+            ));
         LocalRepoMetadataModel::apply_file_tree_mutations(
             &mut lazy_root,
             lazy_mutations,
@@ -2536,7 +2749,7 @@ fn lazy_root_created_directory_inserted_as_placeholder() {
 
         // Eager root: the same directory is fully materialized.
         let mut eager_root = make_root();
-        let (eager_mutations, _, _) =
+        let (eager_mutations, _, _, _) =
             block_on(LocalRepoMetadataModel::compute_file_tree_mutations(
                 &update,
                 &[],

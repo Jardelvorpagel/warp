@@ -8,48 +8,31 @@ use anyhow::Error;
 use repo_metadata::{RepoMetadataModel, RepositoryIdentifier};
 use walkdir::{DirEntry, WalkDir};
 use warp_util::local_or_remote_path::LocalOrRemotePath;
-use warp_util::remote_path::RemotePath;
-use warp_util::standardized_path::StandardizedPath;
 use warpui::AppContext;
 
 use crate::warp_managed_paths_watcher::warp_managed_skill_dirs;
 
-fn local_or_remote_path_for_repo_path(
-    repo_id: &RepositoryIdentifier,
-    path: &StandardizedPath,
-) -> LocalOrRemotePath {
-    match repo_id {
-        RepositoryIdentifier::Local(_) => LocalOrRemotePath::Local(path.to_local_path_lossy()),
-        RepositoryIdentifier::Remote(remote) => {
-            LocalOrRemotePath::Remote(RemotePath::new(remote.host_id.clone(), path.clone()))
-        }
-    }
-}
-
-/// Finds project skill files from stored standing results.
+/// Finds local project skill files from the dedicated repository metadata API.
 ///
-/// Symlinked project skills are resolved while evaluating standing queries on the process that
-/// owns the repository. This consumer treats those results as authoritative for both local and
-/// remote repositories; direct filesystem discovery remains confined to metadata-failure fallback.
+/// Symlinked and ignored project skills are resolved while building the local
+/// sidecar. Remote project skills are fetched through the dedicated remote RPC.
 pub(super) fn find_project_skill_files_in_tree(
     repo_id: &RepositoryIdentifier,
     repo_metadata: &RepoMetadataModel,
     ctx: &AppContext,
 ) -> Vec<LocalOrRemotePath> {
     repo_metadata
-        .standing_query_results(repo_id, ctx)
+        .get_project_skills(repo_id, ctx)
         .into_iter()
-        .flat_map(|results| results.project_skills())
-        .filter(|content| !content.is_directory)
-        .map(|content| local_or_remote_path_for_repo_path(repo_id, &content.path))
+        .flatten()
+        .map(|content| LocalOrRemotePath::Local(content.path.to_local_path_lossy()))
         .collect()
 }
 
 /// Finds local project skill files by discovering provider directories on the filesystem.
 ///
 /// This is a local-only fallback for repositories whose repo metadata indexing fails. Successful
-/// local and remote project refreshes should use [`find_project_skill_files_in_tree`] so the
-/// normal metadata-backed path remains shared.
+/// local project refreshes should use [`find_project_skill_files_in_tree`].
 pub(super) fn find_local_project_skill_files_on_filesystem(
     scan_root: &Path,
 ) -> Vec<LocalOrRemotePath> {

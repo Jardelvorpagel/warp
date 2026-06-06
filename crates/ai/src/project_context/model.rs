@@ -299,6 +299,7 @@ impl ProjectContextModel {
                     }
                     RepoMetadataEvent::FileTreeUpdated { .. }
                     | RepoMetadataEvent::FileTreeEntryUpdated { .. }
+                    | RepoMetadataEvent::ProjectSkillFilesUpdated { .. }
                     | RepoMetadataEvent::UpdatingRepositoryFailed { .. }
                     | RepoMetadataEvent::IncrementalUpdateReady { .. } => {}
                 }
