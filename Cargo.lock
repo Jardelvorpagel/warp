@@ -15507,6 +15507,7 @@ dependencies = [
  "thiserror 2.0.17",
  "titlecase",
  "tokio",
+ "tracing",
  "trait-set",
  "vec1",
  "warp_util",
