@@ -78,36 +78,13 @@ impl Mode {
 
 // ── Agent subprocess ─────────────────────────────────────────────────
 
-#[allow(clippy::disallowed_types)]
 fn resolve_agent_binary() -> String {
     if let Ok(bin) = env::var("WSH_AGENT_BINARY") {
         return bin;
     }
 
-    // Try well-known CLI names on PATH.
-    for name in ["warp", "oz"] {
-        if std::process::Command::new(name)
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok()
-        {
-            return name.to_string();
-        }
-    }
-
-    // Fall back to macOS app bundle binaries.
-    for path in [
-        "/Applications/WarpDev.app/Contents/MacOS/dev",
-        "/Applications/Warp.app/Contents/MacOS/stable",
-    ] {
-        if std::path::Path::new(path).exists() {
-            return path.to_string();
-        }
-    }
-
-    "warp".to_string()
+    // This is a demo prototype; always use the local WarpDev build.
+    "/Applications/WarpDev.app/Contents/MacOS/dev".to_string()
 }
 
 struct AgentProcess {
