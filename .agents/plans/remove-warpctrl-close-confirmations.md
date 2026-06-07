@@ -1,0 +1,24 @@
+# Remove Warp Control close confirmations
+## Problem
+Warp Control currently adds a separate one-shot in-app confirmation before `window.close`, `tab.close`, and `pane.close`. That gate adds a dedicated dialog, asynchronous approval state, protocol errors, catalog metadata, and continuation logic. The added complexity is not justified by the same-user threat it mitigates.
+All 75 Warp Control actions should instead be authorized uniformly after the existing Scripting gate and exact-action credential validation. Close actions must still use Warp's normal close pathways so existing warnings for unsaved files, running processes, shared sessions, and similar app state remain authoritative.
+## Current state
+This plan is based on the latest pushed `zach/warpctrl-implementation` commit, `30e479d8843836c948e465f9f83c972ee08122ac`.
+The four Warp Control specs describe 72 default-authorized actions and three confirmation-required close actions: `specs/warp-control-cli/PRODUCT.md:3`, `specs/warp-control-cli/TECH.md:70`, `specs/warp-control-cli/SECURITY.md:20`, and `specs/warp-control-cli/README.md:3`.
+`crates/local_control/src/catalog.rs:71` exposes confirmation metadata and marks the three close actions as requiring confirmation. `crates/local_control/src/protocol.rs:449` exposes three user-confirmation error codes.
+`app/src/local_control/mod.rs:582` diverts close requests into an asynchronous confirmation flow. `app/src/local_control/bridge.rs:474` owns pending approval state and the post-approval close continuation. `app/src/local_control/confirmation_dialog.rs:1` implements the dedicated UI.
+The existing continuation is not itself the desired final close path: `app/src/local_control/bridge.rs:380` force-closes windows, and `app/src/workspace/view.rs:1893` calls tab close behavior with confirmation skipping enabled. Removing the Warp Control prompt must not preserve those bypasses if they skip normal Warp warnings.
+## Proposed changes
+Update `PRODUCT.md`, `TECH.md`, `SECURITY.md`, and `README.md` so they consistently define exactly 75 default-authorized actions, no Warp Control-specific one-shot close confirmation, no related error codes, and an honest same-user residual-risk statement. Document that close actions flow through normal Warp close behavior and may still show existing app warnings or be cancelled by the user.
+Update `resources/bundled/skills/warpctrl/SKILL.md` to retain the instruction that agents invoke close actions only when explicitly requested, while removing claims about a Warp Control-specific one-shot confirmation.
+Remove confirmation-specific catalog metadata and protocol errors rather than retaining permanently-false or unreachable concepts. Remove the dedicated local-control confirmation dialog, pending confirmation state, timeout/continuation server flow, workspace dialog wiring, and tests that only validate that flow.
+Dispatch `window.close`, `tab.close`, and `pane.close` directly after the same feature, protocol, permission, exact-action credential, parameter, and selector checks as other actions. Each action must use the normal existing Warp close pathway so native close warnings remain in effect. Preserve deterministic targeting and structured errors for invalid, missing, ambiguous, stale, or conflicting targets.
+Update or add focused tests to prove all 75 catalog actions share the same authorization policy, confirmation error codes are absent, and close requests reach their normal close pathways without a Warp Control-specific prompt. Keep unrelated Warp close behavior unchanged.
+## Out of scope
+Do not weaken or remove the Scripting enablement gate, same-user broker checks, short-lived instance-bound exact-action credentials, loopback HTTP protections, app-side revalidation, deterministic selectors, input-staging restrictions, or catalog allowlist.
+Do not remove or weaken existing non-Warp-Control warnings and confirmation dialogs. Do not expand the 75-action catalog or add terminal input submission.
+Do not modify or force-push `zach/warpctrl-implementation`. Implement on `zach/warpctrl-remove-close-confirmations`, push that branch, and report its final commit SHA and validation results. Do not open a pull request; merging will be decided separately.
+## Validation
+Audit the branch for stale positive references to Warp Control close confirmation, the 72/3 split, confirmation metadata, and confirmation error codes.
+Run `./script/format` and the relevant focused Rust unit tests one at a time using `cargo nextest run --no-fail-fast --workspace <test identifier>`. At minimum, cover local-control protocol/catalog tests and app local-control bridge/server tests. Run `cargo check` for the affected workspace targets, then run the relevant clippy command from `./script/presubmit` if time permits.
+Verify the final diff is based on `30e479d8843836c948e465f9f83c972ee08122ac`, contains only this change, and does not alter unrelated close behavior.
