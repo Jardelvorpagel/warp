@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 base64.workspace = true
 chrono.workspace = true
+instant.workspace = true
 rand.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

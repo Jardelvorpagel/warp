@@ -36,6 +36,7 @@ use crate::protocol::{
     Action, ActionKind, ControlError, ControlResponse, ErrorCode, ErrorResponseEnvelope,
     RequestEnvelope, ResponseEnvelope,
 };
+use instant::Instant;
 
 /// Requests an action-scoped credential and sends one authenticated control request.
 #[cfg(not(target_family = "wasm"))]
@@ -43,15 +44,36 @@ pub fn send_request(
     instance: &InstanceRecord,
     request: &RequestEnvelope,
 ) -> Result<ResponseEnvelope, ControlError> {
-    instance.validate_local_control_authority()?;
-    let credential = request_credential(instance, request.action.kind)?;
+    let total_started = Instant::now();
+    let action = request.action.kind;
+    let authority_started = Instant::now();
+    let authority = instance.validate_local_control_authority();
+    crate::timing::emit_action_result(
+        "client.authority_validation",
+        action,
+        authority_started.elapsed(),
+        authority.is_ok(),
+    );
+    authority?;
+    let credential_started = Instant::now();
+    let credential = request_credential(instance, action);
+    crate::timing::emit_action_result(
+        "client.credential",
+        action,
+        credential_started.elapsed(),
+        credential.is_ok(),
+    );
+    let credential = credential?;
     let endpoint = instance.endpoint.as_ref().ok_or_else(|| {
         ControlError::new(
             ErrorCode::LocalControlDisabled,
             "local control endpoint is disabled for this instance",
         )
     })?;
+    let client_started = Instant::now();
     let client = reqwest::blocking::Client::new();
+    crate::timing::emit_action_result("client.http_client", action, client_started.elapsed(), true);
+    let send_started = Instant::now();
     let response = client
         .post(endpoint.url())
         .header("Authorization", credential.authorization_value())
@@ -63,29 +85,64 @@ pub fn send_request(
                 "failed to send local-control request",
                 err.to_string(),
             )
-        })?;
+        });
+    crate::timing::emit_http(
+        "client.http_send",
+        action,
+        send_started.elapsed(),
+        response
+            .as_ref()
+            .ok()
+            .map(|response| response.status().as_u16()),
+        response.is_ok(),
+    );
+    let response = response?;
     let status = response.status();
+    let body_started = Instant::now();
     let text = response.text().map_err(|err| {
         ControlError::with_details(
             ErrorCode::TransportUnavailable,
             "failed to read local-control response",
             err.to_string(),
         )
-    })?;
-    if let Ok(envelope) = serde_json::from_str::<ResponseEnvelope>(&text) {
+    });
+    crate::timing::emit_http(
+        "client.http_body",
+        action,
+        body_started.elapsed(),
+        Some(status.as_u16()),
+        text.is_ok(),
+    );
+    let text = text?;
+    let decode_started = Instant::now();
+    let result = if let Ok(envelope) = serde_json::from_str::<ResponseEnvelope>(&text) {
         if let ControlResponse::Error { error } = &envelope.response {
-            return Err(error.clone());
+            Err(error.clone())
+        } else {
+            Ok(envelope)
         }
-        return Ok(envelope);
-    }
-    if let Ok(envelope) = serde_json::from_str::<ErrorResponseEnvelope>(&text) {
-        return Err(envelope.error);
-    }
-    Err(ControlError::with_details(
-        ErrorCode::TransportUnavailable,
-        format!("local-control request failed with HTTP {status}"),
-        text,
-    ))
+    } else if let Ok(envelope) = serde_json::from_str::<ErrorResponseEnvelope>(&text) {
+        Err(envelope.error)
+    } else {
+        Err(ControlError::with_details(
+            ErrorCode::TransportUnavailable,
+            format!("local-control request failed with HTTP {status}"),
+            text,
+        ))
+    };
+    crate::timing::emit_action_result(
+        "client.response_decode",
+        action,
+        decode_started.elapsed(),
+        result.is_ok(),
+    );
+    crate::timing::emit_action_result(
+        "client.request_total",
+        action,
+        total_started.elapsed(),
+        result.is_ok(),
+    );
+    result
 }
 
 /// Fails closed on platforms without a native local-control HTTP transport.
@@ -107,7 +164,15 @@ fn request_credential_over_owner_ipc(
     request: &CredentialRequest,
 ) -> Result<String, ControlError> {
     let path = instance.broker_socket_path()?;
-    request_credential_over_socket(&path, request)
+    let started = Instant::now();
+    let response = request_credential_over_socket(&path, request);
+    crate::timing::emit_action_result(
+        "client.broker_round_trip",
+        request.action,
+        started.elapsed(),
+        response.is_ok(),
+    );
+    response
 }
 
 #[cfg(unix)]
@@ -176,20 +241,28 @@ pub fn request_credential(
     instance: &InstanceRecord,
     action: crate::protocol::ActionKind,
 ) -> Result<ScopedCredential, ControlError> {
+    let started = Instant::now();
     instance.validate_local_control_authority()?;
     let request = CredentialRequest::new(action);
     let text = request_credential_over_owner_ipc(instance, &request)?;
-    if let Ok(credential) = serde_json::from_str::<ScopedCredential>(&text) {
-        return Ok(credential);
-    }
-    if let Ok(envelope) = serde_json::from_str::<ErrorResponseEnvelope>(&text) {
-        return Err(envelope.error);
-    }
-    Err(ControlError::with_details(
-        ErrorCode::TransportUnavailable,
-        "local-control credential broker returned an invalid response",
-        text,
-    ))
+    let result = if let Ok(credential) = serde_json::from_str::<ScopedCredential>(&text) {
+        Ok(credential)
+    } else if let Ok(envelope) = serde_json::from_str::<ErrorResponseEnvelope>(&text) {
+        Err(envelope.error)
+    } else {
+        Err(ControlError::with_details(
+            ErrorCode::TransportUnavailable,
+            "local-control credential broker returned an invalid response",
+            text,
+        ))
+    };
+    crate::timing::emit_action_result(
+        "client.credential_total",
+        action,
+        started.elapsed(),
+        result.is_ok(),
+    );
+    result
 }
 
 /// Authenticates an app-ping request and verifies the selected instance is live.

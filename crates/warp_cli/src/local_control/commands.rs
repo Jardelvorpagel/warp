@@ -1,4 +1,5 @@
 //! Implementations for user-facing `warpctrl` command groups.
+use instant::Instant;
 use local_control::protocol::{
     Action, ActionKind, ActionNameParams, BindingNameParams, BooleanValueParams, ColorValueParams,
     ControlError, DirectionParams, EmptyParams, ErrorCode, FileOpenParams, KeyParams,
@@ -648,12 +649,21 @@ fn run_action_with_params<T: Serialize>(
     params: T,
     output_format: OutputFormat,
 ) -> Result<(), ControlError> {
+    let started = Instant::now();
     let selector = instance_selector(&args);
     let records = local_control::discovery::list_instances_from_dir(
         &local_control::discovery::discovery_dir(),
     );
     let target = target_selector(&args)?;
-    let instance = select_instance(&records, &selector)?;
+    let selection_started = Instant::now();
+    let instance = select_instance(&records, &selector);
+    local_control::timing::emit_action_result(
+        "cli.instance_selection",
+        action,
+        selection_started.elapsed(),
+        instance.is_ok(),
+    );
+    let instance = instance?;
     let mut request = RequestEnvelope::new(Action::with_params(action, params)?);
     request.target = target;
     let response = local_control::client::send_request(&instance, &request)?;
@@ -663,14 +673,21 @@ fn run_action_with_params<T: Serialize>(
             "local-control request failed without an error payload",
         ));
     };
-    match output_format {
+    let output_result = match output_format {
         OutputFormat::Json => write_json(&data),
         OutputFormat::Ndjson => write_json_line(&data),
         OutputFormat::Pretty | OutputFormat::Text => {
             println!("{}", render_human_readable(action, &data));
             Ok(())
         }
-    }
+    };
+    local_control::timing::emit_action_result(
+        "cli.action_total",
+        action,
+        started.elapsed(),
+        output_result.is_ok(),
+    );
+    output_result
 }
 
 fn parse_json_value_or_string(value: String) -> serde_json::Value {

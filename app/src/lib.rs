@@ -197,6 +197,7 @@ use anyhow::Context;
 use anyhow::{anyhow, Result};
 use appearance::{Appearance, AppearanceManager};
 use channel::ChannelState;
+use instant::Instant;
 use interval_timer::IntervalTimer;
 use itertools::Itertools;
 #[cfg(feature = "integration_tests")]
@@ -582,12 +583,21 @@ fn apply_scroll_multiplier(event: &mut Event, app: &AppContext) {
 
 /// Runs the app. If a subcommand was requested, it'll be run instead of the main application.
 pub fn run() -> Result<()> {
+    let startup_started = Instant::now();
+    let phase_started = Instant::now();
     // Perform any necessary platform-specific initialization.
     platform::init();
+    ::local_control::timing::emit("startup.platform_init", phase_started.elapsed());
 
     // Ensure feature flags are initialized before parsing command-line arguments.
+    let phase_started = Instant::now();
     features::init_feature_flags();
-    if let Some(args) = warp_cli::local_control::ControlArgs::from_control_mode_env() {
+    ::local_control::timing::emit("startup.feature_flags", phase_started.elapsed());
+    let phase_started = Instant::now();
+    let control_args = warp_cli::local_control::ControlArgs::from_control_mode_env();
+    if let Some(args) = control_args {
+        ::local_control::timing::emit("startup.control_arg_parse", phase_started.elapsed());
+        ::local_control::timing::emit("startup.to_control_dispatch", startup_started.elapsed());
         #[cfg(windows)]
         warp_util::windows::attach_to_parent_console();
         warp_cli::local_control::run_and_exit(args);
