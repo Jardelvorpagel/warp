@@ -113,7 +113,7 @@ pub fn assert_ai_document_has_scroll_header(expected: bool) -> AssertionCallback
             Ok(view) => view,
             Err(outcome) => return outcome,
         };
-        let (has_header, _, _) = document_view.read(app, |view, ctx| {
+        let (has_header, _, _, _) = document_view.read(app, |view, ctx| {
             view.editor_scroll_header_state_for_integration_test(ctx)
         });
         if has_header == expected {
@@ -132,7 +132,7 @@ pub fn assert_ai_document_header_at_top_with_content_at_top() -> AssertionCallba
         assert_scroll_header_state(
             app,
             window_id,
-            |has_header, header_scroll_top, content_scroll_top| {
+            |has_header, header_scroll_top, _, content_scroll_top| {
                 has_header
                     && header_scroll_top == Pixels::zero()
                     && content_scroll_top == Pixels::zero()
@@ -148,9 +148,10 @@ pub fn assert_ai_document_header_partially_hidden_before_content_scroll() -> Ass
         assert_scroll_header_state(
             app,
             window_id,
-            |has_header, header_scroll_top, content_scroll_top| {
+            |has_header, header_scroll_top, header_height, content_scroll_top| {
                 has_header
                     && header_scroll_top != Pixels::zero()
+                    && header_scroll_top < header_height
                     && content_scroll_top == Pixels::zero()
             },
             "Expected AI document header to be partially hidden before content scrolls",
@@ -164,9 +165,10 @@ pub fn assert_ai_document_content_scrolled_after_header() -> AssertionCallback {
         assert_scroll_header_state(
             app,
             window_id,
-            |has_header, header_scroll_top, content_scroll_top| {
+            |has_header, header_scroll_top, header_height, content_scroll_top| {
                 has_header
-                    && header_scroll_top != Pixels::zero()
+                    && header_scroll_top == header_height
+                    && header_height != Pixels::zero()
                     && content_scroll_top != Pixels::zero()
             },
             "Expected AI document content to scroll after the header",
@@ -203,22 +205,27 @@ fn single_ai_document_view(
 fn assert_scroll_header_state(
     app: &mut App,
     window_id: WindowId,
-    predicate: impl FnOnce(bool, Pixels, Pixels) -> bool,
+    predicate: impl FnOnce(bool, Pixels, Pixels, Pixels) -> bool,
     failure_message: &str,
 ) -> AssertionOutcome {
     let document_view = match single_ai_document_view(app, window_id) {
         Ok(view) => view,
         Err(outcome) => return outcome,
     };
-    let (has_header, header_scroll_top, content_scroll_top) = document_view
+    let (has_header, header_scroll_top, header_height, content_scroll_top) = document_view
         .read(app, |view, ctx| {
             view.editor_scroll_header_state_for_integration_test(ctx)
         });
-    if predicate(has_header, header_scroll_top, content_scroll_top) {
+    if predicate(
+        has_header,
+        header_scroll_top,
+        header_height,
+        content_scroll_top,
+    ) {
         AssertionOutcome::Success
     } else {
         AssertionOutcome::failure(format!(
-            "{failure_message}: has_header={has_header}, header_scroll_top={header_scroll_top:?}, content_scroll_top={content_scroll_top:?}"
+            "{failure_message}: has_header={has_header}, header_scroll_top={header_scroll_top:?}, header_height={header_height:?}, content_scroll_top={content_scroll_top:?}"
         ))
     }
 }

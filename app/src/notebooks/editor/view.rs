@@ -26,8 +26,8 @@ use warpui::elements::{
     AnchorPair, Axis, Border, ChildAnchor, Clipped, ConstrainedBox, Container, CornerRadius,
     Dismiss, Fill, Flex, Hoverable, Icon, MouseStateHandle, OffsetPositioning, OffsetType,
     ParentAnchor, ParentElement, Point, PositionedElementOffsetBounds, PositioningAxis, Radius,
-    ScrollData, ScrollStateHandle, Scrollable, ScrollableElement, ScrollbarWidth, Stack,
-    XAxisAnchor, YAxisAnchor,
+    SavePosition, ScrollData, ScrollStateHandle, Scrollable, ScrollableElement, ScrollbarWidth,
+    Stack, XAxisAnchor, YAxisAnchor,
 };
 use warpui::event::ModifiersState;
 use warpui::fonts::{FallbackFontEvent, FallbackFontModel};
@@ -95,6 +95,7 @@ struct RichTextWithScrollHeaderElement {
     rich_text: RichTextElement<RichTextEditorView>,
     header_height: Pixels,
     header_scroll_top: Pixels,
+    header_consumed_by_content_scroll: bool,
     size: Option<Vector2F>,
     origin: Option<Point>,
 }
@@ -103,16 +104,29 @@ impl RichTextWithScrollHeaderElement {
     /// Creates a rich text element with optional scroll-positioned header chrome.
     fn new(
         header: Option<Box<dyn Element>>,
+        header_position_id: String,
         rich_text: RichTextElement<RichTextEditorView>,
         header_scroll_top: Pixels,
+        header_consumed_by_content_scroll: bool,
     ) -> Self {
+        let header = header.map(|header| SavePosition::new(header, &header_position_id).finish());
+
         Self {
             header,
             rich_text,
             header_height: Pixels::zero(),
             header_scroll_top,
+            header_consumed_by_content_scroll,
             size: None,
             origin: None,
+        }
+    }
+
+    fn effective_header_scroll_top(&self) -> Pixels {
+        if self.header_consumed_by_content_scroll {
+            self.header_height
+        } else {
+            self.header_scroll_top.min(self.header_height)
         }
     }
 }
@@ -131,7 +145,18 @@ impl Element for RichTextWithScrollHeaderElement {
             );
             header.layout(header_constraint, ctx, app).y().into_pixels()
         });
-        let size = self.rich_text.layout(constraint, ctx, app);
+        let visible_header_height = self.header_height - self.effective_header_scroll_top();
+        let rich_text_max_height = (constraint.max.y() - visible_header_height.as_f32()).max(0.);
+        let rich_text_min_height = (constraint.min.y() - visible_header_height.as_f32()).max(0.);
+        let rich_text_constraint = SizeConstraint::new(
+            vec2f(constraint.min.x(), rich_text_min_height),
+            vec2f(constraint.max.x(), rich_text_max_height),
+        );
+        let rich_text_size = self.rich_text.layout(rich_text_constraint, ctx, app);
+        let size = vec2f(
+            rich_text_size.x(),
+            rich_text_size.y() + visible_header_height.as_f32(),
+        );
         self.size = Some(size);
         size
     }
@@ -145,7 +170,7 @@ impl Element for RichTextWithScrollHeaderElement {
 
     fn paint(&mut self, origin: Vector2F, ctx: &mut PaintContext, app: &AppContext) {
         self.origin = Some(Point::from_vec2f(origin, ctx.scene.z_index()));
-        let header_scroll_top = self.header_scroll_top.min(self.header_height);
+        let header_scroll_top = self.effective_header_scroll_top();
         let visible_header_height = self.header_height - header_scroll_top;
         self.rich_text
             .paint(origin + vec2f(0., visible_header_height.as_f32()), ctx, app);
@@ -180,10 +205,11 @@ impl Element for RichTextWithScrollHeaderElement {
 impl ScrollableElement for RichTextWithScrollHeaderElement {
     fn scroll_data(&self, app: &AppContext) -> Option<ScrollData> {
         let content_scroll_data = ScrollableElement::scroll_data(&self.rich_text, app)?;
+        let header_scroll_top = self.effective_header_scroll_top();
+        let visible_header_height = self.header_height - header_scroll_top;
         Some(ScrollData {
-            scroll_start: self.header_scroll_top.min(self.header_height)
-                + content_scroll_data.scroll_start,
-            visible_px: content_scroll_data.visible_px,
+            scroll_start: header_scroll_top + content_scroll_data.scroll_start,
+            visible_px: visible_header_height + content_scroll_data.visible_px,
             total_size: self.header_height + content_scroll_data.total_size,
         })
     }
@@ -1188,6 +1214,8 @@ pub struct RichTextEditorView {
     disable_block_insertion_menu: bool,
 
     scroll_header_renderer: Option<ScrollHeaderRenderer>,
+    scroll_header_position_id: String,
+    scroll_header_height: Pixels,
     scroll_header_scroll_top: Pixels,
 }
 
@@ -1252,6 +1280,7 @@ impl RichTextEditorView {
         // Ensure that we re-render when the rendering model changes.
         ctx.observe(&model.as_ref(ctx).render_state().clone(), |me, _, ctx| {
             me.watch_layout_affecting_asset_loads(ctx);
+            me.reconcile_scroll_header_after_content_scroll(ctx);
             ctx.notify();
         });
 
@@ -1266,6 +1295,8 @@ impl RichTextEditorView {
 
         let insertion_menu_state =
             BlockInsertionMenuState::new(ctx, config.embedded_objects_enabled.unwrap_or(true));
+        let self_handle = ctx.handle();
+        let scroll_header_position_id = format!("rich_text_scroll_header_{}", self_handle.id());
 
         Self {
             omnibar,
@@ -1273,7 +1304,7 @@ impl RichTextEditorView {
             model,
             display_state: Default::default(),
             scroll_state: Default::default(),
-            self_handle: ctx.handle(),
+            self_handle,
             ongoing_mouse_state: OngoingMouseEvent::None,
             debug_mode: false,
             mouse_states: Default::default(),
@@ -1297,6 +1328,8 @@ impl RichTextEditorView {
             disable_scrolling: config.disable_scrolling,
             disable_block_insertion_menu: config.disable_block_insertion_menu,
             scroll_header_renderer: None,
+            scroll_header_position_id,
+            scroll_header_height: Pixels::zero(),
             scroll_header_scroll_top: Pixels::zero(),
         }
     }
@@ -1572,9 +1605,77 @@ impl RichTextEditorView {
     ) {
         self.scroll_header_renderer = renderer;
         if self.scroll_header_renderer.is_none() {
+            self.scroll_header_height = Pixels::zero();
             self.scroll_header_scroll_top = Pixels::zero();
+        } else {
+            self.reconcile_scroll_header_after_content_scroll(ctx);
         }
         ctx.notify();
+    }
+
+    fn update_scroll_header_height(&mut self, header_height: Pixels) -> bool {
+        let header_height = header_height.max(Pixels::zero());
+        let mut changed = self.scroll_header_height != header_height;
+        self.scroll_header_height = header_height;
+
+        let scroll_top = self.scroll_header_scroll_top.min(header_height);
+        if scroll_top != self.scroll_header_scroll_top {
+            self.scroll_header_scroll_top = scroll_top;
+            changed = true;
+        }
+
+        changed
+    }
+
+    fn update_scroll_header_height_from_position_cache(&mut self, ctx: &ViewContext<Self>) -> bool {
+        let Some(rect) = ctx.element_position_by_id(&self.scroll_header_position_id) else {
+            return false;
+        };
+        self.update_scroll_header_height((rect.max_y() - rect.origin_y()).into_pixels())
+    }
+
+    fn scroll_header_height_for_render(&self, app: &AppContext) -> Pixels {
+        self.self_handle
+            .window_id(app)
+            .and_then(|window_id| {
+                app.element_position_by_id_at_last_frame(window_id, &self.scroll_header_position_id)
+            })
+            .map(|rect| (rect.max_y() - rect.origin_y()).into_pixels())
+            .unwrap_or(self.scroll_header_height)
+    }
+
+    fn scroll_header_scroll_top_for_render(&self, app: &AppContext) -> Pixels {
+        let header_height = self.scroll_header_height_for_render(app);
+        if self.content_scroll_has_consumed_header(app) {
+            header_height
+        } else {
+            self.scroll_header_scroll_top.min(header_height)
+        }
+    }
+    /// Returns true when content scrolling means the header prefix is already consumed.
+    fn content_scroll_has_consumed_header(&self, app: &AppContext) -> bool {
+        self.scroll_header_renderer.is_some() && self.content_scroll_top(app) > Pixels::zero()
+    }
+
+    fn reconcile_scroll_header_after_content_scroll(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) -> bool {
+        let mut changed = self.update_scroll_header_height_from_position_cache(ctx);
+        if self.scroll_header_renderer.is_none() {
+            return changed;
+        }
+
+        if self.content_scroll_top(ctx) > Pixels::zero()
+            && self.scroll_header_height > Pixels::zero()
+        {
+            if self.scroll_header_scroll_top != self.scroll_header_height {
+                self.scroll_header_scroll_top = self.scroll_header_height;
+                changed = true;
+            }
+        }
+
+        changed
     }
 
     /// Returns whether the editor has scroll-header chrome for integration assertions.
@@ -1585,8 +1686,13 @@ impl RichTextEditorView {
 
     /// Returns the hidden header height currently consumed by scrolling.
     #[cfg(feature = "integration_tests")]
-    pub(crate) fn scroll_header_scroll_top_for_integration_test(&self) -> Pixels {
-        self.scroll_header_scroll_top
+    pub(crate) fn scroll_header_scroll_top_for_integration_test(&self, ctx: &AppContext) -> Pixels {
+        self.scroll_header_scroll_top_for_render(ctx)
+    }
+    /// Returns the measured scroll-header height for integration assertions.
+    #[cfg(feature = "integration_tests")]
+    pub(crate) fn scroll_header_height_for_integration_test(&self, ctx: &AppContext) -> Pixels {
+        self.scroll_header_height_for_render(ctx)
     }
 
     /// Returns the editor content scroll offset for integration assertions.
@@ -1864,7 +1970,7 @@ impl RichTextEditorView {
         ctx: &mut ViewContext<Self>,
     ) {
         let zero = Pixels::zero();
-        self.scroll_header_scroll_top = self.scroll_header_scroll_top.min(header_height);
+        self.update_scroll_header_height(header_height);
         if header_height <= zero {
             if self.scroll_header_scroll_top != zero {
                 self.scroll_header_scroll_top = zero;
@@ -1873,9 +1979,15 @@ impl RichTextEditorView {
             self.scroll(delta, ctx);
             return;
         }
+        if self.content_scroll_top(ctx) > zero
+            && self.scroll_header_scroll_top != self.scroll_header_height
+        {
+            self.scroll_header_scroll_top = self.scroll_header_height;
+            ctx.notify();
+        }
 
         if delta < zero {
-            let hidden_remaining = header_height - self.scroll_header_scroll_top;
+            let hidden_remaining = self.scroll_header_height - self.scroll_header_scroll_top;
             let header_delta = (zero - delta).min(hidden_remaining);
             if header_delta > zero {
                 self.scroll_header_scroll_top += header_delta;
@@ -2862,6 +2974,7 @@ impl View for RichTextEditorView {
             .scroll_header_renderer
             .as_ref()
             .and_then(|renderer| renderer(app));
+        let header_consumed_by_content_scroll = self.content_scroll_has_consumed_header(app);
 
         let display_options = DisplayOptions {
             // If there's a command selection, show that instead of the text cursor.
@@ -2889,8 +3002,10 @@ impl View for RichTextEditorView {
         .with_max_width(self.max_width);
         let rich_text = RichTextWithScrollHeaderElement::new(
             scroll_header,
+            self.scroll_header_position_id.clone(),
             rich_text,
-            self.scroll_header_scroll_top,
+            self.scroll_header_scroll_top_for_render(app),
+            header_consumed_by_content_scroll,
         )
         .finish_scrollable();
 

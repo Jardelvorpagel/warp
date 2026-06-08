@@ -506,11 +506,12 @@ impl AIDocumentView {
     pub(crate) fn editor_scroll_header_state_for_integration_test(
         &self,
         ctx: &AppContext,
-    ) -> (bool, Pixels, Pixels) {
+    ) -> (bool, Pixels, Pixels, Pixels) {
         let editor = self.editor.as_ref(ctx);
         (
             editor.has_scroll_header_renderer_for_integration_test(),
-            editor.scroll_header_scroll_top_for_integration_test(),
+            editor.scroll_header_scroll_top_for_integration_test(ctx),
+            editor.scroll_header_height_for_integration_test(ctx),
             editor.content_scroll_top_for_integration_test(ctx),
         )
     }
