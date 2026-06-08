@@ -115,12 +115,12 @@ if ("$CHANNEL" -eq 'local') {
     $FEATURES = 'release_bundle,gui'
 }
 
+# All channels ship the v3 classifier and v2 heuristic.
+$FEATURES = "$FEATURES,nld_classifier_v3,nld_heuristic_v2"
+# The prompt-history match feature is still in development, so only enable
+# it for local/dev builds.
 if (("$CHANNEL" -eq 'local') -or ("$CHANNEL" -eq 'dev')) {
-    $FEATURES = "$FEATURES,nld_classifier_v3,nld_heuristic_v2,nld_prompt_history_match"
-} elseif ("$CHANNEL" -eq 'preview') {
-    $FEATURES = "$FEATURES,nld_classifier_v2,nld_heuristic_v2"
-} else {
-    $FEATURES = "$FEATURES,nld_classifier_v1,nld_heuristic_v1"
+    $FEATURES = "$FEATURES,nld_prompt_history_match"
 }
 
 $BINARY_PATH = "$CARGO_TARGET_OUTPUT_DIR\$BINARY_NAME"
