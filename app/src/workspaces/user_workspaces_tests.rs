@@ -240,6 +240,7 @@ fn test_aws_bedrock_credentials_default_off_when_admin_respects_user_setting() {
         LlmHostSettings {
             enabled: true,
             enablement_setting: HostEnablementSetting::RespectUserSetting,
+            ..Default::default()
         },
     );
 
@@ -276,6 +277,7 @@ fn test_aws_bedrock_credentials_respect_user_setting() {
         LlmHostSettings {
             enabled: true,
             enablement_setting: HostEnablementSetting::RespectUserSetting,
+            ..Default::default()
         },
     );
     let mut team_client = MockTeamClient::new();
@@ -331,6 +333,7 @@ fn test_aws_bedrock_credentials_enforced_by_admin() {
         LlmHostSettings {
             enabled: true,
             enablement_setting: HostEnablementSetting::Enforce,
+            ..Default::default()
         },
     );
     let mut team_client = MockTeamClient::new();
@@ -371,6 +374,64 @@ fn test_aws_bedrock_credentials_enforced_by_admin() {
             assert!(
                 !UserWorkspaces::as_ref(ctx).is_aws_bedrock_credentials_toggleable(),
                 "enforced Bedrock host policy should disable the local Bedrock credentials toggle"
+            );
+        });
+    })
+}
+
+#[test]
+fn test_gemini_enterprise_credentials_enabled_when_admin_enabled() {
+    let team = team_for_test();
+    let mut workspace = workspace_for_test(&team);
+    workspace.settings.llm_settings.enabled = true;
+    workspace.settings.llm_settings.host_configs.insert(
+        LLMModelHost::GeminiEnterprise,
+        LlmHostSettings {
+            enabled: true,
+            gcp_project_id: Some("test-project".to_string()),
+            gcp_location: Some("global".to_string()),
+            ..Default::default()
+        },
+    );
+
+    App::test((), |mut app| async move {
+        initialize_app(
+            &mut app,
+            CachedResources {
+                workspaces: vec![workspace],
+            },
+            Arc::new(MockTeamClient::new()),
+            Arc::new(MockWorkspaceClient::new()),
+        );
+
+        app.read(|ctx| {
+            assert!(
+                UserWorkspaces::as_ref(ctx).is_gemini_enterprise_credentials_enabled(),
+                "Gemini Enterprise credentials should be enabled when the admin enables the host"
+            );
+        });
+    })
+}
+
+#[test]
+fn test_gemini_enterprise_credentials_disabled_when_host_absent() {
+    let team = team_for_test();
+    let workspace = workspace_for_test(&team);
+
+    App::test((), |mut app| async move {
+        initialize_app(
+            &mut app,
+            CachedResources {
+                workspaces: vec![workspace],
+            },
+            Arc::new(MockTeamClient::new()),
+            Arc::new(MockWorkspaceClient::new()),
+        );
+
+        app.read(|ctx| {
+            assert!(
+                !UserWorkspaces::as_ref(ctx).is_gemini_enterprise_credentials_enabled(),
+                "Gemini Enterprise credentials should be disabled when the host is absent"
             );
         });
     })

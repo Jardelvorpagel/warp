@@ -240,6 +240,7 @@ impl RequestParams {
         let api_keys = api_key_manager.api_keys_for_request(
             is_byo_enabled,
             user_workspaces.is_aws_bedrock_credentials_enabled(app),
+            user_workspaces.is_gemini_enterprise_credentials_enabled(),
         );
         let is_custom_inference_enabled = user_workspaces.is_custom_inference_enabled(app);
         let custom_model_providers = FeatureFlag::CustomInferenceEndpoints

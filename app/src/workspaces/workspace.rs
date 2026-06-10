@@ -747,6 +747,10 @@ mod tests;
 pub struct LlmHostSettings {
     pub enabled: bool,
     pub enablement_setting: HostEnablementSetting,
+    pub gcp_project_id: Option<String>,
+    pub gcp_location: Option<String>,
+    pub gcp_audience: Option<String>,
+    pub gcp_sa_email: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

@@ -5,6 +5,7 @@ use warpui_core::{Entity, ModelContext, SingletonEntity};
 use warpui_extras::secure_storage::{self, AppContextExt};
 
 pub use crate::aws_credentials::{AwsCredentials, AwsCredentialsState};
+pub use crate::geap_credentials::{GeapCredentials, GeapCredentialsState};
 
 const SECURE_STORAGE_KEY: &str = "AiApiKeys";
 
@@ -97,6 +98,7 @@ pub enum AwsCredentialsRefreshStrategy {
 pub struct ApiKeyManager {
     keys: ApiKeys,
     pub(crate) aws_credentials_state: AwsCredentialsState,
+    pub(crate) geap_credentials_state: GeapCredentialsState,
     aws_credentials_refresh_strategy: AwsCredentialsRefreshStrategy,
     secure_storage_write_version: u64,
 }
@@ -107,6 +109,7 @@ impl ApiKeyManager {
         Self {
             keys,
             aws_credentials_state: AwsCredentialsState::Missing,
+            geap_credentials_state: GeapCredentialsState::Missing,
             aws_credentials_refresh_strategy: AwsCredentialsRefreshStrategy::default(),
             secure_storage_write_version: 0,
         }
@@ -229,6 +232,19 @@ impl ApiKeyManager {
         &self.aws_credentials_state
     }
 
+    pub fn set_geap_credentials_state(
+        &mut self,
+        state: GeapCredentialsState,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.geap_credentials_state = state;
+        ctx.emit(ApiKeyManagerEvent::KeysUpdated);
+    }
+
+    pub fn geap_credentials_state(&self) -> &GeapCredentialsState {
+        &self.geap_credentials_state
+    }
+
     pub fn aws_credentials_refresh_strategy(&self) -> AwsCredentialsRefreshStrategy {
         self.aws_credentials_refresh_strategy.clone()
     }
@@ -293,6 +309,7 @@ impl ApiKeyManager {
         &self,
         include_byo_keys: bool,
         include_aws_bedrock_credentials: bool,
+        include_geap_credentials: bool,
     ) -> Option<api::request::settings::ApiKeys> {
         let anthropic = include_byo_keys
             .then(|| self.keys.anthropic.clone())
@@ -327,11 +344,21 @@ impl ApiKeyManager {
             })
             .flatten();
 
+        let google_cloud_credentials = include_geap_credentials
+            .then(|| match self.geap_credentials_state {
+                GeapCredentialsState::Loaded {
+                    ref credentials, ..
+                } if !credentials.is_expired() => Some(credentials.clone().into()),
+                _ => None,
+            })
+            .flatten();
+
         if anthropic.is_empty()
             && openai.is_empty()
             && google.is_empty()
             && open_router.is_empty()
             && aws_credentials.is_none()
+            && google_cloud_credentials.is_none()
         {
             None
         } else {
@@ -342,6 +369,7 @@ impl ApiKeyManager {
                 open_router,
                 allow_use_of_warp_credits: false,
                 aws_credentials,
+                google_cloud_credentials,
             })
         }
     }

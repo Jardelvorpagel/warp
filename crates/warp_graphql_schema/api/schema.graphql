@@ -1994,6 +1994,10 @@ type LlmHostSettings {
   IAM role ARN that Oz Cloud Agents assume via the OIDC trust flow to obtain credentials for AWS Bedrock requests.
   """
   oidcAssumeRoleArn: String
+  gcpProjectId: String
+  gcpLocation: String
+  gcpAudience: String
+  gcpSaEmail: String
   optOutOfNewModels: Boolean!
   region: String
 }
@@ -2008,6 +2012,10 @@ input LlmHostSettingsInput {
   enabled: Boolean
   enablementSetting: HostEnablementSetting
   oidcAssumeRoleArn: String
+  gcpProjectId: String
+  gcpLocation: String
+  gcpAudience: String
+  gcpSaEmail: String
   optOutOfNewModels: Boolean
   region: String
 }
@@ -2044,6 +2052,7 @@ enum LlmModelHost {
   AWS_BEDROCK
   CUSTOM_ENDPOINT
   DIRECT_API
+  GEMINI_ENTERPRISE
 }
 
 type LlmModelHostSettings {

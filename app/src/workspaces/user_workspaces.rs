@@ -556,6 +556,30 @@ impl UserWorkspaces {
         }
     }
 
+    pub fn gemini_enterprise_host_settings(&self) -> Option<&super::workspace::LlmHostSettings> {
+        self.current_workspace().and_then(|workspace| {
+            workspace
+                .settings
+                .llm_settings
+                .host_configs
+                .get(&LLMModelHost::GeminiEnterprise)
+        })
+    }
+
+    /// Did the admin enable Gemini Enterprise for the current workspace?
+    pub fn is_gemini_enterprise_available_from_workspace(&self) -> bool {
+        self.current_workspace().is_some_and(|workspace| {
+            workspace.settings.llm_settings.enabled
+                && self
+                    .gemini_enterprise_host_settings()
+                    .is_some_and(|settings| settings.enabled)
+        })
+    }
+
+    pub fn is_gemini_enterprise_credentials_enabled(&self) -> bool {
+        self.is_gemini_enterprise_available_from_workspace()
+    }
+
     /// Returns the AI autonomy settings that are enforced by the workspace for all its members.
     /// If a setting is `None`, the workspace doesn't enforce a particular setting.
     pub fn ai_autonomy_settings(&self) -> AiAutonomySettings {
