@@ -8,14 +8,14 @@ use warpui::elements::{
     ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty,
     Fill, Flex, HighlightedHyperlink, Hoverable, Icon, MainAxisAlignment, MainAxisSize,
     MouseStateHandle, OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius,
-    Shrinkable, Stack, Text,
+    SavePosition, Shrinkable, Stack, Text,
 };
 use warpui::keymap::Keystroke;
 use warpui::platform::Cursor;
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::{
-    AppContext, Element, Entity, EventContext, ModelHandle, SingletonEntity, TypedActionView, View,
-    ViewContext, ViewHandle,
+    AppContext, Element, Entity, EntityId, EventContext, ModelHandle, SingletonEntity,
+    TypedActionView, View, ViewContext, ViewHandle, WindowId,
 };
 
 use crate::ai::agent::api::ServerConversationToken;
@@ -129,6 +129,8 @@ fn render_button(
     debug_request_token: Option<ServerConversationToken>,
     prompt_alert_state: &PromptAlertState,
     should_shrink: bool,
+    position_id: String,
+    collapsed_width: Option<f32>,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
     let theme = appearance.theme();
@@ -231,8 +233,19 @@ fn render_button(
             container = container.with_margin_left(INLINE_BANNER_SPACING);
         }
 
+        // Keep the button in a save position so its width is tracked in the position cache.
+        let pill = SavePosition::new(container.finish(), &position_id).finish();
+
+        // Soft-wrapping the label on hover can narrow the button, moving it out from under the
+        // cursor and causing a hover <-> collapse flicker loop. Pin the expanded button to its
+        // collapsed width so hovering only ever grows it vertically.
+        let pill = match collapsed_width.filter(|_| should_expand_button) {
+            Some(width) => ConstrainedBox::new(pill).with_min_width(width).finish(),
+            None => pill,
+        };
+
         let mut stack = Stack::new();
-        stack.add_child(container.finish());
+        stack.add_child(pill);
 
         if is_button_disabled && mouse_state.is_hovered() {
             if let Some(tooltip_text) = get_tooltip_text_for_alert_state(prompt_alert_state) {
@@ -316,6 +329,8 @@ pub struct PromptSuggestionsView {
     ai_input_model: ModelHandle<BlocklistAIInputModel>,
     prompt_alert: ViewHandle<PromptAlertView>,
     banner_state: Option<PromptSuggestionBannerState>,
+    window_id: WindowId,
+    view_id: EntityId,
 }
 
 impl PromptSuggestionsView {
@@ -336,11 +351,18 @@ impl PromptSuggestionsView {
             ai_input_model,
             prompt_alert,
             banner_state: None,
+            window_id: ctx.window_id(),
+            view_id: ctx.view_id(),
         }
     }
 
     pub fn set_banner_state(&mut self, banner_state: PromptSuggestionBannerState) {
         self.banner_state = Some(banner_state);
+    }
+
+    /// Position-cache id under which the suggestion chip records its rect each frame.
+    fn chip_position_id(&self) -> String {
+        format!("prompt_suggestion_chip_{:?}", self.view_id)
     }
 
     fn handle_prompt_alert_event(&mut self, event: &PromptAlertEvent, ctx: &mut ViewContext<Self>) {
@@ -396,6 +418,11 @@ impl View for PromptSuggestionsView {
             None
         };
 
+        let chip_position_id = self.chip_position_id();
+        let collapsed_chip_width = app
+            .element_position_by_id_at_last_frame(self.window_id, &chip_position_id)
+            .map(|rect| rect.width());
+
         inner_banner_flex.add_child(
             Shrinkable::new(
                 1.0,
@@ -415,6 +442,8 @@ impl View for PromptSuggestionsView {
                     debug_request_token,
                     prompt_alert_state,
                     true, // should_shrink
+                    chip_position_id,
+                    collapsed_chip_width,
                     appearance,
                 ),
             )
