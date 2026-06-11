@@ -690,7 +690,6 @@ impl CodeView {
         )
     }
 
-    #[cfg(any(test, feature = "integration_tests"))]
     pub fn active_code_editor_view(
         &self,
         ctx: &AppContext,
