@@ -195,9 +195,6 @@ pub enum FeatureFlag {
     /// Enables iTerm image rendering
     ITermImages,
 
-    /// Enables validation of autosuggestions.
-    ValidateAutosuggestions,
-
     /// Enables prompt suggestions sourced via MAA.
     PromptSuggestionsViaMAA,
 
