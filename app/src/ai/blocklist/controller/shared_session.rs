@@ -9,17 +9,17 @@ use warp_core::features::FeatureFlag;
 use warp_multi_agent_api::client_action::Action;
 use warp_multi_agent_api::message::Message;
 use warp_multi_agent_api::response_event::{stream_finished, ClientActions};
-use warpui::{AppContext, ModelContext, SingletonEntity};
+use warpui::{AppContext, EntityId, ModelContext, SingletonEntity};
 
 use super::response_stream::ResponseStreamId;
 use super::{BlocklistAIController, RequestInput, SessionContext};
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
-use crate::ai::agent::{AIAgentActionId, AIAgentAttachment, EntrypointType};
+use crate::ai::agent::{AIAgentActionId, AIAgentAttachment, AIAgentExchangeId, EntrypointType};
 use crate::ai::attachment_utils::{
     build_file_attachment_map, download_file, sanitize_filename, DownloadedAttachment,
 };
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
-use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
+use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use crate::server::server_api::ServerApiProvider;
 use crate::terminal::model::block::BlockId;
 
@@ -38,6 +38,86 @@ pub(super) struct SharedSessionState {
     current_response_initiator: Option<ParticipantId>,
     // The sharer's participant ID (set when session sharing starts)
     sharer_participant_id: Option<ParticipantId>,
+    /// `true` while the viewer's event loop is catching up on the backlog of ordered events that
+    /// existed when the session was joined.
+    is_catching_up_on_event_backlog: bool,
+    /// `true` while the sharer is replaying an existing agent conversation (bracketed by the
+    /// `AgentConversationReplayStarted`/`AgentConversationReplayEnded` ordered events).
+    is_receiving_conversation_replay: bool,
+    /// History-model events captured while coalescing is active. High-volume events are deduped
+    /// on insert (see [`coalescing_key`]); the buffer is flushed as a single batch once no
+    /// coalescing window remains active.
+    coalesced_history_events: Vec<BlocklistAIHistoryEvent>,
+}
+
+/// Identity of a buffered history event used for deduplication while coalescing. A new event
+/// that maps to the same key as an earlier buffered event supersedes it: the stale entry is
+/// removed and the new one is appended, so the latest payload wins in both content and
+/// ordering. Events with no key are always appended and delivered in emission order.
+#[derive(PartialEq, Eq)]
+enum CoalescedHistoryEventKey {
+    UpdatedStreamingExchange { exchange_id: AIAgentExchangeId },
+    UpdatedTodoList { terminal_view_id: EntityId },
+    UpdatedConversationStatus { conversation_id: AIConversationId },
+    UpdatedConversationMetadata { conversation_id: AIConversationId },
+    ConversationUsageMetadataUpdated { conversation_id: AIConversationId },
+    SetActiveConversation { terminal_view_id: EntityId },
+}
+
+/// Returns the deduplication key for a history event, or `None` for events that should never
+/// be coalesced. Only events whose subscribers re-read the latest model state (rather than
+/// depending on each intermediate payload) are safe to dedupe.
+fn coalescing_key(event: &BlocklistAIHistoryEvent) -> Option<CoalescedHistoryEventKey> {
+    match event {
+        BlocklistAIHistoryEvent::UpdatedStreamingExchange { exchange_id, .. } => {
+            Some(CoalescedHistoryEventKey::UpdatedStreamingExchange {
+                exchange_id: *exchange_id,
+            })
+        }
+        BlocklistAIHistoryEvent::UpdatedTodoList { terminal_view_id } => {
+            Some(CoalescedHistoryEventKey::UpdatedTodoList {
+                terminal_view_id: *terminal_view_id,
+            })
+        }
+        BlocklistAIHistoryEvent::UpdatedConversationStatus {
+            conversation_id, ..
+        } => Some(CoalescedHistoryEventKey::UpdatedConversationStatus {
+            conversation_id: *conversation_id,
+        }),
+        BlocklistAIHistoryEvent::UpdatedConversationMetadata {
+            conversation_id, ..
+        } => Some(CoalescedHistoryEventKey::UpdatedConversationMetadata {
+            conversation_id: *conversation_id,
+        }),
+        BlocklistAIHistoryEvent::ConversationUsageMetadataUpdated { conversation_id } => {
+            Some(CoalescedHistoryEventKey::ConversationUsageMetadataUpdated {
+                conversation_id: *conversation_id,
+            })
+        }
+        BlocklistAIHistoryEvent::SetActiveConversation {
+            terminal_view_id, ..
+        } => Some(CoalescedHistoryEventKey::SetActiveConversation {
+            terminal_view_id: *terminal_view_id,
+        }),
+        BlocklistAIHistoryEvent::StartedNewConversation { .. }
+        | BlocklistAIHistoryEvent::CreatedSubtask { .. }
+        | BlocklistAIHistoryEvent::UpgradedTask { .. }
+        | BlocklistAIHistoryEvent::AppendedExchange { .. }
+        | BlocklistAIHistoryEvent::ReassignedExchange { .. }
+        | BlocklistAIHistoryEvent::ClearedActiveConversation { .. }
+        | BlocklistAIHistoryEvent::ClearedConversationsInTerminalView { .. }
+        | BlocklistAIHistoryEvent::UpdatedAutoexecuteOverride { .. }
+        | BlocklistAIHistoryEvent::SplitConversation { .. }
+        | BlocklistAIHistoryEvent::RemoveConversation { .. }
+        | BlocklistAIHistoryEvent::DeletedConversation { .. }
+        | BlocklistAIHistoryEvent::RestoredConversations { .. }
+        | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
+        | BlocklistAIHistoryEvent::ConversationServerTokenAssigned { .. }
+        | BlocklistAIHistoryEvent::ConversationOwnershipTransferred { .. }
+        | BlocklistAIHistoryEvent::NewConversationRequestComplete { .. }
+        | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. }
+        | BlocklistAIHistoryEvent::LocalSharedSessionEstablished { .. } => None,
+    }
 }
 
 impl BlocklistAIController {
@@ -95,16 +175,108 @@ impl BlocklistAIController {
             return;
         };
         match kind {
-            warp_multi_agent_api::response_event::Type::Init(init) => {
-                self.on_shared_init(init, ctx)
-            }
-            warp_multi_agent_api::response_event::Type::ClientActions(actions) => {
-                self.on_shared_client_actions(actions, ctx)
-            }
-            warp_multi_agent_api::response_event::Type::Finished(finished) => {
-                self.on_shared_finished(finished, ctx);
-            }
+            warp_multi_agent_api::response_event::Type::Init(init) => self
+                .capture_history_events_if_coalescing(ctx, |controller, ctx| {
+                    controller.on_shared_init(init, ctx)
+                }),
+            warp_multi_agent_api::response_event::Type::ClientActions(actions) => self
+                .capture_history_events_if_coalescing(ctx, |controller, ctx| {
+                    controller.on_shared_client_actions(actions, ctx)
+                }),
+            warp_multi_agent_api::response_event::Type::Finished(finished) => self
+                .capture_history_events_if_coalescing(ctx, |controller, ctx| {
+                    controller.on_shared_finished(finished, ctx);
+                }),
         }
+    }
+
+    /// Returns whether history-model events emitted while processing shared-session response
+    /// events should currently be buffered instead of delivered immediately. Coalescing is
+    /// active while the viewer is replaying a backlog of events (joining mid-session or
+    /// receiving an existing-conversation replay), where delivering each event individually
+    /// triggers a full subscriber fanout per replayed delta and can freeze the UI.
+    fn is_coalescing_history_events(&self) -> bool {
+        FeatureFlag::CoalesceSharedSessionCatchUpEvents.is_enabled()
+            && (self.shared_session_state.is_catching_up_on_event_backlog
+                || self.shared_session_state.is_receiving_conversation_replay)
+    }
+
+    /// Marks the start of the viewer's catch-up on the session's ordered event backlog.
+    pub fn begin_shared_session_event_backlog_catch_up(&mut self) {
+        self.shared_session_state.is_catching_up_on_event_backlog = true;
+    }
+
+    /// Marks the end of the viewer's catch-up on the session's ordered event backlog, flushing
+    /// any coalesced history events.
+    pub fn end_shared_session_event_backlog_catch_up(&mut self, ctx: &mut ModelContext<Self>) {
+        self.shared_session_state.is_catching_up_on_event_backlog = false;
+        self.maybe_flush_coalesced_history_events(ctx);
+    }
+
+    /// Records whether the sharer is currently replaying an existing agent conversation
+    /// (bracketed by the `AgentConversationReplayStarted`/`AgentConversationReplayEnded`
+    /// ordered events), flushing any coalesced history events when the replay ends.
+    pub fn set_is_receiving_conversation_replay(
+        &mut self,
+        value: bool,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.shared_session_state.is_receiving_conversation_replay = value;
+        if !value {
+            self.maybe_flush_coalesced_history_events(ctx);
+        }
+    }
+
+    /// Runs `f`, capturing any history-model events it emits into the coalescing buffer when a
+    /// coalescing window is active. When no window is active, `f` runs unchanged and its events
+    /// are delivered normally.
+    fn capture_history_events_if_coalescing<R>(
+        &mut self,
+        ctx: &mut ModelContext<Self>,
+        f: impl FnOnce(&mut Self, &mut ModelContext<Self>) -> R,
+    ) -> R {
+        if !self.is_coalescing_history_events() {
+            return f(self, ctx);
+        }
+        let history = BlocklistAIHistoryModel::handle(ctx);
+        let (result, events) = ctx.capture_emitted_events_for_model(&history, |ctx| f(self, ctx));
+        for event in events {
+            self.buffer_coalesced_history_event(event);
+        }
+        result
+    }
+
+    /// Inserts a captured event into the coalescing buffer, superseding any earlier buffered
+    /// event with the same coalescing key.
+    fn buffer_coalesced_history_event(&mut self, event: BlocklistAIHistoryEvent) {
+        if let Some(key) = coalescing_key(&event) {
+            self.shared_session_state
+                .coalesced_history_events
+                .retain(|existing| coalescing_key(existing).as_ref() != Some(&key));
+        }
+        self.shared_session_state
+            .coalesced_history_events
+            .push(event);
+    }
+
+    /// Emits all buffered history events as a single batch, in buffer order, if no coalescing
+    /// window remains active. Subscribers then see one `flush_effects` fanout for the whole
+    /// backlog instead of one per replayed event.
+    fn maybe_flush_coalesced_history_events(&mut self, ctx: &mut ModelContext<Self>) {
+        if self.is_coalescing_history_events()
+            || self
+                .shared_session_state
+                .coalesced_history_events
+                .is_empty()
+        {
+            return;
+        }
+        let events = std::mem::take(&mut self.shared_session_state.coalesced_history_events);
+        BlocklistAIHistoryModel::handle(ctx).update(ctx, |_history, ctx| {
+            for event in events {
+                ctx.emit(event);
+            }
+        });
     }
 
     fn on_shared_init(

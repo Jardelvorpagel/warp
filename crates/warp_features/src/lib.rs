@@ -886,6 +886,13 @@ pub enum FeatureFlag {
     /// Gates the SuperGrok feature, which lets users
     /// connect a Grok subscription instead of pasting an API key.
     SuperGrok,
+
+    /// Coalesces `BlocklistAIHistoryModel` events while a shared-session
+    /// viewer catches up on a session's event backlog, flushing one deduped
+    /// batch when caught up. This avoids a per-delta subscriber fanout that
+    /// can freeze the UI for tens of seconds when opening large cloud agent
+    /// conversations.
+    CoalesceSharedSessionCatchUpEvents,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -955,6 +962,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::GPTConfigurableContextWindow,
     FeatureFlag::RestorePromptOnInlineModelSelectorSearch,
     FeatureFlag::SuperGrok,
+    FeatureFlag::CoalesceSharedSessionCatchUpEvents,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).

@@ -195,6 +195,55 @@ impl<'a, T: Entity> ModelContext<'a, T> {
         });
     }
 
+    /// Runs `f` and captures any events emitted for `handle`'s model during it,
+    /// instead of leaving them queued for delivery to subscribers.
+    ///
+    /// Effects emitted for other entities and non-event effects (notifications,
+    /// actions, etc.) are left in the queue untouched. The captured events are
+    /// returned in emission order; the caller decides whether and when to
+    /// re-emit them. This is useful for deferring or coalescing high-volume
+    /// event streams (e.g. while replaying a backlog) without changing the
+    /// emitting code paths.
+    pub fn capture_emitted_events_for_model<E, R>(
+        &mut self,
+        handle: &ModelHandle<E>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> (R, Vec<E::Event>)
+    where
+        E: Entity,
+        E::Event: 'static,
+    {
+        let target_entity_id = handle.id();
+        let start_index = self.app.pending_effects.len();
+        let result = f(self);
+
+        let mut captured = Vec::new();
+        let mut index = start_index;
+        while index < self.app.pending_effects.len() {
+            let is_captured_event = matches!(
+                &self.app.pending_effects[index],
+                Effect::Event { entity_id, .. } if *entity_id == target_entity_id
+            );
+            if is_captured_event {
+                // `remove` preserves the relative order of the remaining
+                // effects, so interleaved effects for other entities are
+                // delivered in their original order.
+                let Some(Effect::Event { payload, .. }) = self.app.pending_effects.remove(index)
+                else {
+                    unreachable!("the effect at this index was just matched as an event");
+                };
+                let payload = payload
+                    .downcast::<E::Event>()
+                    .expect("events emitted with a model's entity id have its event type");
+                captured.push(*payload);
+            } else {
+                index += 1;
+            }
+        }
+
+        (result, captured)
+    }
+
     /// Global actions are being phased out. Prefer dispatching typed actions instead of global actions.
     /// Dispatch a global action to be handled by the registered handler
     ///

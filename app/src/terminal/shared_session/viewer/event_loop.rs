@@ -121,6 +121,15 @@ impl EventLoop {
                 .set_shared_session_status(SharedSessionStatus::ActiveViewer {
                     role: Default::default(),
                 });
+        } else if let Some(terminal_view) = terminal_view.upgrade(ctx) {
+            // Coalesce AI history events while replaying the join-time event backlog so each
+            // replayed delta does not trigger a full subscriber fanout, which can freeze the UI
+            // for large conversations.
+            terminal_view.update(ctx, |terminal_view, ctx| {
+                terminal_view.ai_controller().update(ctx, |controller, _| {
+                    controller.begin_shared_session_event_backlog_catch_up();
+                });
+            });
         }
 
         let mut event_loop = Self {
@@ -350,10 +359,11 @@ impl EventLoop {
                         let should_suppress_existing_replay =
                             self.should_suppress_existing_agent_conversation_replay;
                         view.update(ctx, |view, ctx| {
-                            view.ai_controller().update(ctx, |controller, _| {
+                            view.ai_controller().update(ctx, |controller, ctx| {
                                 controller.set_should_suppress_existing_agent_conversation_replay(
                                     should_suppress_existing_replay,
                                 );
+                                controller.set_is_receiving_conversation_replay(true, ctx);
                             });
                         });
                     }
@@ -364,9 +374,10 @@ impl EventLoop {
                         .set_is_receiving_agent_conversation_replay(false);
                     if let Some(view) = self.terminal_view.upgrade(ctx) {
                         view.update(ctx, |view, ctx| {
-                            view.ai_controller().update(ctx, |controller, _| {
+                            view.ai_controller().update(ctx, |controller, ctx| {
                                 controller
                                     .set_should_suppress_existing_agent_conversation_replay(false);
+                                controller.set_is_receiving_conversation_replay(false, ctx);
                             });
                         });
                     }
@@ -402,6 +413,14 @@ impl EventLoop {
                             );
                         }
                     }
+
+                    // Catch-up is complete; deliver any coalesced AI history events as a
+                    // single batch.
+                    view.update(ctx, |view, ctx| {
+                        view.ai_controller().update(ctx, |controller, ctx| {
+                            controller.end_shared_session_event_backlog_catch_up(ctx);
+                        });
+                    });
                 }
             }
 
