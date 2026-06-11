@@ -750,17 +750,17 @@ impl AgentInputFooter {
                 let LLMPreferencesEvent::UpdatedActiveAgentModeLLM = event else {
                     return;
                 };
-                let (effective_model_id, effective_model_provider) = {
+                let (effective_model_provider, effective_model_threshold) = {
                     let active_base_model = preferences
                         .as_ref(ctx)
                         .get_active_base_model(ctx, Some(me.terminal_view_id));
                     (
-                        active_base_model.id.clone(),
                         active_base_model.provider.clone(),
+                        active_base_model.context_window.long_context_threshold,
                     )
                 };
                 me.long_context_warning_state
-                    .update_effective_model(effective_model_id, effective_model_provider);
+                    .update_effective_model(effective_model_provider, effective_model_threshold);
                 me.update_context_window_button(ctx);
             },
         );
@@ -916,17 +916,17 @@ impl AgentInputFooter {
             None
         };
 
-        let (effective_model_id, effective_model_provider) = {
+        let (effective_model_provider, effective_model_threshold) = {
             let active_base_model =
                 LLMPreferences::as_ref(ctx).get_active_base_model(ctx, Some(terminal_view_id));
             (
-                active_base_model.id.clone(),
                 active_base_model.provider.clone(),
+                active_base_model.context_window.long_context_threshold,
             )
         };
-        let long_context_used = BlocklistAIHistoryModel::as_ref(ctx)
+        let total_input_tokens = BlocklistAIHistoryModel::as_ref(ctx)
             .active_conversation(terminal_view_id)
-            .is_some_and(|conversation| conversation.long_context_used());
+            .map_or(0, |conversation| conversation.total_input_tokens());
         let mut me = Self {
             terminal_view_id,
             ambient_agent_view_model,
@@ -947,9 +947,9 @@ impl AgentInputFooter {
             plugin_chip_ready: false,
             context_window_button,
             long_context_warning_state: LongContextWarningState::new(
-                effective_model_id,
                 effective_model_provider,
-                long_context_used,
+                effective_model_threshold,
+                total_input_tokens,
             ),
             model_selector: profile_model_selector_full,
             environment_selector,
@@ -1105,11 +1105,11 @@ impl AgentInputFooter {
     }
 
     fn sync_long_context_warning_from_conversation(&mut self, app: &AppContext) {
-        let long_context_used = BlocklistAIHistoryModel::as_ref(app)
+        let total_input_tokens = BlocklistAIHistoryModel::as_ref(app)
             .active_conversation(self.terminal_view_id)
-            .is_some_and(|conversation| conversation.long_context_used());
+            .map_or(0, |conversation| conversation.total_input_tokens());
         self.long_context_warning_state
-            .sync_from_server(long_context_used);
+            .sync_from_server(total_input_tokens);
     }
 
     fn has_active_cli_agent_input_session(&self, app: &AppContext) -> bool {
@@ -2107,10 +2107,13 @@ impl AgentInputFooter {
             self.prompt_cache_expired = is_cache_expired;
             self.context_window_button.update(ctx, |button, ctx| {
                 button.set_icon(Some(icon), ctx);
-                button.set_icon_ansi_color(
-                    show_long_context_warning.then_some(AnsiColorIdentifier::Yellow),
-                    ctx,
-                );
+                // Icon color flows from theme.text_color(); no separate ANSI override needed.
+                button.set_icon_ansi_color(None, ctx);
+                if show_long_context_warning {
+                    button.set_theme(LongContextWarningButtonTheme, ctx);
+                } else {
+                    button.set_theme(AgentInputButtonTheme, ctx);
+                }
                 button.set_tooltip(Some(tooltip), ctx);
             });
 

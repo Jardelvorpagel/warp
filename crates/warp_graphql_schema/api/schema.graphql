@@ -821,7 +821,12 @@ type ConversationUsageMetadata {
   """
   contextWindowSegments: [ContextWindowSegment!]!
   contextWindowUsage: Float!
-  longContextUsed: Boolean!
+
+  """
+  Input tokens of the latest primary-agent LLM call in the latest successfully
+  persisted request that had Warp-charged or BYOK usage; 0 otherwise.
+  """
+  totalInputTokens: Int!
 
   """
   Input tokens of the latest primary-agent LLM call in the latest successfully
