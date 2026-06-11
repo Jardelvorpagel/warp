@@ -99,9 +99,7 @@ use crate::code_review::diff_state::{
 };
 use crate::code_review::editor_state::CodeReviewEditorState;
 use crate::code_review::find_model::CodeReviewFindModel;
-#[cfg(feature = "local_fs")]
 use crate::code_review::git_repo_model::{GitRepoModels, GitRepoStatusEvent, GitRepoStatusModel};
-#[cfg(feature = "local_fs")]
 use crate::code_review::github_repo_model::{GitHubRepoEvent, GitHubRepoModel};
 use crate::code_review::hidden_lines::calculate_hidden_lines;
 #[cfg(feature = "local_fs")]
@@ -649,10 +647,8 @@ pub struct CodeReviewView {
     /// Active git-operation dialog overlay (commit / push / publish), if open.
     git_dialog: Option<ViewHandle<GitDialog>>,
     /// Per-repo git status model for the current repository, if any.
-    #[cfg(feature = "local_fs")]
     git_repo_status: Option<ModelHandle<GitRepoStatusModel>>,
     /// Per-repo GitHub-info model for the current repository, if any.
-    #[cfg(feature = "local_fs")]
     github_repo_model: Option<ModelHandle<GitHubRepoModel>>,
 }
 
@@ -701,11 +697,8 @@ impl CodeReviewView {
         self.is_open = true;
 
         ctx.subscribe_to_model(&self.diff_state_model, Self::handle_diff_state_model_event);
-        #[cfg(feature = "local_fs")]
-        {
-            self.subscribe_to_git_repo_status_model(ctx);
-            self.subscribe_to_github_repo_model(ctx);
-        }
+        self.subscribe_to_git_repo_status_model(ctx);
+        self.subscribe_to_github_repo_model(ctx);
         if self.repo_path().is_some() {
             self.fetch_branches_and_setup_dropdown(ctx);
         }
@@ -770,11 +763,8 @@ impl CodeReviewView {
         }
 
         ctx.unsubscribe_to_model(&self.diff_state_model);
-        #[cfg(feature = "local_fs")]
-        {
-            self.unsubscribe_from_git_repo_status_model(ctx);
-            self.unsubscribe_from_github_repo_model(ctx);
-        }
+        self.unsubscribe_from_git_repo_status_model(ctx);
+        self.unsubscribe_from_github_repo_model(ctx);
 
         self.code_review_footer = None;
 
@@ -1350,9 +1340,7 @@ impl CodeReviewView {
             is_open: false,
             code_review_footer: None,
             git_dialog: None,
-            #[cfg(feature = "local_fs")]
             git_repo_status: None,
-            #[cfg(feature = "local_fs")]
             github_repo_model: None,
         };
         view.set_active_repo_comment_model(comment_batch_model, ctx);
@@ -6309,35 +6297,18 @@ impl CodeReviewView {
     /// The model dispatches to a local `gh`-driven backend or a remote
     /// GitHub PR-info push receiver.
     fn pr_info(&self, ctx: &AppContext) -> Option<PrInfo> {
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "local_fs")] {
-                let github_repo_model = self.github_repo_model.as_ref()?;
-                github_repo_model.as_ref(ctx).pr_info(ctx).cloned()
-            } else {
-                let _ = ctx;
-                None
-            }
-        }
+        let github_repo_model = self.github_repo_model.as_ref()?;
+        github_repo_model.as_ref(ctx).pr_info(ctx).cloned()
     }
 
     /// Whether a `gh pr view` lookup is currently in flight.
     fn is_pr_info_refreshing(&self, ctx: &AppContext) -> bool {
-        #[cfg(feature = "local_fs")]
-        {
-            self.github_repo_model
-                .as_ref()
-                .map(|h| h.as_ref(ctx).is_refreshing_pr_info(ctx))
-                .unwrap_or(false)
-        }
-
-        #[cfg(not(feature = "local_fs"))]
-        {
-            let _ = ctx;
-            false
-        }
+        self.github_repo_model
+            .as_ref()
+            .map(|h| h.as_ref(ctx).is_refreshing_pr_info(ctx))
+            .unwrap_or(false)
     }
 
-    #[cfg(feature = "local_fs")]
     fn refresh_pr_info(&self, ctx: &mut ViewContext<Self>) {
         let Some(handle) = self.github_repo_model.as_ref() else {
             return;
@@ -6347,11 +6318,7 @@ impl CodeReviewView {
         });
     }
 
-    #[cfg(not(feature = "local_fs"))]
-    fn refresh_pr_info(&self, _ctx: &mut ViewContext<Self>) {}
-
     /// Subscribes to the per-repo git status model.
-    #[cfg(feature = "local_fs")]
     fn subscribe_to_git_repo_status_model(&mut self, ctx: &mut ViewContext<Self>) {
         let Some(repo) = self.repo_path().cloned() else {
             return;
@@ -6374,7 +6341,6 @@ impl CodeReviewView {
     }
 
     /// Subscribes to the per-repo GitHub-info model.
-    #[cfg(feature = "local_fs")]
     fn subscribe_to_github_repo_model(&mut self, ctx: &mut ViewContext<Self>) {
         let Some(repo) = self.repo_path().cloned() else {
             return;
@@ -6399,14 +6365,12 @@ impl CodeReviewView {
         self.github_repo_model = Some(handle);
     }
 
-    #[cfg(feature = "local_fs")]
     fn unsubscribe_from_git_repo_status_model(&mut self, ctx: &mut ViewContext<Self>) {
         if let Some(handle) = self.git_repo_status.take() {
             ctx.unsubscribe_to_model(&handle);
         }
     }
 
-    #[cfg(feature = "local_fs")]
     fn unsubscribe_from_github_repo_model(&mut self, ctx: &mut ViewContext<Self>) {
         if let Some(handle) = self.github_repo_model.take() {
             ctx.unsubscribe_to_model(&handle);

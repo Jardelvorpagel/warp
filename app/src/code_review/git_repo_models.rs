@@ -1,20 +1,16 @@
-#[cfg(feature = "local_fs")]
 use std::collections::HashMap;
 
 #[cfg(feature = "local_fs")]
 use repo_metadata::repositories::DetectedRepositories;
-#[cfg(feature = "local_fs")]
 use warp_util::local_or_remote_path::LocalOrRemotePath;
-use warpui::{Entity, SingletonEntity};
-#[cfg(feature = "local_fs")]
-use warpui::{ModelContext, ModelHandle, WeakModelHandle};
+use warpui::{Entity, ModelContext, ModelHandle, SingletonEntity, WeakModelHandle};
 
 #[cfg(feature = "local_fs")]
-use super::git_repo_model::{
-    new_local_git_repo_status_model, new_remote_git_repo_status_model, GitRepoStatusModel,
-};
+use super::git_repo_model::new_local_git_repo_status_model;
+use super::git_repo_model::{new_remote_git_repo_status_model, GitRepoStatusModel};
 #[cfg(feature = "local_fs")]
-use super::github_repo_model::{GitHubRepoModel, LocalGitHubRepoModel, RemoteGitHubRepoModel};
+use super::github_repo_model::LocalGitHubRepoModel;
+use super::github_repo_model::{GitHubRepoModel, RemoteGitHubRepoModel};
 
 // ── GitRepoModels (singleton cache) ─────────────────────────────────────────
 
@@ -29,17 +25,13 @@ pub struct GitRepoModels {
     // receiver) repos. Each entry stores the unified-enum handle; callers in
     // the same repo share it, and it is torn down when the last strong handle
     // is dropped.
-    #[cfg(feature = "local_fs")]
     git_status_models: HashMap<LocalOrRemotePath, WeakModelHandle<GitRepoStatusModel>>,
-    #[cfg(feature = "local_fs")]
     github_repo_models: HashMap<LocalOrRemotePath, WeakModelHandle<GitHubRepoModel>>,
 }
 impl GitRepoModels {
     pub fn new() -> Self {
         Self {
-            #[cfg(feature = "local_fs")]
             git_status_models: HashMap::new(),
-            #[cfg(feature = "local_fs")]
             github_repo_models: HashMap::new(),
         }
     }
@@ -53,7 +45,6 @@ impl GitRepoModels {
     /// dropped.
     ///
     /// Callers hold the returned `ModelHandle` for as long as they need updates.
-    #[cfg(feature = "local_fs")]
     pub fn subscribe(
         &mut self,
         repo: &LocalOrRemotePath,
@@ -69,15 +60,25 @@ impl GitRepoModels {
 
         let handle = match repo {
             LocalOrRemotePath::Local(repo_path) => {
-                let Some(repository_model) = DetectedRepositories::as_ref(ctx)
-                    .get_local_watched_repo_for_path(repo_path, ctx)
-                else {
+                #[cfg(feature = "local_fs")]
+                {
+                    let Some(repository_model) = DetectedRepositories::as_ref(ctx)
+                        .get_local_watched_repo_for_path(repo_path, ctx)
+                    else {
+                        anyhow::bail!(
+                            "No watched repository found for path: {}",
+                            repo_path.display()
+                        );
+                    };
+                    new_local_git_repo_status_model(repo_path.clone(), repository_model, ctx)
+                }
+                #[cfg(not(feature = "local_fs"))]
+                {
                     anyhow::bail!(
                         "No watched repository found for path: {}",
                         repo_path.display()
                     );
-                };
-                new_local_git_repo_status_model(repo_path.clone(), repository_model, ctx)
+                }
             }
             LocalOrRemotePath::Remote(remote_path) => {
                 new_remote_git_repo_status_model(remote_path.clone(), ctx)
@@ -99,7 +100,6 @@ impl GitRepoModels {
     /// repo share one model (cached by `LocalOrRemotePath`).
     ///
     /// Callers hold the returned `ModelHandle` for as long as they need updates.
-    #[cfg(feature = "local_fs")]
     pub fn subscribe_github_repo(
         &mut self,
         repo: &LocalOrRemotePath,
@@ -115,16 +115,26 @@ impl GitRepoModels {
 
         let handle = match repo {
             LocalOrRemotePath::Local(repo_path) => {
-                // LocalGitHubRepoModel needs a sibling GitRepoStatusModel for
-                // branch info.
-                let git_status = self.subscribe(repo, ctx)?;
-                let repo_path = repo_path.clone();
-                let inner =
-                    ctx.add_model(|ctx| LocalGitHubRepoModel::new(repo_path, git_status, ctx));
-                ctx.add_model(|ctx| {
-                    ctx.subscribe_to_model(&inner, GitHubRepoModel::forward_event);
-                    GitHubRepoModel::Local(inner)
-                })
+                #[cfg(feature = "local_fs")]
+                {
+                    // LocalGitHubRepoModel needs a sibling GitRepoStatusModel for
+                    // branch info.
+                    let git_status = self.subscribe(repo, ctx)?;
+                    let repo_path = repo_path.clone();
+                    let inner =
+                        ctx.add_model(|ctx| LocalGitHubRepoModel::new(repo_path, git_status, ctx));
+                    ctx.add_model(|ctx| {
+                        ctx.subscribe_to_model(&inner, GitHubRepoModel::forward_event);
+                        GitHubRepoModel::Local(inner)
+                    })
+                }
+                #[cfg(not(feature = "local_fs"))]
+                {
+                    anyhow::bail!(
+                        "Local GitHub repo info is unavailable without local_fs: {}",
+                        repo_path.display()
+                    );
+                }
             }
             LocalOrRemotePath::Remote(remote_path) => {
                 let inner =

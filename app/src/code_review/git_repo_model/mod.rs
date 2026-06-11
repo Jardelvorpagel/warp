@@ -1,24 +1,18 @@
-use warpui::Entity;
-#[cfg(feature = "local_fs")]
-use warpui::{AppContext, ModelContext, ModelHandle};
+use warpui::{AppContext, Entity, ModelContext, ModelHandle};
 
 #[cfg(feature = "local_fs")]
 mod local;
 #[cfg(feature = "local_fs")]
 pub use local::LocalGitRepoStatusModel;
 
-#[cfg(feature = "local_fs")]
 mod remote;
-#[cfg(feature = "local_fs")]
 pub use remote::RemoteGitRepoStatusModel;
 
-#[cfg(feature = "local_fs")]
 use super::diff_state::DiffStats;
 pub use super::git_repo_models::GitRepoModels;
 
 /// Public metadata exposed to consumers — the subset of diff metadata
 /// that the git chip (prompt display, agent view footer) needs.
-#[cfg(feature = "local_fs")]
 #[derive(Debug, Clone)]
 pub struct GitStatusMetadata {
     pub current_branch_name: String,
@@ -28,16 +22,6 @@ pub struct GitStatusMetadata {
 
 // ── GitRepoStatusModel ──────────────────────────────────────────────────────
 
-#[cfg(not(feature = "local_fs"))]
-#[allow(dead_code)]
-pub struct GitRepoStatusModel;
-
-#[cfg(not(feature = "local_fs"))]
-impl Entity for GitRepoStatusModel {
-    type Event = ();
-}
-
-#[cfg(feature = "local_fs")]
 #[derive(Debug)]
 pub enum GitRepoStatusEvent {
     /// Emitted whenever the metadata changes (branch name, diff stats, etc.).
@@ -53,18 +37,16 @@ pub enum GitRepoStatusEvent {
 /// `ModelHandle<GitRepoStatusModel>` and subscribe to its [`GitRepoStatusEvent`]s
 /// without caring whether the repository is local or on an SSH host. Only one
 /// variant is populated at a time.
-#[cfg(feature = "local_fs")]
 pub enum GitRepoStatusModel {
+    #[cfg(feature = "local_fs")]
     Local(ModelHandle<LocalGitRepoStatusModel>),
     Remote(ModelHandle<RemoteGitRepoStatusModel>),
 }
 
-#[cfg(feature = "local_fs")]
 impl Entity for GitRepoStatusModel {
     type Event = GitRepoStatusEvent;
 }
 
-#[cfg(feature = "local_fs")]
 impl GitRepoStatusModel {
     /// Re-emit a sub-model event so subscribers of the unified model observe
     /// the same `GitRepoStatusEvent`s regardless of backend.
@@ -77,6 +59,7 @@ impl GitRepoStatusModel {
     /// Mode-independent status metadata (branch names + HEAD diff stats).
     pub fn metadata<'a>(&self, ctx: &'a AppContext) -> Option<&'a GitStatusMetadata> {
         match self {
+            #[cfg(feature = "local_fs")]
             Self::Local(m) => m.as_ref(ctx).metadata(),
             Self::Remote(m) => m.as_ref(ctx).metadata(),
         }
@@ -85,6 +68,7 @@ impl GitRepoStatusModel {
     /// Force a metadata refresh (branch names, diff stats).
     pub fn refresh_metadata(&self, ctx: &mut ModelContext<Self>) {
         match self {
+            #[cfg(feature = "local_fs")]
             Self::Local(m) => m.update(ctx, |m, ctx| m.refresh_metadata(ctx)),
             Self::Remote(m) => m.update(ctx, |m, ctx| m.request_snapshot(ctx)),
         }
@@ -104,7 +88,6 @@ pub(super) fn new_local_git_repo_status_model(
     })
 }
 
-#[cfg(feature = "local_fs")]
 pub(super) fn new_remote_git_repo_status_model(
     remote_path: warp_util::remote_path::RemotePath,
     ctx: &mut ModelContext<GitRepoModels>,
@@ -135,6 +118,7 @@ impl GitRepoStatusModel {
         ctx: &mut ModelContext<Self>,
     ) {
         match self {
+            #[cfg(feature = "local_fs")]
             Self::Local(m) => m.update(ctx, |m, ctx| m.set_metadata_for_test(metadata, ctx)),
             Self::Remote(_) => unreachable!("remote test models are not used"),
         }
