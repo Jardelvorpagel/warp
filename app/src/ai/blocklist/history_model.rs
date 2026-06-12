@@ -250,9 +250,8 @@ pub struct BlocklistAIHistoryModel {
     persisted_queries: Vec<PersistedAIInput>,
 
     /// Recent agent prompts (text and submission time) read from the `ai_queries` table at
-    /// startup, newest-first and not deduped. Larger than `persisted_queries` but much
-    /// lighter per row; combined with in-memory conversation queries by
-    /// [`Self::nld_prompt_history`] for NLD input classification.
+    ///combined with in-memory conversation queries by [`Self::nld_prompt_history`] for 
+    /// NLD input classification.
     nld_persisted_prompts: Vec<(String, DateTime<Local>)>,
 
     /// Metadata for both local and ambient agent conversations.
@@ -2231,17 +2230,11 @@ impl BlocklistAIHistoryModel {
             .chain(live_queries_vec)
     }
 
-    /// Returns the prompt-history candidates for NLD input classification: the user's
-    /// recent agent prompts with the latest submission time per distinct prompt text,
-    /// sorted newest-first so a fuzzy matcher's first hit is the most recent matching
-    /// prompt.
+    /// Returns the prompt-history candidates for NLD input classification: 
     ///
     /// Combines the queries from [`Self::all_ai_queries`] (live and cleared in-memory
     /// conversations plus the small persisted up-arrow set) with the larger lightweight
-    /// set read from the `ai_queries` table at startup. The sources overlap (a loaded
-    /// conversation's exchanges are also persisted rows), which is harmless: the dedup
-    /// keeps the latest timestamp per text, and the same exchange carries the same
-    /// timestamp in both sources.
+    /// set read from the `ai_queries` table at startup. Dedup keeps the latest timestamp per text
     pub(crate) fn nld_prompt_history(&self) -> Vec<(String, DateTime<Local>)> {
         let mut latest_by_text: HashMap<String, DateTime<Local>> = HashMap::new();
         let candidates = self
