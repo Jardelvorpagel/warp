@@ -251,7 +251,7 @@ pub struct BlocklistAIHistoryModel {
     persisted_queries: Vec<PersistedAIInput>,
 
     /// Prompt-history candidates for NLD input classification, read once from `ai_queries` at
-    /// startup. 
+    /// startup.
     nld_persisted_prompts: Vec<(Arc<str>, DateTime<Local>)>,
 
     /// User-query prompts submitted during the current session,
@@ -316,7 +316,7 @@ impl BlocklistAIHistoryModel {
     }
 
     /// Stores the NLD prompt-history snapshot ([`Self::nld_persisted_prompts`]) read from
-    /// `ai_queries` at startup, preserving its newest-first order. 
+    /// `ai_queries` at startup, preserving its newest-first order.
     pub(crate) fn with_nld_persisted_prompts(
         mut self,
         nld_persisted_prompts: Vec<(String, DateTime<Local>)>,
@@ -1081,7 +1081,6 @@ impl BlocklistAIHistoryModel {
             let new_status = conversation.status().clone();
             self.conversations_by_id
                 .insert(conversation_id, conversation);
-
 
             // Emit UpdatedConversationStatus for restored conversations so that
             // the workspace can set tab indicators appropriately

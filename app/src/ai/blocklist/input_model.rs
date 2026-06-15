@@ -753,7 +753,7 @@ impl BlocklistAIInputModel {
             return;
         }
 
-        // If we have a session, gather command history entries 
+        // If we have a session, gather command history entries
         let history_entries = session_id.map(|sid| {
             History::as_ref(ctx)
                 .commands(sid)
@@ -771,7 +771,7 @@ impl BlocklistAIInputModel {
                 .collect::<Vec<(String, Option<DateTime<Local>>)>>()
         });
 
-        // Gather agent prompt history 
+        // Gather agent prompt history
         let prompt_entries = cfg!(feature = "nld_prompt_history_match")
             .then(|| BlocklistAIHistoryModel::as_ref(ctx).nld_prompt_history());
 

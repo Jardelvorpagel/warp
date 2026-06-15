@@ -844,7 +844,10 @@ fn nld_prompt_history_chains_session_prompts_then_persisted_snapshot() {
         // whitespace-only row that must be dropped.
         let nld_prompts = vec![
             ("deploy it".to_string(), now - chrono::Duration::seconds(10)),
-            ("live query".to_string(), now - chrono::Duration::seconds(20)),
+            (
+                "live query".to_string(),
+                now - chrono::Duration::seconds(20),
+            ),
             (
                 "restored query".to_string(),
                 now - chrono::Duration::seconds(30),
