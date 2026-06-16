@@ -617,8 +617,9 @@ impl ShellCommandExecutor {
     }
 
     pub(super) fn cancel_execution(&mut self, id: &AIAgentActionId, _ctx: &mut ModelContext<Self>) {
-        // Requested commands wait on an action id before the terminal block id is
-        // stable. Later LRC interactions wait on the block id, so clear both handles.
+        // Requested commands register by action id before the terminal block id is
+        // stable. Later LRC interactions register by block id, and cancellation can
+        // race across that handoff, so clear either waiter if present.
         let requested_command_selector = BlockSelector::RequestedCommandId(id.clone());
         self.block_finished_senders
             .remove(&requested_command_selector);

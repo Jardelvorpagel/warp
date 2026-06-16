@@ -7438,15 +7438,17 @@ impl TerminalView {
 
                 // While the command was blocked on confirmation, the AI block grabbed focus so
                 // Enter could accept it. Now that it's executing, hand focus back to the
-                // input/terminal so Ctrl-C reaches the command and follow-ups reach the CLI
-                // subagent input if the command becomes long-running.
+                // input/terminal so Ctrl-C reaches the command. If the command becomes
+                // long-running, follow-ups should reach the CLI subagent input box without
+                // requiring the user to refocus it.
                 // We call `redetermine_global_focus` rather than `redetermine_terminal_focus`
                 // because the latter deliberately no-ops while an AI block is focused.
                 if ctx.is_self_or_child_focused() {
                     self.redetermine_global_focus(ctx);
                 }
 
-                // If the command turns out to be long-running, lock the input in agent mode.
+                // If the command turns out to be long-running and the agent still owns it,
+                // lock the input in agent mode.
                 ctx.spawn(
                     // Command execution is triggered by a subscriber to the event above, so
                     // give some buffer to actually determine if its long running.
@@ -8503,6 +8505,8 @@ impl TerminalView {
             if active_block.ai_conversation_id() == Some(conversation_id)
                 && active_block.requested_command_action_id() == Some(&action_id)
             {
+                // Mark this before sending ETX so a command that ignores Ctrl-C is no
+                // longer treated as agent-driven if it later becomes long-running.
                 active_block.set_user_control_with_stop_reason();
             }
             drop(model);

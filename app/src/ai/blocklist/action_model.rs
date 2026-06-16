@@ -1022,11 +1022,12 @@ impl BlocklistAIActionModel {
         self.handle_action_result(conversation_id, Arc::new(action_result), None, ctx);
     }
 
-    /// Cancels a command requested by the agent before a CLI subagent attaches.
+    /// Cancels local action state for an agent-requested shell command before a CLI
+    /// subagent attaches.
     ///
     /// The command may still be queued, actively starting, or represented by an
-    /// unsent long-running snapshot. Returns `false` once there is no local result
-    /// left to rewrite, so callers can cancel the conversation directly instead.
+    /// unsent long-running snapshot. Returns `false` once there is no local action
+    /// state left to cancel, so callers can cancel the conversation directly instead.
     pub(crate) fn cancel_requested_command_with_id(
         &mut self,
         conversation_id: AIConversationId,
@@ -1046,6 +1047,8 @@ impl BlocklistAIActionModel {
             self.cancel_action_with_id(conversation_id, action_id, reason, ctx);
             return true;
         }
+        // Once the initial long-running snapshot is buffered, cancelling the action
+        // means rewriting that snapshot before the next agent follow-up consumes it.
 
         let Some(action_result) = self
             .finished_action_results
