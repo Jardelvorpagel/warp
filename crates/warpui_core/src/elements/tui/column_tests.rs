@@ -174,3 +174,58 @@ fn dispatch_event_offers_children_in_order_and_stops_when_handled() {
         });
     });
 }
+
+#[test]
+fn flex_child_fills_height_left_after_fixed_children() {
+    let mut column = TuiColumn::new()
+        .child(TuiText::new("H").truncate())
+        .flex_child(TuiText::new("B\nB\nB\nB\nB\nB").truncate());
+
+    // With a flex child the column fills the height it is offered (5), not the
+    // content total (7).
+    let mut rendered_views = HashMap::new();
+    let mut ctx = TuiLayoutContext { rendered_views: &mut rendered_views };
+    let size = column.layout(TuiConstraint::new(TuiSize::ZERO, TuiSize::new(1, 5)), &mut ctx);
+    assert_eq!(size, TuiSize::new(1, 5));
+
+    // The header takes row 0; the flex body fills the remaining four rows, and
+    // its extra rows are clipped to that slot.
+    assert_eq!(
+        render_to_lines(&column, TuiSize::new(1, 5)),
+        vec!["H", "B", "B", "B", "B"],
+    );
+}
+
+#[test]
+fn multiple_flex_children_split_remaining_height_evenly() {
+    let mut column = TuiColumn::new()
+        .child(TuiText::new("H").truncate())
+        .flex_child(TuiText::new("A\nA\nA\nA").truncate())
+        .flex_child(TuiText::new("B\nB\nB\nB").truncate());
+
+    // Seven rows: one for the header, the remaining six split evenly (3 + 3).
+    let mut rendered_views = HashMap::new();
+    let mut ctx = TuiLayoutContext { rendered_views: &mut rendered_views };
+    column.layout(TuiConstraint::tight(TuiSize::new(1, 7)), &mut ctx);
+    assert_eq!(
+        render_to_lines(&column, TuiSize::new(1, 7)),
+        vec!["H", "A", "A", "A", "B", "B", "B"],
+    );
+}
+
+#[test]
+fn flex_remainder_favors_earlier_children() {
+    let mut column = TuiColumn::new()
+        .flex_child(TuiText::new("A\nA\nA\nA\nA").truncate())
+        .flex_child(TuiText::new("B\nB\nB\nB\nB").truncate());
+
+    // Five rows across two flex children: base 2 each, the odd remainder going
+    // to the first => 3 + 2.
+    let mut rendered_views = HashMap::new();
+    let mut ctx = TuiLayoutContext { rendered_views: &mut rendered_views };
+    column.layout(TuiConstraint::tight(TuiSize::new(1, 5)), &mut ctx);
+    assert_eq!(
+        render_to_lines(&column, TuiSize::new(1, 5)),
+        vec!["A", "A", "A", "B", "B"],
+    );
+}

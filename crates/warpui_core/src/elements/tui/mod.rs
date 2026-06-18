@@ -14,12 +14,8 @@
 //!   [`TuiElement::dispatch_event`]. (The crossterm → warp event *conversion*
 //!   lives with the runtime, in `crate::runtime`.)
 //! - The concrete elements: [`TuiText`], [`TuiColumn`], [`TuiContainer`],
-//!   [`TuiCenter`], [`TuiChildView`], and [`TuiEventHandler`].
-//! - [`TuiParentElement`]: a trait for multi-child elements, providing
-//!   [`with_child`](TuiParentElement::with_child) /
-//!   [`with_children`](TuiParentElement::with_children) /
-//!   [`add_child`](TuiParentElement::add_child) /
-//!   [`add_children`](TuiParentElement::add_children).
+//!   [`TuiCenter`], [`TuiScrollable`], [`TuiChildView`], and
+//!   [`TuiEventHandler`].
 
 use std::collections::HashMap;
 
@@ -34,6 +30,7 @@ mod event;
 mod event_handler;
 mod geometry;
 mod parent;
+mod scrollable;
 mod text;
 
 pub use buffer::{Cell, Color, Modifier, TuiBuffer, TuiBufferExt, TuiStyle};
@@ -45,6 +42,7 @@ pub use event::{TuiDispatchEventResult, TuiEventContext, TuiEventDispatchResult}
 pub use event_handler::TuiEventHandler;
 pub use geometry::{TuiConstraint, TuiRect, TuiRectExt, TuiSize};
 pub use parent::TuiParentElement;
+pub use scrollable::{TuiScrollHandle, TuiScrollable};
 pub use text::TuiText;
 
 /// Carries the pre-rendered per-view element map through the layout pass,
@@ -215,3 +213,4 @@ impl<'a> TuiPresentationContext<'a> {
         Some(result)
     }
 }
+
