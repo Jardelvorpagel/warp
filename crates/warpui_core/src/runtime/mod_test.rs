@@ -291,6 +291,69 @@ fn invalidation_callback_repaints_on_notify_without_input() {
     });
 }
 
+/// A view whose element consumes the `x` key, so an `x` key event dispatches as
+/// "handled" without the handler itself calling `notify`.
+struct KeyConsumingView;
+
+impl Entity for KeyConsumingView {
+    type Event = ();
+}
+
+impl TuiView for KeyConsumingView {
+    fn ui_name() -> &'static str {
+        "KeyConsumingView"
+    }
+
+    fn render(&self, _: &AppContext) -> Box<dyn TuiElement> {
+        Box::new(TuiEventHandler::new(TuiText::new("x")).on_key("x", |_, _, _| {}))
+    }
+}
+
+impl TypedActionView for KeyConsumingView {
+    type Action = ();
+}
+
+fn char_key(character: char) -> CrosstermEvent {
+    CrosstermEvent::Key(KeyEvent::new(
+        KeyCode::Char(character),
+        KeyModifiers::empty(),
+    ))
+}
+
+#[test]
+fn handled_input_invalidates_window_for_repaint() {
+    App::test((), |mut app| async move {
+        let (window_id, root) =
+            app.update(|ctx| ctx.add_tui_window(window_options(), |_| KeyConsumingView));
+        let root_view_id = root.id();
+
+        // Clear the window's creation invalidation so we observe only what input
+        // dispatch produces.
+        app.update(|ctx| {
+            let _ = ctx.take_all_invalidations_for_window(window_id);
+        });
+
+        // A handled key invalidates the window (mirrors `run_until`'s
+        // "handled => redraw") even though the handler never calls `notify` — the
+        // path a scrollable relies on to repaint after changing its offset.
+        app.update(|ctx| handle_input_event(ctx, window_id, root_view_id, char_key('x')));
+        assert!(
+            app.read(|ctx| ctx.has_window_invalidations(window_id)),
+            "a handled input event should invalidate the window so the driver repaints"
+        );
+
+        // An unhandled key does not force a needless repaint.
+        app.update(|ctx| {
+            let _ = ctx.take_all_invalidations_for_window(window_id);
+        });
+        app.update(|ctx| handle_input_event(ctx, window_id, root_view_id, char_key('z')));
+        assert!(
+            !app.read(|ctx| ctx.has_window_invalidations(window_id)),
+            "an unhandled input event should not invalidate the window"
+        );
+    });
+}
+
 /// Records the mode-control enter/leave calls so the guard's lifecycle can be
 /// asserted without touching a real terminal.
 struct RecordingControl {

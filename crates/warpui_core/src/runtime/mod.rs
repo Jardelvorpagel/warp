@@ -449,8 +449,10 @@ pub fn spawn_tui_driver<T: TuiView>(
 }
 
 /// Routes one raw terminal event into the shared core. A resize invalidates the
-/// window so the next flush repaints at the new size; other events dispatch
-/// (which may invalidate the window via a handler's `notify`).
+/// window so the next flush repaints at the new size; other events dispatch and,
+/// if handled, invalidate the window so a state change made during dispatch
+/// (e.g. a scroll offset) repaints — matching `run_until`'s "handled => redraw".
+/// A handler that calls `notify` itself also repaints through that path.
 fn handle_input_event(
     ctx: &mut AppContext,
     window_id: WindowId,
@@ -461,13 +463,16 @@ fn handle_input_event(
         CrosstermEvent::Resize(_, _) => ctx.invalidate_all_views(),
         event => {
             if let Some(warp_event) = crossterm_event_to_warp_event(event) {
-                dispatch_event(
+                let handled = dispatch_event(
                     ctx,
                     window_id,
                     root_view_id,
                     current_terminal_size(),
                     &warp_event,
                 );
+                if handled {
+                    ctx.invalidate_all_views();
+                }
             }
         }
     }

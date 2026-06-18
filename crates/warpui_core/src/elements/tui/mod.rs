@@ -14,7 +14,8 @@
 //!   [`TuiElement::dispatch_event`]. (The crossterm → warp event *conversion*
 //!   lives with the runtime, in `crate::runtime`.)
 //! - The concrete elements: [`TuiText`], [`TuiColumn`], [`TuiContainer`],
-//!   [`TuiCenter`], [`TuiChildView`], and [`TuiEventHandler`].
+//!   [`TuiCenter`], [`TuiScrollable`], [`TuiChildView`], and
+//!   [`TuiEventHandler`].
 
 use std::collections::HashMap;
 
@@ -28,6 +29,7 @@ mod container;
 mod event;
 mod event_handler;
 mod geometry;
+mod scrollable;
 mod text;
 
 pub use buffer::{Cell, Color, Modifier, TuiBuffer, TuiBufferExt, TuiStyle};
@@ -38,6 +40,7 @@ pub use container::TuiContainer;
 pub use event::{TuiDispatchEventResult, TuiEventContext, TuiEventDispatchResult};
 pub use event_handler::TuiEventHandler;
 pub use geometry::{TuiConstraint, TuiRect, TuiRectExt, TuiSize};
+pub use scrollable::{TuiScrollHandle, TuiScrollable};
 pub use text::TuiText;
 
 /// A node in the renderable tree: it measures itself against a constraint,
