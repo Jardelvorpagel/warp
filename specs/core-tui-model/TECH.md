@@ -76,12 +76,46 @@ A behavior-preserving rename from terminal-view ownership to agent-session owner
 GUI terminal call sites keep working by passing an `AgentSessionOwnerId::new(terminal_view_id)`. This is a sizable but mechanical change; it should land as its own PR ahead of the TUI model.
 
 ### 3. Split app initialization into phases
-Factor `initialize_app` (`app/src/lib.rs:1142`) into shared and surface-specific phases so the TUI gets a **real app singleton graph**, not a minimal custom bootstrap.
-- Shared phase: settings/auth/server/persistence and the AI singletons (`BlocklistAIHistoryModel`, `BlocklistAIPermissions`, `LLMPreferences`, `AIExecutionProfilesModel`, `AISettings`, `NetworkStatus`, MCP/API-key managers, `AIDocumentModel`, `AIRequestUsageModel`, etc.).
-- GUI phase: workspace/pane/terminal/window models + GUI launch.
-- TUI phase: `CoreTuiModel`, the root TUI window/view, and the TUI session/driver.
+Today `initialize_app` (`app/src/lib.rs:1142-2175`) is a ~1000-line monolith run for every non-TUI mode; afterwards `launch` (`app/src/lib.rs:2627`) builds the GUI workspace. `LaunchMode::Tui` bypasses **both** via an early short-circuit (`app/src/lib.rs:1079-1084`) that just calls `tui::init`. To give the TUI a real singleton graph, we decompose `initialize_app` into ordered phases, share the backend-neutral + agent phases, and give GUI and TUI their own final phase.
 
-`LaunchMode::Tui` runs shared + TUI phases. The early `LaunchMode::Tui` short-circuit (`app/src/lib.rs:1078`) moves **after** shared initialization.
+#### 3a. Keep the pre-context bootstrap as-is
+The `run_internal` early setup (profiling, feature flags, crash-reporting hub, tracing, logging, resource limits, `AppBuilder` construction) is already surface-neutral. The only change here is **deleting** the `LaunchMode::Tui` short-circuit at `app/src/lib.rs:1079-1084` so TUI flows through the shared `app_builder.run(...)` closure like every other mode.
+
+#### 3b. Extract shared phases from `initialize_app`
+A **behavior-preserving** extraction: same registration order, just grouped into functions both surfaces call. Each phase is a fn over `&mut AppContext` returning the handles/restored data later phases consume. Proposed contiguous phases (line ranges are current, approximate):
+1. **Platform + settings** (`~1157-1191`) — secure storage, managed-paths watcher, `WarpConfig`, `SettingsManager`, `settings::init`, zoom.
+2. **Auth + server** (`~1193-1262`) — API key extraction, `AuthState`, `NetworkLogModel`, IAP state, `ServerApiProvider`, `AuthStateProvider`, telemetry context, `AuthManager`, `GPUState`, `PrivacySettings`.
+3. **Persistence + restore** (`~1264-1399`) — `persistence::initialize`, `PersistenceWriter`, and unpacking restored sqlite bundles (notably `ai_queries` and `multi_agent_conversations`, which `BlocklistAIHistoryModel::new` consumes).
+4. **Workspaces + API managers** (`~1404-1500`) — `ServerExperiments`, `AIRequestUsageModel`, `UserWorkspaces`, `ApiKeyManager`, `crash_reporting::init`, `experiments::init`, `ManagedSecretManager`. Required by `RequestParams::new`.
+5. **Cloud + sync infra** (`~1821-1969`) — `CloudModel`, `SyncQueue`, `TeamUpdateManager`, `UpdateManager`, cloud-preferences syncer, `LogManager`, MCP managers (`FileMCPWatcher`, `FileBasedMCPManager`, `TemplatableMCPServerManager`). The agent models below subscribe to `UpdateManager` and read the MCP managers, so this must precede them.
+6. **Agent models** (interleaved `~1774-2133`) — `NetworkStatus`, `BlocklistAIHistoryModel`, `BlocklistAIPermissions`, orchestration models, `RestoredAgentConversations`, `ActiveAgentViewsModel`, `AIDocumentModel`, `AgentConversationsModel`, `RepoOutlines`, `ProjectContextModel`, `SkillManager`, `CodebaseIndexManager`, `LLMPreferences`, `AIExecutionProfilesModel`, `HarnessAvailabilityModel`. This is the set `CoreTuiModel`'s send path transitively needs.
+
+All six are the **shared core**; both surfaces run them in this order.
+
+#### 3c. GUI-only final phase (`initialize_gui_app`)
+The remainder of today's `initialize_app` is GUI surface wiring: the `::init(ctx)` action/handler registrations (`~1754-1766`), `ActiveSession`, `DefaultTerminal`, terminal/notebook/workspace managers, keybindings (`TerminalKeybindings`/`NotebookKeybindings`), shared-session managers, `OpenedFilesModel`, `Listener`, etc. — followed by the existing `launch(...)`.
+
+#### 3d. TUI-only final phase (`initialize_tui_app`)
+Register `CoreTuiModel`; create the root TUI window/view (whose `EntityId` seeds the root `AgentSessionOwnerId`); start the TUI session/driver (today's `tui::init`). It does **not** register `ActiveSession`, terminal managers, GUI keybindings, or GUI action handlers.
+
+#### 3e. Dispatch
+The `app_builder.run(...)` closure (`app/src/lib.rs:1086`) keeps its shared prefix (`AppExecutionMode`, prefs, plugin host), runs the 3b phases, then branches:
+```rust
+let shared = initialize_shared_app(&launch_mode, …, ctx); // phases 3b
+match launch_mode {
+    LaunchMode::Tui => initialize_tui_app(shared, ctx),
+    _ => {
+        let app_state = initialize_gui_app(shared, &launch_mode, ctx);
+        launch(ctx, app_state, launch_mode);
+    }
+}
+```
+The `LaunchMode::Tui => unreachable!()` arm in `launch` (`app/src/lib.rs:2645`) is removed.
+
+#### Risks / constraints
+- **Implicit ordering.** `initialize_app` has load-bearing ordering (AI models subscribe to `UpdateManager`; `BlocklistAIHistoryModel::new` consumes restored sqlite bundles; `RequestParams::new` reads `UserWorkspaces`/`ApiKeyManager`/MCP). The extraction must preserve current order — it is a grouping refactor, not a reordering. Note phases 5 and 6 are **interleaved today** (e.g. `BlocklistAIHistoryModel` at `~1870` precedes `UpdateManager` at `~1927`, while `AIDocumentModel`/`AgentConversationsModel` at `~1981-1984` follow it; `LLMPreferences`/`AIExecutionProfilesModel` are registered late near `DefaultTerminal`). Draw phase boundaries at safe contiguous cut points; only move a registration earlier if a dependency check proves it safe.
+- **Shared/GUI boundary is partly TBD.** A few "middle" singletons (`CloudViewModel`, `NotebookManager`, `Prompt`, `Listener`) may be GUI-only. Settle the exact line by compiling the TUI path and pulling in only what `ResponseStream` + `RequestParams::new` + `BlocklistAIHistoryModel` transitively require; leave the rest in `initialize_gui_app`.
+- **Preserve cfg gates.** Several registrations are `#[cfg(feature = "local_tty"/"local_fs")]` or platform-gated; keep those gates inside the phase fns.
 
 ### 4. Add the `CoreTuiModel` singleton
 The TUI app's stateful agent-session owner — the closest analog to the Agent Mode state `TerminalView` holds today, but as one app-level singleton keyed per session rather than per pane. Conversation/transcript content stays in the shared `BlocklistAIHistoryModel`; `CoreTuiModel` owns only the send pipeline and per-session pointers into history.
