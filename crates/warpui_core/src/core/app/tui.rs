@@ -1,5 +1,5 @@
 //! The TUI-backend half of the `AppContext` API: TUI view/window creation and
-//! TUI view rendering, mirroring the GUI half in [`super::gui`].
+//! TUI view rendering, available when compiled with `tui` feature.
 
 use anyhow::{anyhow, Result};
 
@@ -10,10 +10,7 @@ use super::{
 use crate::{EntityId, WindowId};
 
 impl AppContext {
-    /// Adds a TUI view to the given window. The TUI counterpart of
-    /// [`Self::add_view`]: the view is stored in the same per-window registry
-    /// and shares all of the neutral machinery (handles + ref counts, focus,
-    /// subscriptions/observations, drop/transfer).
+    /// Adds a TUI view to the given window.
     pub fn add_tui_view<T, F>(&mut self, window_id: WindowId, build_view: F) -> ViewHandle<T>
     where
         T: crate::TuiView,
@@ -41,10 +38,7 @@ impl AppContext {
         handle
     }
 
-    /// Adds a TUI view that handles typed actions. The TUI counterpart of
-    /// [`Self::add_typed_action_view`]: the handler is registered in the same
-    /// `typed_actions` registry, so dispatch through the shared responder
-    /// chain reaches TUI views exactly like GUI views.
+    /// Adds a TUI view that handles typed actions.
     pub fn add_typed_action_tui_view<V, F>(
         &mut self,
         window_id: WindowId,
