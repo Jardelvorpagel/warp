@@ -14,11 +14,10 @@ This is a minimal working slice, but it is built to extend. We prefer good seams
 A **view-tree-free** test drives the TUI agent core. It:
 - Initializes the TUI singleton graph in a test app context.
 - Constructs a synthetic `AgentSessionOwnerId` from a fresh `EntityId` — no `TerminalView`, no `RootTuiView`, no runtime/driver. This proves conversation ownership is fully decoupled from views.
-- Submits prompt `"first"` to the real agent backend and receives the streamed response.
-- Submits follow-up prompt `"second"` in the same conversation and receives another streamed response.
+- Submits prompt `"first"`, folds a streamed response into history, then submits follow-up prompt `"second"` and folds another response.
 - Asserts **one conversation with two ordered exchanges**, and that the second request carries the first request's conversation/task context.
 
-The prototype builds no auth flow: the test authenticates with the existing warp-dev credential and hits the real server, so it is network-dependent (not a hermetic unit test). That is acceptable for proving the end-to-end send/follow-up slice.
+The named test is deterministic and hermetic: it drives `CoreTuiModel` through the shared engine using a no-network fake `ResponseStream` and synthetic server events, so it runs in CI without hitting the backend. Real-backend verification (an actual send → streamed response) is done separately via the manual `warp-tui --prompt` binary (see Testing strategy).
 
 **Target command (name may change):**
 ```sh
@@ -79,12 +78,15 @@ Extract this into a backend-neutral `AgentConversationEngine` (new module under 
 - appending the user exchange and marking the conversation `InProgress` via `BlocklistAIHistoryModel::update_conversation_for_new_request_input`;
 - subscribing and folding `ResponseStreamEvent`s into history.
 
-Terminal-only behavior is injected, not baked in:
-- a `SkillPathOrigin` (controller: from its session; TUI: `Local`);
-- an optional shared-session forwarder (controller: its terminal model; TUI: none);
-- a `ClientActions` action sink (controller: `BlocklistAIActionModel`; TUI: none in phase one — §6).
+Surface-specific behavior is supplied through an `AgentConversationEngineDelegate` trait that the owning surface implements; `AgentConversationEngine` itself is a stateless helper (a unit struct with associated functions generic over the delegate), so it holds no terminal/GUI state. The delegate's hooks cover the surface-specific side effects of the fold path, e.g.:
+- `skill_path_origin` (controller: from its session; TUI: `Local`);
+- `forward_response_event_to_shared_session` — shared-session forwarding (controller: its terminal model; TUI: no-op);
+- `queue_client_actions` — the `ClientActions` action sink (controller: `BlocklistAIActionModel`; TUI: no-op in phase one — §6);
+- lifecycle/cleanup hooks (`response_stream_cancelled`, `response_stream_completed`, `schedule_auto_resume_after_error`, `finished_receiving_output`, `free_tier_limit_check_triggered`, `maybe_refresh_ai_overages`, `take_should_refresh_available_llms_on_stream_finish`).
 
-**`BlocklistAIController` is refactored to call `AgentConversationEngine`**, so there is a *single* send/stream code path used by both surfaces — not a parallel copy. That is the point of the seam: the TUI gets the controller's canonical streaming/dispatch logic without inheriting the terminal model, the action/input/context models, or the agent-view controller. `CoreTuiModel` calls the same `AgentConversationEngine` with local hooks.
+Every hook has a default no-op impl, so a surface overrides only what it needs (the TUI implements just `skill_path_origin` and `finished_receiving_output`).
+
+**`BlocklistAIController` is refactored to implement `AgentConversationEngineDelegate` and call `AgentConversationEngine`**, so there is a *single* send/stream code path used by both surfaces — not a parallel copy. That is the point of the seam: the TUI gets the controller's canonical streaming/dispatch logic without inheriting the terminal model, the action/input/context models, or the agent-view controller. `CoreTuiModel` implements the same delegate (mostly defaults) and drives the same engine.
 
 `AgentConversationEngine` keys history by the owner id (`AgentSessionOwnerId::entity_id()`), passing through to the existing `BlocklistAIHistoryModel` APIs — **no wholesale rename of the history model is required** for the prototype.
 
@@ -94,11 +96,13 @@ Terminal-only behavior is injected, not baked in:
 For the prototype we do **not** carve `initialize_app` into shared/GUI/TUI phases. The singleton models the main app registers are cheap, so `LaunchMode::Tui` runs the same `initialize_app` (`app/src/lib.rs:1142`) bootstrap and simply skips the few heavyweight, terminal-specific pieces. This is much smaller and lower-risk than a phase split, and it still leaves the agent singleton graph fully populated.
 
 Concretely:
-- **Delete** the `LaunchMode::Tui` short-circuit at `app/src/lib.rs:1079-1084` so TUI flows through `initialize_app` like every other mode.
-- Inside `initialize_app`, gate the heavyweight, terminal-specific work behind a non-TUI check — anything that spawns a process or PTY or builds the GUI workspace: the terminal-server process, the default terminal / `ActiveSession` (the PTY-backed session), and the GUI `launch(...)` workspace build. Everything else (settings, auth/server, persistence, workspaces/API managers, cloud/sync, MCP, and the agent models the send path needs) runs unchanged.
-- For TUI, run `tui::init` in place of the GUI `launch(...)`, registering `CoreTuiModel` (§4) and creating the root TUI window/view (whose `EntityId` seeds the root `AgentSessionOwnerId`). Remove the `LaunchMode::Tui => unreachable!()` arm in `launch` (`app/src/lib.rs:2645`).
+- `LaunchMode::Tui` carries `{ prompt: Option<String> }`. The old short-circuit before `initialize_app` is removed, so TUI flows through `initialize_app` like every other mode.
+- Inside `initialize_app`, the heavyweight terminal-specific work is gated to non-TUI modes: the terminal-server `pty_spawner` singleton is registered only when present (it is `None` for TUI) and `ActiveSession::default()` is skipped for TUI. `CoreTuiModel` is registered here too (under `#[cfg(feature = "tui")]`, alongside the other agent singletons). Everything else (settings, auth/server, persistence, workspaces/API managers, cloud/sync, MCP, and the agent models the send path needs) runs unchanged.
+- After `initialize_app`, the TUI branch runs `crate::tui::run_prompt(prompt, ctx)` when a prompt was passed, and `crate::tui::init(ctx)` otherwise, then returns before the GUI `launch(...)`. `init` creates the root TUI window/view (whose `EntityId` seeds the root `AgentSessionOwnerId`) and starts the draw/input driver; `run_prompt` is the manual verification path (see Testing strategy).
 
 The send path needs the singleton graph, not a live terminal session: the TUI supplies its own local `SessionContext` (§7) instead of an `ActiveSession`.
+
+**Channel + auth (`warp-tui` binary).** The bin builds a `Channel::Dev` config (dev backend endpoints via `channel_config::load_config!("dev")`) with DEBUG + DOGFOOD + PREVIEW feature flags, a distinct `WarpTui` app id, and its own logfile/telemetry names. Because the prototype has no auth UI, it **temporarily reuses WarpDev's keychain**: for `LaunchMode::Tui`, secure storage is registered against the `dev.warp.Warp-Dev` domain so the existing WarpDev login is picked up, while the TUI keeps its own app/data identity. A real TUI auth flow is follow-up work.
 
 #### Risks / constraints
 - **Preserve ordering.** `initialize_app`'s registration order is load-bearing (AI models subscribe to `UpdateManager`; `BlocklistAIHistoryModel::new` consumes restored sqlite bundles; `RequestParams::new` reads `UserWorkspaces`/`ApiKeyManager`/MCP). Gating the heavyweight pieces must not reorder the rest.
@@ -179,7 +183,7 @@ Shared singletons it reads (all registered by `initialize_app` per §3): `Blockl
 1. Resolve `active_conversation_id`, or start a new conversation via `BlocklistAIHistoryModel::start_new_conversation(owner.entity_id(), …)`.
 2. Build context via the TUI context builder (§7) and an `AIAgentInput::UserQuery`.
 3. Build `RequestInput`, then `api::RequestParams::new(...)` with `supported_tools_override: Some(vec![])` (§6).
-4. Hand the request to `AgentConversationEngine` with local hooks (`SkillPathOrigin::Local`, no shared-session forwarder, no action sink). `AgentConversationEngine` creates the `ResponseStream`, appends the user exchange, marks the conversation `InProgress`, subscribes, and folds events into history — including streamed agent text via `ClientActions` (`AddMessagesToTask` / `AppendToMessageContent` carrying `AgentOutput`), which arrives even with tools disabled.
+4. Hand the request to `AgentConversationEngine` as the engine delegate (`SkillPathOrigin::Local`; shared-session and action hooks default to no-ops). `AgentConversationEngine` creates the `ResponseStream`, appends the user exchange, marks the conversation `InProgress`, subscribes, and folds events into history — including streamed agent text via `ClientActions` (`AddMessagesToTask` / `AppendToMessageContent` carrying `AgentOutput`), which arrives even with tools disabled.
 5. Record the returned `ResponseStream` as `in_flight`; clear it and emit `RequestFinished` when the engine reports the stream finished.
 
 The follow-up reuses `active_conversation_id`, so step 3 sends the prior `ConversationData` (tasks + server token), giving the second request the first request's context. Because the fold is `AgentConversationEngine`'s — identical to the GUI controller's — the TUI and GUI cannot drift.
@@ -191,7 +195,7 @@ The review asked whether `CoreTuiModel` should hold a `BlocklistAIActionModel` a
 - With no tools advertised, no executable client actions arrive, so an action model would have nothing to do.
 - `BlocklistAIActionModel` is itself terminal-coupled: its `new()` (`action_model.rs:247`) takes a `TerminalModel` + `ActiveSession` purely to eagerly build the full executor cluster, including the `ShellCommandExecutor` (`shell_command.rs:38`) that runs commands as blocks in the terminal grid. Holding it would re-introduce exactly the coupling §2 removes.
 
-Instead, `AgentConversationEngine` exposes a `ClientActions` **action sink** (§2): today the GUI controller plugs in its `BlocklistAIActionModel`; the TUI plugs in nothing. Nothing in the shared send/stream path hard-codes "no actions" assumptions.
+Instead, the engine's `queue_client_actions` delegate hook is the **action sink** (§2): the GUI controller overrides it to queue into its `BlocklistAIActionModel`; the TUI leaves the default no-op. Nothing in the shared send/stream path hard-codes "no actions" assumptions.
 
 **When we add tools.** This is a proof of concept, so we are **not** building the full action layer. The milestone ships zero tools; the first increment, if any, is a single neutral tool (e.g. `read_files`) — not the full set. The agreed seam, for when tools land:
 - **Inject the executor set** into `BlocklistAIActionModel` (drop its `terminal_model`/`active_session` params) via `BlocklistAIActionExecutor::for_gui(...)` / `::for_tui(...)` builders, so the action model's queue/phase/permission logic stays shared and surface-agnostic.
@@ -226,19 +230,22 @@ Explicitly excluded for now: terminal block selection, selected terminal text, p
 ## Testing strategy
 
 ### Primary end-to-end model test (no view tree)
-Drives `CoreTuiModel` directly using a synthetic `AgentSessionOwnerId` from a fresh `EntityId` (no `TerminalView`, no `RootTuiView`, no runtime/driver), proving conversation ownership is fully decoupled from views.
-- Hits the **real** agent backend, authenticated with the warp-dev credential (no auth flow is built in the prototype). The shared `AgentConversationEngine` (§2) drives the live `ResponseStream`; no fake stream is emitted.
+`core_tui_model_sends_initial_prompt_and_follow_up` (in `app/src/tui_tests.rs`) drives `CoreTuiModel` directly using a synthetic `AgentSessionOwnerId` from a fresh `EntityId` (no `TerminalView`, no `RootTuiView`, no runtime/driver), proving conversation ownership is fully decoupled from views.
+- **Deterministic, no network.** It sends through the shared engine via `CoreTuiModel::send_prompt_for_test` (a no-network `ResponseStream::new_for_test`) and folds synthetic `Init` / `ClientActions` / `Finished` events through the engine's `fold_*_for_test` hooks, so it runs hermetically in CI.
 - Asserts that `CoreTuiModel`:
-    - Registers as a singleton and tracks state under the `AgentSessionOwnerId`.
-    - Starts a new conversation on the first prompt and appends the user query + the real streamed agent text to `BlocklistAIHistoryModel`.
-    - Marks the conversation successful after the stream finishes.
-    - Sends the second prompt as a **follow-up in the same conversation**, with the second `RequestParams` carrying the first request's task/server context.
+    - Tracks state under the `AgentSessionOwnerId` after `register_session`.
+    - Sends the first prompt with `supported_tools_override: Some(vec![])`, no prior server token, and no prior tasks; folds the streamed agent text into a new conversation whose exchange finishes successfully and whose server conversation token is captured.
+    - Sends the second prompt as a **follow-up in the same conversation**, with the second `RequestParams` carrying the first request's server token and task context.
+    - Ends with one conversation holding two ordered, successful exchanges.
 
-### Engine-parity regression test
-After `BlocklistAIController` is refactored onto the shared `AgentConversationEngine`, the existing controller / Agent Mode tests must still pass unchanged — proving the GUI send/stream path is behavior-preserving. Add direct coverage that `AgentConversationEngine` folds `Init` / `ClientActions` / `Finished` / error events into `BlocklistAIHistoryModel` correctly given an owner id + conversation id.
+### Real-backend verification (manual)
+`cargo run -p warp --features tui --bin warp-tui -- --prompt "<text>"` exercises the live path end to end: it builds the request through `CoreTuiModel` / `AgentConversationEngine`, streams the real agent response to stdout, and exits. This is the manual counterpart to the deterministic test — the codebase has no prior art for driving the live agent backend through `cargo test`.
+
+### Engine fold tests
+`agent_conversation_engine_tests.rs` covers the engine directly given an owner id + conversation id: `folds_init_client_actions_and_finished_into_history` (Init → ClientActions → Finished yields a successful conversation with the captured server token and agent message) and `folds_stream_error_into_history` (an API error marks the conversation `Error`). Because `BlocklistAIController` is refactored onto the same engine, the existing controller / Agent Mode tests must still pass unchanged, proving the GUI send/stream path is behavior-preserving.
 
 ### Initializer coverage
-Verify that `LaunchMode::Tui` runs the full `initialize_app` singleton bootstrap (minus the heavyweight terminal pieces) **before** registering `CoreTuiModel`. No need to launch the terminal UI — just prove the models required by request construction exist in a test app context.
+`tui_initialize_app_registers_agent_singletons_without_terminal_session` runs `initialize_app` for `LaunchMode::Tui { prompt: None }` and asserts the agent singletons exist (`CoreTuiModel`, `BlocklistAIHistoryModel`, `LLMPreferences`, `AIExecutionProfilesModel`, `BlocklistAIPermissions`, `ServerApiProvider`, `NetworkStatus`, `TemplatableMCPServerManager`) while `ActiveSession` and `DefaultTerminal` are absent.
 
 ## Non-goals
 - **No final UI yet:** no transcript rendering, scrollable transcript, text input editor, shell-command interleaving, or model selector. This plan prepares the state/request pipeline those PRs read and write.
@@ -247,7 +254,7 @@ Verify that `LaunchMode::Tui` runs the full `initialize_app` singleton bootstrap
 
 ## Sequencing
 1. **Shared agent engine** — introduce `AgentSessionOwnerId` and extract `AgentConversationEngine` (§2) from `BlocklistAIController`, refactoring the controller onto it (with its terminal hooks). Behavior-preserving for the GUI. (Engine-parity regression test.)
-2. **Initializer** — route `LaunchMode::Tui` through `initialize_app`, gating the heavyweight terminal pieces; run `tui::init` in place of the GUI `launch(...)`. (Initializer coverage.)
+2. **Initializer** — route `LaunchMode::Tui { prompt }` through `initialize_app`, gating the heavyweight terminal pieces; run `tui::run_prompt`/`tui::init` in place of the GUI `launch(...)`. (Initializer coverage.)
 3. **`CoreTuiModel` + context builder + request path** — text-only, no tools. (Primary end-to-end model test.)
 
 Later PRs (out of scope): transcript view, input view, action/shell execution.
@@ -259,4 +266,4 @@ Later PRs (out of scope): transcript view, input view, action/shell execution.
 - **How far sharing goes (controller vs. engine):** open — both end states give the TUI full parity: **E1** one shared `BlocklistAIController` with every collaborator abstracted (per-surface impls; the TUI holds a controller, no separate `CoreTuiModel`), or **E2** a shared `AgentConversationEngine` with thin per-surface adapters (GUI controller + `CoreTuiModel`). Step one is identical for both (extract `AgentConversationEngine`, abstract collaborators incrementally), so this is deferred. Principle: carve **bottom-up** (grow `AgentConversationEngine`, shrink the controller toward a GUI adapter), never a `mode` flag branched through the controller.
 - **Initialization factoring boundary:** resolved — run the full `initialize_app` for `LaunchMode::Tui`, gating only the heavyweight terminal pieces (terminal-server process, default terminal/`ActiveSession`, GUI workspace `launch(...)`). Settle the exact skip list when compiling the TUI path.
 - **`SessionContext` constructor:** needs a small additive local (non-terminal) constructor; confirm shape during implementation.
-- **Auth + server for the test:** resolved — the prototype builds no auth flow; the end-to-end test reuses the warp-dev credential and exercises the real server through the shared `AgentConversationEngine` (§2). The test is network-dependent by design.
+- **Auth + verification:** resolved — the prototype builds no TUI auth UI; the `warp-tui` binary temporarily reuses WarpDev's keychain (secure storage registered against `dev.warp.Warp-Dev`) so an existing dev login is picked up while the TUI keeps its own app/data identity. The CI test is deterministic (no network); real-backend send/follow-up is verified manually via `warp-tui --prompt`. A dedicated TUI auth flow is follow-up work.

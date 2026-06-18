@@ -36,8 +36,8 @@ use crate::ai::agent::api::{self, RequestParams};
 use crate::ai::agent::conversation::{AIConversation, AIConversationId};
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::{
-    AIAgentAttachment, AIAgentContext, AIAgentInput, AIAgentOutputStatus, FinishedAIAgentOutput,
-    CancellationReason, UserQueryMode,
+    AIAgentAttachment, AIAgentContext, AIAgentInput, AIAgentOutputStatus, CancellationReason,
+    FinishedAIAgentOutput, UserQueryMode,
 };
 use crate::ai::blocklist::{
     AgentConversationEngine, AgentConversationEngineDelegate, AgentSessionOwnerId,
@@ -182,11 +182,7 @@ impl CoreTuiModel {
             return;
         };
         response_stream.update(ctx, |stream, ctx| {
-            stream.cancel(
-                CancellationReason::ManuallyCancelled,
-                conversation_id,
-                ctx,
-            );
+            stream.cancel(CancellationReason::ManuallyCancelled, conversation_id, ctx);
         });
     }
 
