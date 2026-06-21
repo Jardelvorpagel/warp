@@ -20259,8 +20259,9 @@ impl Workspace {
         } else {
             0.0
         };
-        tab_bar
-            .add_child(Shrinkable::new(0.5 + collapsed_member_flex, Empty::new().finish()).finish());
+        tab_bar.add_child(
+            Shrinkable::new(0.5 + collapsed_member_flex, Empty::new().finish()).finish(),
+        );
 
         self.add_configurable_right_side_tab_bar_controls(
             &mut tab_bar,
