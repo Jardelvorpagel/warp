@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ai::document::{AIDocumentId, AIDocumentVersion};
+use chrono::{DateTime, Local};
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::{vec2f, Vector2F};
@@ -36,10 +37,7 @@ use warpui::elements::{
     PositionedElementOffsetBounds, Radius, Shrinkable, Stack, Text, Wrap, WrapFill,
     WrapFillEntireRun, DEFAULT_UI_LINE_HEIGHT_RATIO,
 };
-#[cfg(feature = "voice_input")]
-use warpui::r#async::SpawnedFutureHandle;
-#[cfg(not(target_family = "wasm"))]
-use warpui::r#async::Timer;
+use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::{
     AppContext, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
@@ -279,6 +277,10 @@ pub struct AgentInputFooter {
     #[cfg(feature = "voice_input")]
     cli_transcription_handle: Option<SpawnedFutureHandle>,
     v2_model_selector: Option<ViewHandle<ModelSelector>>,
+
+    /// Pending one-shot timer that refreshes the context-window button at the
+    /// prompt-cache expiry instant so the yellow tint appears while idle.
+    prompt_cache_expiry_timer_handle: Option<SpawnedFutureHandle>,
 }
 
 impl AgentInputFooter {
@@ -974,6 +976,7 @@ impl AgentInputFooter {
                     })
             }),
             v2_model_selector,
+            prompt_cache_expiry_timer_handle: None,
         };
         me.sync_fast_forward_button(ctx);
         me.sync_remote_control_button(ctx);
@@ -2140,26 +2143,62 @@ impl AgentInputFooter {
             let show_long_context_warning = self.long_context_warning_state.is_visible();
             let icon = icon_for_context_window_usage(usage, show_long_context_warning);
             let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
-            let tooltip = if show_long_context_warning {
-                format!(
-                    "{remaining_pct}% context remaining\n{OPENAI_LONG_CONTEXT_PRICING_WARNING_TOOLTIP}"
-                )
+
+            let expiry = conversation.latest_exchange().and_then(|exchange| {
+                let output = exchange.output_status.output()?;
+                output.get().model_info.as_ref()?.prompt_cache_expires_at
+            });
+            let is_cache_expired = FeatureFlag::PromptCacheExpiryWarning.is_enabled()
+                && expiry.is_some_and(|expiry| expiry <= Local::now());
+            let context_remaining_tooltip = format!("{remaining_pct}% context remaining");
+            let tooltip = if is_cache_expired {
+                format!("{context_remaining_tooltip} · prompt cache expired")
             } else {
-                format!("{remaining_pct}% context remaining")
+                context_remaining_tooltip
             };
 
             self.context_window_button.update(ctx, |button, ctx| {
                 button.set_icon(Some(icon), ctx);
-                // Icon color flows from theme.text_color(); no separate ANSI override needed.
-                button.set_icon_ansi_color(None, ctx);
-                if show_long_context_warning {
-                    button.set_theme(LongContextWarningButtonTheme, ctx);
+                if is_cache_expired {
+                    button.set_theme(WarningAgentInputButtonTheme, ctx);
                 } else {
                     button.set_theme(AgentInputButtonTheme, ctx);
                 }
                 button.set_tooltip(Some(tooltip), ctx);
             });
+
+            self.reschedule_prompt_cache_expiry_timer(expiry, ctx);
         }
+    }
+
+    /// Schedules a refresh of the context-window button at the prompt-cache
+    /// expiry instant so the yellow tint appears while the conversation is idle.
+    fn reschedule_prompt_cache_expiry_timer(
+        &mut self,
+        expiry: Option<DateTime<Local>>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if let Some(handle) = self.prompt_cache_expiry_timer_handle.take() {
+            handle.abort();
+        }
+        if !FeatureFlag::PromptCacheExpiryWarning.is_enabled() {
+            return;
+        }
+        // Only future expiries need a timer; past ones already render as expired.
+        let Some(delay) = expiry.and_then(|expiry| (expiry - Local::now()).to_std().ok()) else {
+            return;
+        };
+        let handle = ctx.spawn(
+            async move {
+                Timer::after(delay).await;
+            },
+            |me, _, ctx| {
+                me.prompt_cache_expiry_timer_handle = None;
+                me.update_context_window_button(ctx);
+                ctx.notify();
+            },
+        );
+        self.prompt_cache_expiry_timer_handle = Some(handle);
     }
 
     fn render_toolbar_item(
@@ -2986,6 +3025,43 @@ impl ActionButtonTheme for InstallPluginButtonTheme {
 
     fn should_opt_out_of_contrast_adjustment(&self) -> bool {
         true
+    }
+}
+
+/// Yellow-tinted variant of [`AgentInputButtonTheme`] used to flag a warning
+/// state on an input chip (e.g. expired prompt cache); slightly darker on hover.
+struct WarningAgentInputButtonTheme;
+
+impl ActionButtonTheme for WarningAgentInputButtonTheme {
+    fn background(&self, hovered: bool, appearance: &Appearance) -> Option<Fill> {
+        let yellow = appearance.theme().ansi_fg_yellow();
+        let base = appearance.theme().surface_1();
+        Some(if hovered {
+            base.blend(&Fill::Solid(yellow).with_opacity(45))
+        } else {
+            base.blend(&Fill::Solid(yellow).with_opacity(30))
+        })
+    }
+
+    fn text_color(
+        &self,
+        hovered: bool,
+        background: Option<Fill>,
+        appearance: &Appearance,
+    ) -> ColorU {
+        AgentInputButtonTheme.text_color(hovered, background, appearance)
+    }
+
+    fn border(&self, appearance: &Appearance) -> Option<ColorU> {
+        AgentInputButtonTheme.border(appearance)
+    }
+
+    fn should_opt_out_of_contrast_adjustment(&self) -> bool {
+        AgentInputButtonTheme.should_opt_out_of_contrast_adjustment()
+    }
+
+    fn font_properties(&self) -> Option<warpui::fonts::Properties> {
+        AgentInputButtonTheme.font_properties()
     }
 }
 
