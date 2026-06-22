@@ -5,7 +5,7 @@ use std::sync::Arc;
 use ai::diff_validation::{AIRequestedCodeDiff, DiffType};
 use anyhow::{anyhow, Result};
 use chrono::Local;
-use futures::future::BoxFuture;
+use futures::future::{join_all, BoxFuture};
 use futures::FutureExt;
 use warp_core::command::ExitCode;
 use warp_terminal::model::BlockId;
@@ -14,15 +14,16 @@ use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{
     AIAgentAction, AIAgentActionId, AIAgentActionResult, AIAgentActionResultType,
-    AIAgentActionType, AnyFileContent, FileContext, FileGlobResult, FileGlobV2Result, GrepResult,
-    ReadFilesResult, ReadShellCommandOutputResult, RequestCommandOutputResult,
-    RequestFileEditsResult, TransferShellCommandControlToUserResult, UpdatedFileContext,
-    WriteToLongRunningShellCommandResult,
+    AIAgentActionType, AnyFileContent, CancellationReason, FileContext, FileGlobResult,
+    FileGlobV2Result, GrepResult, ReadFilesResult, ReadShellCommandOutputResult,
+    RequestCommandOutputResult, RequestFileEditsResult, TransferShellCommandControlToUserResult,
+    UpdatedFileContext, WriteToLongRunningShellCommandResult,
 };
 use crate::ai::blocklist::{
     apply_edits, ActionExecution, AgentToolActionModel, AgentToolExecutionContext,
-    AgentToolExecutor, AnyActionExecution, ExecuteActionInput, FileReadResult,
-    PreprocessActionInput, SessionContext, SurfaceSpecificToolExecutor,
+    AgentToolExecutor, AgentToolScheduleHost, AgentToolScheduler, AnyActionExecution,
+    ExecuteActionInput, FileReadResult, PreprocessActionInput, RunningActionPhase, SessionContext,
+    SurfaceSpecificToolExecutor, TryExecuteResult,
 };
 use crate::ai::paths::host_native_absolute_path;
 use crate::auth::AuthStateProvider;
@@ -45,6 +46,9 @@ pub(crate) struct TuiToolCard {
 pub(crate) struct TuiToolActionModel {
     tools: AgentToolActionModel,
     cards_by_conversation: HashMap<AIConversationId, Vec<TuiToolCard>>,
+    /// Stores the action type for each in-flight action so `on_action_finished` can build the
+    /// result card without re-fetching from pending (which has been drained by then).
+    pending_action_types: HashMap<AIAgentActionId, AIAgentActionType>,
     session: Arc<Session>,
 }
 
@@ -58,6 +62,7 @@ impl TuiToolActionModel {
         Self {
             tools: AgentToolActionModel::new(),
             cards_by_conversation: HashMap::new(),
+            pending_action_types: HashMap::new(),
             session: Arc::new(tui_local_session()),
         }
     }
@@ -88,96 +93,7 @@ impl TuiToolActionModel {
         if actions.is_empty() {
             return;
         }
-        self.tools.record_action_order(conversation_id, &actions);
-        for action in &actions {
-            self.tools
-                .record_serial_running_action(conversation_id, action.id.clone());
-        }
-
-        self.cards_by_conversation
-            .entry(conversation_id)
-            .or_default()
-            .extend(actions.iter().map(|action| TuiToolCard {
-                action_id: action.id.clone(),
-                title: action.action.user_friendly_name(),
-                lines: vec!["queued".to_string()],
-            }));
-        ctx.emit(TuiToolActionEvent::Updated { conversation_id });
-
-        for action in actions {
-            self.start_action(action, conversation_id, ctx);
-        }
-    }
-
-    /// Starts one queued TUI tool action through the shared executor.
-    fn start_action(
-        &mut self,
-        action: AIAgentAction,
-        conversation_id: AIConversationId,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        let input = ExecuteActionInput {
-            action: &action,
-            conversation_id,
-        };
-        let mut surface = TuiToolExecutor::new(self.session.clone(), ctx);
-        let execution = AgentToolExecutor::execute_action(&mut surface, input, ctx);
-        let action_id = action.id.clone();
-        let task_id = action.task_id.clone();
-        let action_type = action.action.clone();
-
-        match execution {
-            AnyActionExecution::Async {
-                execute_future,
-                on_complete,
-            } => {
-                ctx.spawn(execute_future, move |model, result, ctx| {
-                    let result = AIAgentActionResult {
-                        id: action_id,
-                        task_id,
-                        result: on_complete(result, ctx),
-                    };
-                    model.finish_action(conversation_id, action_type, result, ctx);
-                });
-            }
-            AnyActionExecution::Sync(result) => {
-                let result = AIAgentActionResult {
-                    id: action_id,
-                    task_id,
-                    result,
-                };
-                self.finish_action(conversation_id, action_type, result, ctx);
-            }
-            AnyActionExecution::NotReady | AnyActionExecution::InvalidAction => {
-                let result = AIAgentActionResult {
-                    id: action_id,
-                    task_id,
-                    result: action_type.cancelled_result(),
-                };
-                self.finish_action(conversation_id, action_type, result, ctx);
-            }
-        }
-    }
-
-    /// Records a finished action result and emits follow-up readiness when the batch is complete.
-    fn finish_action(
-        &mut self,
-        conversation_id: AIConversationId,
-        action_type: AIAgentActionType,
-        result: AIAgentActionResult,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        let card = card_for_result(result.id.clone(), &action_type, &result.result);
-        self.tools
-            .finish_running_action(conversation_id, &result.id);
-        self.tools
-            .push_finished_result(conversation_id, Arc::new(result));
-        self.update_card(conversation_id, card);
-        let is_done = !self.tools.has_running_actions(conversation_id);
-        ctx.emit(TuiToolActionEvent::Updated { conversation_id });
-        if is_done {
-            ctx.emit(TuiToolActionEvent::ActionsFinished { conversation_id });
-        }
+        AgentToolScheduler::queue_actions(self, actions, conversation_id, ctx);
     }
 
     /// Updates or inserts the rendered card for an action.
@@ -203,6 +119,162 @@ impl Entity for TuiToolActionModel {
 
 impl SingletonEntity for TuiToolActionModel {}
 
+impl AgentToolScheduleHost for TuiToolActionModel {
+    type Context<'a> = ModelContext<'a, Self>;
+
+    fn app_context<'a, 'b>(ctx: &'a Self::Context<'b>) -> &'a AppContext {
+        ctx
+    }
+
+    fn tools(&mut self) -> &mut AgentToolActionModel {
+        &mut self.tools
+    }
+
+    fn tools_ref(&self) -> &AgentToolActionModel {
+        &self.tools
+    }
+
+    fn preprocess(
+        &mut self,
+        _action: &AIAgentAction,
+        _conversation_id: AIConversationId,
+        _ctx: &mut Self::Context<'_>,
+    ) -> BoxFuture<'static, ()> {
+        futures::future::ready(()).boxed()
+    }
+
+    fn try_execute(
+        &mut self,
+        action: AIAgentAction,
+        conversation_id: AIConversationId,
+        _is_user_initiated: bool,
+        ctx: &mut Self::Context<'_>,
+    ) -> TryExecuteResult {
+        let mut surface = TuiToolExecutor::new(self.session.clone(), ctx);
+        let input = ExecuteActionInput {
+            action: &action,
+            conversation_id,
+        };
+        let execution = AgentToolExecutor::execute_action(&mut surface, input, ctx);
+        let action_id = action.id.clone();
+        let task_id = action.task_id.clone();
+        match execution {
+            AnyActionExecution::Async {
+                execute_future,
+                on_complete,
+            } => {
+                ctx.spawn(execute_future, move |model, result, ctx| {
+                    let r = Arc::new(AIAgentActionResult {
+                        id: action_id,
+                        task_id,
+                        result: on_complete(result, ctx),
+                    });
+                    AgentToolScheduler::finish_action(model, conversation_id, r, None, ctx);
+                });
+                TryExecuteResult::ExecutedAsync
+            }
+            AnyActionExecution::Sync(result) => {
+                let r = Arc::new(AIAgentActionResult {
+                    id: action_id,
+                    task_id,
+                    result,
+                });
+                // Defer via a ready future to avoid re-entrant scheduling.
+                ctx.spawn(futures::future::ready(()), move |model, _, ctx| {
+                    AgentToolScheduler::finish_action(model, conversation_id, r, None, ctx);
+                });
+                TryExecuteResult::ExecutedAsync
+            }
+            AnyActionExecution::NotReady | AnyActionExecution::InvalidAction => {
+                let r = Arc::new(AIAgentActionResult {
+                    id: action_id,
+                    task_id,
+                    result: action.action.cancelled_result(),
+                });
+                // Defer via a ready future to avoid re-entrant scheduling.
+                ctx.spawn(futures::future::ready(()), move |model, _, ctx| {
+                    AgentToolScheduler::finish_action(model, conversation_id, r, None, ctx);
+                });
+                TryExecuteResult::ExecutedAsync
+            }
+        }
+    }
+
+    fn can_autoexecute(
+        &mut self,
+        _action: &AIAgentAction,
+        _conversation_id: AIConversationId,
+        _ctx: &mut Self::Context<'_>,
+    ) -> bool {
+        true
+    }
+
+    fn action_phase(&self, action: &AIAgentAction, ctx: &AppContext) -> RunningActionPhase {
+        let surface = TuiToolExecutor::for_phase_check(self.session.clone(), ctx);
+        AgentToolExecutor::action_phase(&surface, action, ctx)
+    }
+
+    fn spawn_after_preprocess(
+        &mut self,
+        futures: Vec<BoxFuture<'static, ()>>,
+        ctx: &mut Self::Context<'_>,
+        then: impl FnOnce(&mut Self, &mut Self::Context<'_>) + 'static,
+    ) {
+        ctx.spawn(join_all(futures), move |model, _, ctx| then(model, ctx));
+    }
+
+    fn on_action_enqueued(
+        &mut self,
+        conversation_id: AIConversationId,
+        action_id: &AIAgentActionId,
+        ctx: &mut Self::Context<'_>,
+    ) {
+        // Look up the action type (it was just pushed to pending_actions by the scheduler).
+        let title = if let Some(action) = self.tools.find_pending_action(conversation_id, action_id)
+        {
+            self.pending_action_types
+                .insert(action_id.clone(), action.action.clone());
+            action.action.user_friendly_name()
+        } else {
+            String::new()
+        };
+        self.cards_by_conversation
+            .entry(conversation_id)
+            .or_default()
+            .push(TuiToolCard {
+                action_id: action_id.clone(),
+                title,
+                lines: vec!["queued".to_string()],
+            });
+        ctx.emit(TuiToolActionEvent::Updated { conversation_id });
+    }
+
+    fn on_action_finished(
+        &mut self,
+        conversation_id: AIConversationId,
+        result: &Arc<AIAgentActionResult>,
+        _cancellation_reason: Option<CancellationReason>,
+        ctx: &mut Self::Context<'_>,
+    ) {
+        let action_type = self
+            .pending_action_types
+            .remove(&result.id)
+            .unwrap_or(AIAgentActionType::InitProject);
+        let card = card_for_result(result.id.clone(), &action_type, &result.result);
+        self.update_card(conversation_id, card);
+        ctx.emit(TuiToolActionEvent::Updated { conversation_id });
+    }
+
+    fn on_phase_drained(
+        &mut self,
+        conversation_id: AIConversationId,
+        _cancellation_reason: Option<CancellationReason>,
+        ctx: &mut Self::Context<'_>,
+    ) {
+        ctx.emit(TuiToolActionEvent::ActionsFinished { conversation_id });
+    }
+}
+
 struct TuiToolExecutor {
     session: Arc<Session>,
     current_working_directory: Option<String>,
@@ -226,6 +298,22 @@ impl TuiToolExecutor {
             shell_type: shell_type_from_env(),
             shell_launch_data: None,
             background_executor: ctx.background_executor(),
+            auth_state: AuthStateProvider::as_ref(ctx).get().clone(),
+        }
+    }
+
+    /// Lightweight executor for action-phase queries that only need session info.
+    fn for_phase_check(session: Arc<Session>, ctx: &AppContext) -> Self {
+        let current_working_directory = std::env::current_dir()
+            .ok()
+            .map(|path| path.to_string_lossy().to_string());
+        Self {
+            session,
+            current_working_directory: current_working_directory.clone(),
+            session_context: SessionContext::local(current_working_directory),
+            shell_type: shell_type_from_env(),
+            shell_launch_data: None,
+            background_executor: ctx.background_executor().clone(),
             auth_state: AuthStateProvider::as_ref(ctx).get().clone(),
         }
     }

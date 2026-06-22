@@ -12,129 +12,92 @@ The main coupling to remove is not `Session`; it is the direct dependency from r
 * `ShellCommandExecutor` is terminal-block-backed: it emits terminal events and waits for `TerminalModel` block output ([`shell_command.rs:38 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/app/src/ai/blocklist/action_model/execute/shell_command.rs#L38), [`shell_command.rs:235 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/app/src/ai/blocklist/action_model/execute/shell_command.rs#L235), [`shell_command.rs:487 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/app/src/ai/blocklist/action_model/execute/shell_command.rs#L487)).
 * `RequestFileEditsExecutor` preprocesses candidate diffs but execution waits on a registered GUI `CodeDiffView` to save/reject ([`request_file_edits.rs:45 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/app/src/ai/blocklist/action_model/execute/request_file_edits.rs#L45), [`request_file_edits.rs:120 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/app/src/ai/blocklist/action_model/execute/request_file_edits.rs#L120), [`code_diff_view.rs:1022 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/app/src/ai/blocklist/inline_action/code_diff_view.rs#L1022)).
 ## Proposed changes
-### TUI active session
-Add a TUI-native active session model rather than reusing or faking the GUI `ActiveSession`.
+### TUI local session
+The TUI owns a single local `Session` built by `tui_local_session()` from the process cwd/shell environment and backed by `LocalCommandExecutor`. It is held directly on `TuiToolActionModel` as `session: Arc<Session>`; there is no separate `TuiActiveSession` model. This can later grow to multiple concurrent sessions/processes.
+### Execution context for shared tools
+Surface-neutral tools never store `ModelHandle<ActiveSession>`. Each surface instead produces an `AgentToolExecutionContext` on demand through `SurfaceSpecificToolExecutor::tool_execution_context`.
 ```rust
-pub(crate) struct TuiActiveSession {
-    active: Arc<Session>,
-    current_working_directory: Option<String>,
-}
-```
-For v0 this owns a single local `Session`, created from process cwd/shell environment and backed by the existing local command executor. This gives TUI a real session concept that can later grow to multiple concurrent sessions/processes.
-### Session snapshot for tools
-Make reusable executors independent of `ModelHandle<ActiveSession>` by passing an explicit snapshot through action preprocessing/execution.
-```rust
-pub(crate) struct AgentToolSessionSnapshot {
-    owner_id: AgentSessionOwnerId,
-    session_context: SessionContext,
+pub(crate) struct AgentToolExecutionContext {
     current_working_directory: Option<String>,
     shell_launch_data: Option<ShellLaunchData>,
-    shell_type: Option<ShellType>,
-    session: Arc<Session>,
+    session: Option<Arc<Session>>,
+    terminal_view_id: Option<EntityId>,
 }
 ```
-GUI builds this from `ActiveSession` at the action boundary. TUI builds it from `TuiActiveSession`. Sub-executors that only need session data take the snapshot and stop storing `ModelHandle<ActiveSession>`.
-### Shared action backing model
-Do not make TUI depend directly on a model named `BlocklistAIActionModel`. Extract a shared backing model for queue/result state and let GUI/TUI wrap it.
+GUI builds it from `ActiveSession`; TUI builds it from its local `Session` (with no `terminal_view_id`). Shared file-edit diff application takes a `SessionContext` derived the same way.
+### Shared action state and scheduling
+`AgentToolActionModel` is plain embedded state (not an `Entity`): preprocessing queues, pending actions, running actions, finished results, action ordering, and past results. Both surfaces hold it as a `tools` field rather than wrapping a `ModelHandle`.
 ```rust
 pub(crate) struct AgentToolActionModel {
     // shared queue/result state
 }
-
-pub(crate) struct BlocklistAIActionModel {
-    inner: ModelHandle<AgentToolActionModel>,
-    // GUI/blocklist conveniences and compatibility API
-}
-
-pub(crate) struct TuiToolActionModel {
-    inner: ModelHandle<AgentToolActionModel>,
-    // TUI-specific convenience API if needed
-}
 ```
-The shared model owns action queueing, preprocessing, running/finished state, action ordering, cancellation, and finished result draining. GUI-specific inline views, shared-session viewer UI, terminal block events, `TerminalModel`, `AIBlock`, `RequestedCommandView`, and `CodeDiffView` stay out of the shared model.
-For v0, TUI tools auto-accept. The shared model should avoid a user-confirmation blocked state for TUI and immediately execute tools when permission checks allow or when v0 auto-accept rules apply.
-### Shared-first tool executor
-Tool execution should be centralized in a shared executor used by both GUI and TUI. Shared tools are handled directly by the shared executor. Inherently surface-specific tools are delegated to a required surface executor implemented by both surfaces.
+The scheduling loop — preprocessing fan-out, the pending queue, serial/parallel phase admission, ordered result draining, and follow-up readiness — lives in a shared `AgentToolScheduler` parameterized over an `AgentToolScheduleHost` trait. The host is implemented by the model that owns the state (`BlocklistAIActionModel` for GUI, `TuiToolActionModel` for TUI), so scheduler callbacks (`ctx.spawn`, event emission, status updates) land on the owning model.
 ```rust
-pub(crate) struct AgentToolExecutor<S> {
-    surface: S,
-    shared_context: AgentToolExecutionContext,
+pub(crate) trait AgentToolScheduleHost: Sized {
+    type Context<'a>;
+    fn tools(&mut self) -> &mut AgentToolActionModel;
+    // execution: preprocess / try_execute / can_autoexecute / action_phase
+    // side effects: on_action_enqueued / on_action_started / on_action_not_executed
+    //               / on_action_finished / on_phase_drained / should_enqueue
 }
+
+pub(crate) struct AgentToolScheduler; // generic static methods over the host
+```
+`AgentToolScheduler` owns `queue_actions`, `try_to_execute_available_actions`, `start_pending_action_by_id`, and `finish_action`. Surface-specific execution (shell, file edits) and side effects (history status, event emission, TUI cards) are delegated to the host. GUI-specific inline views, shared-session viewer UI, terminal block events, `TerminalModel`, `AIBlock`, `RequestedCommandView`, and `CodeDiffView` stay in the GUI adapter.
+The two surfaces keep different async-completion mechanisms behind `try_execute`: GUI execution completes via its executor's `FinishedAction` event subscription, TUI execution via its own `ctx.spawn` callback; both call back into `AgentToolScheduler::finish_action`. For v0, TUI auto-accepts (no user-confirmation blocked state) and inherits the shared phased loop, so read-only tools fan out in one parallel phase while shell and file-edit tools run as serial barriers.
+### Shared-first tool executor
+Tool execution is centralized in a shared `AgentToolExecutor` used by both GUI and TUI. Shared tools are handled directly; inherently surface-specific tools are delegated to a required `SurfaceSpecificToolExecutor` implemented by each surface. `AgentToolExecutor` is a unit type with static methods generic over the surface — it holds no state.
+```rust
+pub(crate) struct AgentToolExecutor; // static methods generic over the surface
 
 pub(crate) trait SurfaceSpecificToolExecutor {
-    fn preprocess_shell(
-        &mut self,
-        input: PreprocessActionInput<'_>,
-        ctx: &mut AppContext,
-    ) -> BoxFuture<'static, ()>;
+    type Context<'a>;
 
-    fn execute_shell(
-        &mut self,
-        input: ExecuteActionInput<'_>,
-        ctx: &mut AppContext,
-    ) -> AnyActionExecution;
+    fn tool_execution_context(&self, ctx: &Self::Context<'_>) -> AgentToolExecutionContext;
+    fn tool_execution_context_from_app(&self, ctx: &AppContext) -> AgentToolExecutionContext;
+    fn app_context<'a, 'b>(ctx: &'a Self::Context<'b>) -> &'a AppContext;
 
-    fn should_autoexecute_shell(
-        &mut self,
-        input: ExecuteActionInput<'_>,
-        ctx: &mut AppContext,
-    ) -> bool;
+    // Required, surface-specific tool families.
+    fn preprocess_shell(&mut self, input: PreprocessActionInput<'_>, ctx: &mut Self::Context<'_>) -> BoxFuture<'static, ()>;
+    fn execute_shell(&mut self, input: ExecuteActionInput<'_>, ctx: &mut Self::Context<'_>) -> AnyActionExecution;
+    fn should_autoexecute_shell(&mut self, input: ExecuteActionInput<'_>, ctx: &mut Self::Context<'_>) -> bool;
+    fn preprocess_file_edits(&mut self, input: PreprocessActionInput<'_>, ctx: &mut Self::Context<'_>) -> BoxFuture<'static, ()>;
+    fn execute_file_edits(&mut self, input: ExecuteActionInput<'_>, ctx: &mut Self::Context<'_>) -> AnyActionExecution;
+    fn should_autoexecute_file_edits(&mut self, input: ExecuteActionInput<'_>, ctx: &mut Self::Context<'_>) -> bool;
 
-    fn preprocess_file_edits(
-        &mut self,
-        input: PreprocessActionInput<'_>,
-        ctx: &mut AppContext,
-    ) -> BoxFuture<'static, ()>;
-
-    fn execute_file_edits(
-        &mut self,
-        input: ExecuteActionInput<'_>,
-        ctx: &mut AppContext,
-    ) -> AnyActionExecution;
-
-    fn should_autoexecute_file_edits(
-        &mut self,
-        input: ExecuteActionInput<'_>,
-        ctx: &mut AppContext,
-    ) -> bool;
+    // Defaulted fallbacks for GUI-only tools (no-op / cancelled / serial).
+    fn preprocess_other(&mut self, input: PreprocessActionInput<'_>, ctx: &mut Self::Context<'_>) -> BoxFuture<'static, ()> { /* no-op */ }
+    fn execute_other(&mut self, input: ExecuteActionInput<'_>, ctx: &mut Self::Context<'_>) -> AnyActionExecution { /* cancelled */ }
+    fn should_autoexecute_other(&mut self, input: ExecuteActionInput<'_>, ctx: &mut Self::Context<'_>) -> bool { false }
+    fn action_phase_other(&self, action: &AIAgentAction, ctx: &AppContext) -> RunningActionPhase { /* Serial */ }
 }
 ```
-`AgentToolExecutor` owns the only top-level `AIAgentActionType` dispatch. For shared tools like grep, file glob, and read files, it runs shared default logic. For non-shared tools like shell commands and file edits, it delegates to `SurfaceSpecificToolExecutor`.
-This avoids optional override registries. Since GUI and TUI are the only surfaces, if a tool is inherently non-shared, both surfaces must implement the same required method and make an explicit decision.
-The GUI implementation delegates to existing GUI machinery:
+`AgentToolExecutor`'s static `preprocess_action` / `execute_action` / `should_autoexecute` / `action_phase` own the only top-level `AIAgentActionType` dispatch. Read files, grep, and file glob run shared default logic (using the surface's `AgentToolExecutionContext`); shell commands and file edits delegate to the required `SurfaceSpecificToolExecutor` methods; every remaining tool falls through to the defaulted `*_other` hooks.
+The GUI `BlocklistAIActionExecutor` implements the trait by delegating to existing GUI machinery:
 * shell commands use `ShellCommandExecutor`, `TerminalModel`, and terminal blocks;
 * file edits use `RequestFileEditsExecutor` and `CodeDiffView`;
-* GUI-only events remain in the GUI action executor unless they become true shared agent tools.
-The TUI implementation supplies only TUI-specific behavior:
-* shell commands use the TUI local `Session` and TUI-owned process state;
+* GUI-only tools (MCP, computer use, start/run agents, documents, etc.) are handled in `preprocess_other`/`execute_other`.
+The TUI `TuiToolExecutor` supplies only TUI-specific behavior:
+* shell commands run on the TUI local `Session`;
 * file edits use shared diff application plus v0 auto-save;
-* simple cards summarize surface-specific execution for the transcript.
-`app/src/ai/blocklist/action_model/basic_tool_executor.rs` must not remain as a TUI-only top-level dispatch tree. Its reusable pieces should move into shared executor helpers or TUI surface-specific methods, and both GUI and TUI must call the same `AgentToolExecutor<S>` before this PR is complete.
+* unsupported tools fall through to the cancelled `*_other` defaults.
+Both surfaces route through the same `AgentToolExecutor`; there is no separate TUI-only dispatch tree.
 ### Tool-result follow-up
-Move action-result follow-up out of `BlocklistAIController` and into shared conversation machinery. The tool-result turn is part of the shared loop:
+The tool-result turn closes the loop:
 ```text
 stream response -> execute tools -> send tool results -> continue streaming
 ```
-Preferred shape:
-```rust
-impl AgentConversationEngine {
-    pub(crate) fn connect_action_results(...);
-}
-```
-If this is large enough to deserve a separate type, use `AgentToolFollowUpCoordinator` as an implementation detail owned by `AgentConversationEngine`, not as another surface-specific controller.
-The shared follow-up logic should wait until a conversation has no unfinished actions, preserve relevant passive-diff and long-running-command completion behavior, drain finished action results in original tool-call order, build `RequestInput` for action results from the active session snapshot, and send the follow-up through `AgentConversationEngine`.
+This stayed surface-specific rather than moving into `AgentConversationEngine`. The GUI keeps `BlocklistAIController`'s follow-up path. The TUI drives it from `CoreTuiModel::send_action_results`, triggered by `TuiToolActionEvent::ActionsFinished` — which the scheduler raises from its `on_phase_drained` hook once a conversation has no pending or running actions. `send_action_results` drains finished results in original tool-call order, builds `RequestInput` from the local session, and sends the follow-up through `AgentConversationEngine`.
 ### TUI tool pipeline
-`CoreTuiModel` should own or reference:
+`CoreTuiModel` owns or references:
 * the single `AgentSessionOwnerId`;
-* `TuiActiveSession`;
-* `TuiToolActionModel` or the extracted shared action model;
-* the `AgentConversationEngine` tool-result follow-up hookup.
-After this is wired, remove `supported_tools_override: Some(vec![])` from normal TUI prompt sends.
+* `TuiToolActionModel`, which owns the local `Session` and the shared `AgentToolActionModel` state;
+* the follow-up hookup: it subscribes to `TuiToolActionModel` and calls `send_action_results` on `ActionsFinished`.
+`supported_tools_override: Some(vec![])` has been removed from normal TUI prompt sends.
 ### Command running
-Command execution is surface-specific and should be required by `SurfaceSpecificToolExecutor`.
-The GUI implementation keeps existing terminal-block behavior through `ShellCommandExecutor`.
-The TUI implementation should not pretend it has terminal blocks. It should track commands by a TUI-owned command id and convert to the legacy `BlockId` field only at the action-result/API boundary, because existing result types store command ids as `BlockId` ([`crates/ai/src/agent/action_result/mod.rs:183 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/crates/ai/src/agent/action_result/mod.rs#L183)).
-`TuiCommandModel` stores command text, start/finish timestamps, exit code, captured stdout/stderr buffer, stdin handle, and cancellation handle. `RequestCommandOutput` returns `Completed` when finished and `LongRunningCommandSnapshot` with bounded captured output when still running at the wait boundary. `ReadShellCommandOutput` and `WriteToLongRunningShellCommand` look up the TUI command mapping and return the existing result variants.
+Command execution is surface-specific, required by `SurfaceSpecificToolExecutor`. The GUI keeps terminal-block behavior through `ShellCommandExecutor`.
+For v0 the TUI runs each `RequestCommandOutput` synchronously on its local `Session`, captures combined stdout/stderr, and returns `Completed` with a freshly generated `BlockId` at the result boundary (existing result types still key commands by `BlockId` — [`crates/ai/src/agent/action_result/mod.rs:183 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/crates/ai/src/agent/action_result/mod.rs#L183)). It has no persistent command registry yet, so `ReadShellCommandOutput`, `WriteToLongRunningShellCommand`, and `TransferShellCommandControlToUser` return `BlockNotFound`. A `TuiCommandModel` with snapshots, stdin, and cancellation is a follow-up.
 ### File edits
 Keep `diff_application::apply_edits` as the shared diff parser/matcher; it already accepts `SessionContext` and a file-read closure ([`diff_application.rs:161 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/app/src/ai/blocklist/action_model/execute/request_file_edits/diff_application.rs#L161)).
 Change `ApplyDiffModel::apply_diffs` to take the session snapshot/session context as input instead of storing `ModelHandle<ActiveSession>` ([`apply_diff_model.rs:25 @ f2592f0`](https://github.com/warpdotdev/warp/blob/f2592f04a9c6544780d830058d6571a2f091df80/app/src/ai/blocklist/action_model/execute/request_file_edits/apply_diff_model.rs#L25)).
@@ -175,5 +138,5 @@ Do not use parallel implementation agents for the first pass. The core refactor 
 ## Follow-ups
 * Rich TUI approval/edit UI for commands and file edits.
 * Better TUI command interleaving for user-authored shell commands.
-* Generalize `ActiveSession` if the parallel `TuiActiveSession` and GUI `ActiveSession` converge.
+* Generalize `ActiveSession` if the GUI `ActiveSession` and the TUI local `Session` converge.
 * Remove compatibility wrappers once `BlocklistAIActionModel` is thin enough to rename or delete.

@@ -286,3 +286,52 @@ Compile-only validation still caught integration errors in the shared executor r
   Rejected for that pass because the user explicitly asked not to run code/tests.
 - **Skip validation entirely.**
   Rejected because `cargo check` is non-interactive and necessary for a refactor crossing shared GUI/TUI code.
+
+## 13. Extract the scheduling loop into a shared `AgentToolScheduler`
+
+### Decision
+
+The scheduling loop — preprocessing fan-out, the pending queue, serial/parallel phase admission, ordered result draining, and follow-up readiness — moved out of `BlocklistAIActionModel` into a shared `AgentToolScheduler` whose static methods are generic over an `AgentToolScheduleHost` trait.
+
+`AgentToolActionModel` remains pure embedded state. `BlocklistAIActionModel` (GUI) and `TuiToolActionModel` (TUI) are thin host adapters: they implement `AgentToolScheduleHost` (execution primitives plus side-effect hooks) and delegate the loop to `AgentToolScheduler`.
+
+### Why
+
+Decisions 1–3 shared execution dispatch and decision 7 shared action state, but the scheduling loop itself was still GUI-only. The TUI reimplemented a degenerate version that marked every action running and spawned them all at once, with no serial barrier. Sharing the loop removes that divergence: the TUI now inherits identical ordering and phase semantics, gaining serial barriers for mutating tools and parallel fan-out for read-only tools.
+
+### Alternatives considered
+
+- **A single model parameterized by surface (`AgentToolActionModel<S>`).**
+  Rejected because view-only/session-sharing behavior and the GUI's sub-executor accessors are GUI-only; folding them into one shared type would accrete surface flags and conditionals.
+- **Share only decision helpers and keep a per-surface drive loop.**
+  Rejected because the bug-prone drain/admission loop would be duplicated and could drift — the same class of divergence decision 8 already fixed for running-action state.
+
+## 14. Preserve each surface's async-completion mechanism behind `try_execute`
+
+### Decision
+
+`AgentToolScheduler` never spawns execution futures. Each host's `try_execute` returns a synchronous `TryExecuteResult` and guarantees that `AgentToolScheduler::finish_action` is eventually called: the GUI completes via its executor's `FinishedAction` event subscription, the TUI via its own `ctx.spawn` callback. The TUI delivers even `Sync`/`NotReady`/`InvalidAction` results through a deferred ready-future spawn to avoid re-entrant scheduling.
+
+### Why
+
+GUI completion is event-decoupled (the executor model emits, the action model subscribes); TUI completion is inline on the owning model. Forcing one mechanism would mean rewriting the GUI executor's `async_executing_actions` tracking and cancellation, which is out of scope and risky.
+
+### Alternatives considered
+
+- **Move spawning into the scheduler, generic over the host context.**
+  Rejected as more invasive and incompatible with the existing executor-owned async tracking/cancellation.
+
+## 15. Test shared scheduling deterministically with a mock host
+
+### Decision
+
+Phase-admission behavior is tested in `app/src/ai/blocklist/action_model/scheduler_tests.rs` with a mock `AgentToolScheduleHost` whose `try_execute` records actions as running but never completes them, and whose `spawn_after_preprocess` runs its callback synchronously. Tests assert post-queue running/pending counts (two reads → both running; file-edit then command → one running, one pending).
+
+### Why
+
+Observing the transient running/pending state of real async execution is racy: the test executor can drain the spawned execution futures before the assertion, so the counts are not stable. A non-completing mock host makes admission state deterministic without timing dependence.
+
+### Alternatives considered
+
+- **Drive the real TUI executor and assert counts after yields.**
+  Rejected as flaky; the first attempt at this relied on `yield` timing and could not reliably catch the transient "both running" window.

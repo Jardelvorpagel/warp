@@ -661,7 +661,7 @@ impl NotExecutedReason {
 
 /// Result type for `BlocklistAIActionExecutor::try_to_execute_action`.
 #[derive(Debug)]
-pub(super) enum TryExecuteResult {
+pub(crate) enum TryExecuteResult {
     ExecutedSync,
     ExecutedAsync,
     NotExecuted {

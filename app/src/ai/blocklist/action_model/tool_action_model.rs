@@ -62,15 +62,6 @@ impl AgentToolActionModel {
         }
     }
 
-    /// Convenience wrapper used by the TUI, which always runs actions serially.
-    pub(crate) fn record_serial_running_action(
-        &mut self,
-        conversation_id: AIConversationId,
-        action_id: AIAgentActionId,
-    ) {
-        self.record_running_action(conversation_id, action_id, RunningActionPhase::Serial);
-    }
-
     /// Removes the given action from the running set; clears the conversation entry when empty.
     pub(crate) fn finish_running_action(
         &mut self,
@@ -89,13 +80,6 @@ impl AgentToolActionModel {
         }
     }
 
-    /// Returns whether the conversation has any actions still running.
-    pub(crate) fn has_running_actions(&self, conversation_id: AIConversationId) -> bool {
-        self.running_actions
-            .get(&conversation_id)
-            .is_some_and(|running| !running.is_empty())
-    }
-
     pub(crate) fn push_finished_result(
         &mut self,
         conversation_id: AIConversationId,
@@ -105,6 +89,36 @@ impl AgentToolActionModel {
             .entry(conversation_id)
             .or_default()
             .push(result);
+    }
+
+    /// Returns the pending action with the given ID, if any.
+    #[cfg_attr(not(feature = "tui"), allow(dead_code))]
+    pub(crate) fn find_pending_action(
+        &self,
+        conversation_id: AIConversationId,
+        action_id: &AIAgentActionId,
+    ) -> Option<&AIAgentAction> {
+        self.pending_actions
+            .get(&conversation_id)
+            .and_then(|q| q.iter().find(|a| &a.id == action_id))
+    }
+
+    /// Returns the number of currently running actions (test helper).
+    #[cfg(any(test, feature = "integration_tests"))]
+    pub(crate) fn running_action_count(&self, conversation_id: AIConversationId) -> usize {
+        self.running_actions
+            .get(&conversation_id)
+            .map(|r| r.action_ids.len())
+            .unwrap_or(0)
+    }
+
+    /// Returns the number of pending (not-yet-started) actions (test helper).
+    #[cfg(any(test, feature = "integration_tests"))]
+    pub(crate) fn pending_action_count(&self, conversation_id: AIConversationId) -> usize {
+        self.pending_actions
+            .get(&conversation_id)
+            .map(|q| q.len())
+            .unwrap_or(0)
     }
 
     pub(crate) fn drain_finished_results(
