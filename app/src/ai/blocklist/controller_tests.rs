@@ -50,6 +50,23 @@ fn normal_user_query_input() -> AIAgentInput {
     }
 }
 
+fn image_attachment(file_name: &str) -> PendingAttachment {
+    PendingAttachment::Image(ImageContext {
+        data: String::new(),
+        mime_type: "image/png".to_owned(),
+        file_name: file_name.to_owned(),
+        is_figma: false,
+    })
+}
+
+fn file_attachment(file_name: &str) -> PendingAttachment {
+    PendingAttachment::File(PendingFile {
+        file_name: file_name.to_owned(),
+        file_path: file_name.into(),
+        mime_type: "text/plain".to_owned(),
+    })
+}
+
 #[test]
 fn request_params_only_snapshots_pending_handoff_for_user_inputs() {
     App::test((), |mut app| async move {
@@ -128,23 +145,6 @@ fn request_params_only_snapshots_pending_handoff_for_user_inputs() {
             assert_eq!(top_level_params.pending_conversation_handoff, None);
         });
     });
-}
-
-fn image_attachment(file_name: &str) -> PendingAttachment {
-    PendingAttachment::Image(ImageContext {
-        data: String::new(),
-        mime_type: "image/png".to_owned(),
-        file_name: file_name.to_owned(),
-        is_figma: false,
-    })
-}
-
-fn file_attachment(file_name: &str) -> PendingAttachment {
-    PendingAttachment::File(PendingFile {
-        file_name: file_name.to_owned(),
-        file_path: file_name.into(),
-        mime_type: "text/plain".to_owned(),
-    })
 }
 
 #[test]

@@ -210,7 +210,7 @@ pub struct RequestInput {
 impl RequestInput {
     pub fn can_carry_conversation_handoff_marker(&self) -> bool {
         self.all_inputs()
-            .any(|input| input.user_input_text().is_some())
+            .any(|input| input.display_query().is_some())
     }
     fn for_task(
         inputs: Vec<AIAgentInput>,
@@ -420,7 +420,7 @@ impl InputQuery {
         match &self.input_query {
             InputQueryType::UserSubmittedQueryFromInput { query, .. } => query.clone(),
             InputQueryType::AIInputType { ai_input } => {
-                ai_input.user_input_text().unwrap_or_default()
+                ai_input.display_query().unwrap_or_default()
             }
         }
     }
