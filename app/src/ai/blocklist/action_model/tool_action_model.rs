@@ -2,9 +2,12 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use super::preprocess::PendingPreprocessedActions;
-use super::{RunningActionPhase, RunningActions};
+use super::{AIActionStatus, RunningActionPhase, RunningActions};
 use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::agent::{AIAgentAction, AIAgentActionId, AIAgentActionResult};
+use crate::ai::agent::{
+    AIAgentAction, AIAgentActionId, AIAgentActionResult, AIAgentActionResultType, AIAgentExchange,
+    AIAgentInput, RequestCommandOutputResult,
+};
 
 /// Shared action queue/result state for Agent Mode tools.
 pub(crate) struct AgentToolActionModel {
@@ -46,6 +49,10 @@ impl AgentToolActionModel {
     }
 
     /// Records an action as currently running in the given conversation.
+    ///
+    /// Asserts that any existing running phase for this conversation matches the new
+    /// action's phase, since a phase must drain before actions from a different phase
+    /// are admitted.
     pub(crate) fn record_running_action(
         &mut self,
         conversation_id: AIConversationId,
@@ -54,6 +61,7 @@ impl AgentToolActionModel {
     ) {
         match self.running_actions.entry(conversation_id) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
+                debug_assert_eq!(entry.get().phase, phase);
                 entry.get_mut().add_action(action_id);
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -101,6 +109,156 @@ impl AgentToolActionModel {
         self.pending_actions
             .get(&conversation_id)
             .and_then(|q| q.iter().find(|a| &a.id == action_id))
+    }
+
+    /// Returns the next pending action for a conversation, or `None` if a phase is running
+    /// (running phases block new actions until they drain).
+    pub(crate) fn blocked_action_for_conversation(
+        &self,
+        conversation_id: &AIConversationId,
+    ) -> Option<&AIAgentAction> {
+        if self.running_actions.contains_key(conversation_id) {
+            return None;
+        }
+        self.pending_actions
+            .get(conversation_id)
+            .and_then(|queue| queue.front())
+    }
+
+    /// Returns all pending actions across all conversations.
+    pub(crate) fn get_pending_actions(&self) -> Vec<&AIAgentAction> {
+        self.pending_actions
+            .values()
+            .flat_map(|queue| queue.iter())
+            .collect()
+    }
+
+    /// Returns all pending actions for a specific conversation.
+    pub(crate) fn get_pending_actions_for_conversation(
+        &self,
+        conversation_id: &AIConversationId,
+    ) -> impl Iterator<Item = &AIAgentAction> {
+        self.pending_actions
+            .get(conversation_id)
+            .into_iter()
+            .flat_map(|queue| queue.iter())
+    }
+
+    /// Returns a pending action by its ID, searching across all conversations.
+    pub(crate) fn get_pending_action_by_id(
+        &self,
+        action_id: &AIAgentActionId,
+    ) -> Option<&AIAgentAction> {
+        self.pending_actions
+            .values()
+            .flat_map(|queue| queue.iter())
+            .find(|action| &action.id == action_id)
+    }
+
+    /// Returns whether a conversation has any pending or running actions.
+    pub(crate) fn has_unfinished_actions_for_conversation(
+        &self,
+        conversation_id: AIConversationId,
+    ) -> bool {
+        let has_pending = self
+            .pending_actions
+            .get(&conversation_id)
+            .is_some_and(|queue| !queue.is_empty());
+        let has_running = self
+            .running_actions
+            .get(&conversation_id)
+            .is_some_and(|running| !running.is_empty());
+        has_pending || has_running
+    }
+
+    /// Returns finished action results received from the most recent AI output for a conversation.
+    pub(crate) fn get_finished_action_results(
+        &self,
+        conversation_id: AIConversationId,
+    ) -> Option<&Vec<Arc<AIAgentActionResult>>> {
+        self.finished_action_results.get(&conversation_id)
+    }
+
+    /// Returns the result for a finished action, searching current finished results and past results.
+    pub(crate) fn get_action_result(
+        &self,
+        id: &AIAgentActionId,
+    ) -> Option<&Arc<AIAgentActionResult>> {
+        self.finished_action_results
+            .values()
+            .flat_map(|results| results.iter())
+            .find(|result| &result.id == id)
+            .or_else(|| self.past_action_results.get(id))
+    }
+
+    /// Returns the status of an action by ID.
+    ///
+    /// `is_view_only` controls whether a front-of-queue action is reported as `Blocked`
+    /// (interactive surfaces) or `Queued` (view-only surfaces that never block on user acceptance).
+    pub(crate) fn get_action_status(
+        &self,
+        id: &AIAgentActionId,
+        is_view_only: bool,
+    ) -> Option<AIActionStatus> {
+        for (conversation_id, pending_actions_for_conversation) in &self.pending_actions {
+            for (index, action) in pending_actions_for_conversation.iter().enumerate() {
+                if &action.id != id {
+                    continue;
+                }
+
+                if index == 0
+                    && !is_view_only
+                    && !self.running_actions.contains_key(conversation_id)
+                {
+                    return Some(AIActionStatus::Blocked);
+                }
+
+                return Some(AIActionStatus::Queued);
+            }
+        }
+
+        self.running_actions
+            .values()
+            .find(|running| running.contains(id))
+            .map(|_| AIActionStatus::RunningAsync)
+            .or_else(|| {
+                self.get_action_result(id)
+                    .map(|result| AIActionStatus::Finished(result.clone()))
+            })
+            .or_else(|| {
+                self.pending_preprocessed_actions
+                    .values()
+                    .any(|preprocessing| preprocessing.contains(id))
+                    .then_some(AIActionStatus::Preprocessing)
+            })
+    }
+
+    /// Bulk restores action results from a list of exchanges (used when loading conversations from tasks).
+    ///
+    /// Long-running command snapshots are downgraded to `CancelledBeforeExecution` since the command
+    /// was incomplete when the app was closed.
+    pub(crate) fn restore_action_results_from_exchanges(
+        &mut self,
+        exchanges: Vec<&AIAgentExchange>,
+    ) {
+        for exchange in exchanges.iter() {
+            for input in &exchange.input {
+                if let AIAgentInput::ActionResult { result, .. } = input {
+                    let result_id = result.id.clone();
+                    let mut result_to_insert = result.clone();
+                    if let AIAgentActionResultType::RequestCommandOutput(
+                        RequestCommandOutputResult::LongRunningCommandSnapshot { .. },
+                    ) = &result.result
+                    {
+                        result_to_insert.result = AIAgentActionResultType::RequestCommandOutput(
+                            RequestCommandOutputResult::CancelledBeforeExecution,
+                        );
+                    }
+                    self.past_action_results
+                        .insert(result_id, Arc::new(result_to_insert));
+                }
+            }
+        }
     }
 
     /// Returns the number of currently running actions (test helper).

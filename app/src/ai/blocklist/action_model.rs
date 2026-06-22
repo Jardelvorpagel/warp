@@ -52,8 +52,8 @@ use super::BlocklistAIHistoryModel;
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::agent::{
     AIAgentAction, AIAgentActionId, AIAgentActionResult, AIAgentActionResultType,
-    AIAgentActionType, AIAgentActionTypeDiscriminants, AIAgentExchange, AIAgentInput,
-    CancellationReason, CreateDocumentsResult, EditDocumentsResult, RequestCommandOutputResult,
+    AIAgentActionType, AIAgentActionTypeDiscriminants, AIAgentExchange, CancellationReason,
+    CreateDocumentsResult, EditDocumentsResult,
 };
 use crate::ai::ai_document_view::DEFAULT_PLANNING_DOCUMENT_TITLE;
 use crate::ai::blocklist::action_model::execute::suggest_new_conversation::SuggestNewConversationExecutor;
@@ -293,7 +293,7 @@ impl BlocklistAIActionModel {
             pending_actions.retain(|a| &a.id != action_id);
         }
 
-        self.add_running_action(
+        self.tools.record_running_action(
             conversation_id,
             action_id.clone(),
             RunningActionPhase::Serial,
@@ -373,44 +373,9 @@ impl BlocklistAIActionModel {
         });
     }
 
-    fn blocked_action_for_conversation(
-        &self,
-        conversation_id: &AIConversationId,
-    ) -> Option<&AIAgentAction> {
-        if self.tools.running_actions.contains_key(conversation_id) {
-            return None;
-        }
-
-        self.tools
-            .pending_actions
-            .get(conversation_id)
-            .and_then(|queue| queue.front())
-    }
-
-    fn add_running_action(
-        &mut self,
-        conversation_id: AIConversationId,
-        action_id: AIAgentActionId,
-        phase: RunningActionPhase,
-    ) {
-        match self.tools.running_actions.entry(conversation_id) {
-            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                debug_assert_eq!(entry.get().phase, phase);
-                entry.get_mut().add_action(action_id);
-            }
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(RunningActions::new(phase, action_id));
-            }
-        }
-    }
-
     /// Returns all pending actions for all conversations.
     pub fn get_pending_actions(&self) -> Vec<&AIAgentAction> {
-        self.tools
-            .pending_actions
-            .values()
-            .flat_map(|queue| queue.iter())
-            .collect()
+        self.tools.get_pending_actions()
     }
 
     /// Returns all pending actions for a specific conversation.
@@ -419,25 +384,18 @@ impl BlocklistAIActionModel {
         conversation_id: &AIConversationId,
     ) -> impl Iterator<Item = &AIAgentAction> {
         self.tools
-            .pending_actions
-            .get(conversation_id)
-            .into_iter()
-            .flat_map(|queue| queue.iter())
+            .get_pending_actions_for_conversation(conversation_id)
     }
 
     /// Returns the next pending action
     pub fn get_pending_action(&self, app: &AppContext) -> Option<&AIAgentAction> {
         let conversation_id = self.active_conversation_id(app)?;
-        self.blocked_action_for_conversation(&conversation_id)
+        self.tools.blocked_action_for_conversation(&conversation_id)
     }
 
     /// Returns a pending action by its ID, searching across all conversations.
     pub fn get_pending_action_by_id(&self, action_id: &AIAgentActionId) -> Option<&AIAgentAction> {
-        self.tools
-            .pending_actions
-            .values()
-            .flat_map(|queue| queue.iter())
-            .find(|action| &action.id == action_id)
+        self.tools.get_pending_action_by_id(action_id)
     }
 
     /// Returns the next pending or running action ID, for the active conversation, if any.
@@ -446,7 +404,8 @@ impl BlocklistAIActionModel {
         app: &'a AppContext,
     ) -> Option<&'a AIAgentActionId> {
         let conversation_id = self.active_conversation_id(app)?;
-        self.blocked_action_for_conversation(&conversation_id)
+        self.tools
+            .blocked_action_for_conversation(&conversation_id)
             .map(|action| &action.id)
             .or_else(|| {
                 self.tools
@@ -478,24 +437,16 @@ impl BlocklistAIActionModel {
         let Some(conversation_id) = self.active_conversation_id(app) else {
             return false;
         };
-        self.has_unfinished_actions_for_conversation(conversation_id)
+        self.tools
+            .has_unfinished_actions_for_conversation(conversation_id)
     }
 
     pub fn has_unfinished_actions_for_conversation(
         &self,
         conversation_id: AIConversationId,
     ) -> bool {
-        let has_pending = self
-            .tools
-            .pending_actions
-            .get(&conversation_id)
-            .is_some_and(|queue| !queue.is_empty());
-        let has_running = self
-            .tools
-            .running_actions
-            .get(&conversation_id)
-            .is_some_and(|running| !running.is_empty());
-        has_pending || has_running
+        self.tools
+            .has_unfinished_actions_for_conversation(conversation_id)
     }
 
     /// Returns finished action results received from the most recent AI output for the active conversation.
@@ -503,79 +454,21 @@ impl BlocklistAIActionModel {
         &self,
         conversation_id: AIConversationId,
     ) -> Option<&Vec<Arc<AIAgentActionResult>>> {
-        self.tools.finished_action_results.get(&conversation_id)
+        self.tools.get_finished_action_results(conversation_id)
     }
 
     /// Returns the `AIActionStatus` for the action corresponding to the given `id`, if any.
     pub fn get_action_status(&self, id: &AIAgentActionId) -> Option<AIActionStatus> {
-        for (conversation_id, pending_actions_for_conversation) in &self.tools.pending_actions {
-            for (index, action) in pending_actions_for_conversation.iter().enumerate() {
-                if &action.id != id {
-                    continue;
-                }
-
-                if index == 0
-                    && !self.is_view_only
-                    && !self.tools.running_actions.contains_key(conversation_id)
-                {
-                    return Some(AIActionStatus::Blocked);
-                }
-
-                return Some(AIActionStatus::Queued);
-            }
-        }
-
-        self.tools
-            .running_actions
-            .values()
-            .find(|running| running.contains(id))
-            .map(|_| AIActionStatus::RunningAsync)
-            .or_else(|| {
-                self.get_action_result(id)
-                    .map(|result| AIActionStatus::Finished(result.clone()))
-            })
-            .or_else(|| {
-                self.tools
-                    .pending_preprocessed_actions
-                    .values()
-                    .any(|preprocessing| preprocessing.contains(id))
-                    .then_some(AIActionStatus::Preprocessing)
-            })
+        self.tools.get_action_status(id, self.is_view_only)
     }
 
     pub fn get_action_result(&self, id: &AIAgentActionId) -> Option<&Arc<AIAgentActionResult>> {
-        // Search through all conversations' finished action results
-        self.tools
-            .finished_action_results
-            .values()
-            .flat_map(|results| results.iter())
-            .find(|result| &result.id == id)
-            .or_else(|| self.tools.past_action_results.get(id))
+        self.tools.get_action_result(id)
     }
 
     /// Bulk restore action results from a list of exchanges (used when loading conversations from tasks)
     pub fn restore_action_results_from_exchanges(&mut self, exchanges: Vec<&AIAgentExchange>) {
-        for exchange in exchanges.iter() {
-            for input in &exchange.input {
-                if let AIAgentInput::ActionResult { result, .. } = input {
-                    let result_id = result.id.clone();
-                    let mut result_to_insert = result.clone();
-                    if let AIAgentActionResultType::RequestCommandOutput(
-                        RequestCommandOutputResult::LongRunningCommandSnapshot { .. },
-                    ) = &result.result
-                    {
-                        // On restoration we set long running command snapshot results to cancelled,
-                        // since this means the command was incomplete when the app was closed.
-                        result_to_insert.result = AIAgentActionResultType::RequestCommandOutput(
-                            RequestCommandOutputResult::CancelledBeforeExecution,
-                        );
-                    }
-                    self.tools
-                        .past_action_results
-                        .insert(result_id, Arc::new(result_to_insert));
-                }
-            }
-        }
+        self.tools.restore_action_results_from_exchanges(exchanges);
     }
 
     /// Dispatches a `RunAgents` action with the user-edited request
