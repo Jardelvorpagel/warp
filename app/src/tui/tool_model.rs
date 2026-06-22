@@ -9,6 +9,7 @@ use futures::future::{join_all, BoxFuture};
 use futures::FutureExt;
 use warp_core::command::ExitCode;
 use warp_terminal::model::BlockId;
+use warp_util::path::ShellFamily;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use crate::ai::agent::conversation::AIConversationId;
@@ -22,8 +23,8 @@ use crate::ai::agent::{
 use crate::ai::blocklist::{
     apply_edits, ActionExecution, AgentToolActionModel, AgentToolExecutionContext,
     AgentToolExecutor, AgentToolScheduleHost, AgentToolScheduler, AnyActionExecution,
-    ExecuteActionInput, FileReadResult, PreprocessActionInput, RunningActionPhase, SessionContext,
-    SurfaceSpecificToolExecutor, TryExecuteResult,
+    BlocklistAIPermissions, ExecuteActionInput, FileReadResult, PreprocessActionInput,
+    RunningActionPhase, SessionContext, SurfaceSpecificToolExecutor, TryExecuteResult,
 };
 use crate::ai::paths::host_native_absolute_path;
 use crate::auth::AuthStateProvider;
@@ -155,6 +156,42 @@ impl AgentToolScheduleHost for TuiToolActionModel {
             action: &action,
             conversation_id,
         };
+        let can_auto_execute = AgentToolExecutor::should_autoexecute(&mut surface, input, ctx);
+        if !can_auto_execute {
+            // v0 autonomous policy: the only denials are denylisted commands and
+            // protected-path writes. Report the denial so the agent can adapt rather
+            // than silently running or hanging.
+            // TODO: when the TUI gains real (supervised) permissions + an approval
+            // surface, route policy-denied actions to that surface instead of
+            // returning a denial here, and stop forcing is_autoexecute_override.
+            let result = match &action.action {
+                AIAgentActionType::RequestCommandOutput { command, .. } => {
+                    AIAgentActionResultType::RequestCommandOutput(
+                        RequestCommandOutputResult::Denylisted {
+                            command: command.clone(),
+                        },
+                    )
+                }
+                AIAgentActionType::RequestFileEdits { .. } => {
+                    AIAgentActionResultType::RequestFileEdits(
+                        RequestFileEditsResult::DiffApplicationFailed {
+                            error: "File edit was not permitted by the current autonomy policy."
+                                .to_string(),
+                        },
+                    )
+                }
+                _ => action.action.cancelled_result(),
+            };
+            let r = Arc::new(AIAgentActionResult {
+                id: action.id.clone(),
+                task_id: action.task_id.clone(),
+                result,
+            });
+            ctx.spawn(futures::future::ready(()), move |model, _, ctx| {
+                AgentToolScheduler::finish_action(model, conversation_id, r, None, ctx);
+            });
+            return TryExecuteResult::ExecutedAsync;
+        }
         let execution = AgentToolExecutor::execute_action(&mut surface, input, ctx);
         let action_id = action.id.clone();
         let task_id = action.task_id.clone();
@@ -202,11 +239,16 @@ impl AgentToolScheduleHost for TuiToolActionModel {
 
     fn can_autoexecute(
         &mut self,
-        _action: &AIAgentAction,
-        _conversation_id: AIConversationId,
-        _ctx: &mut Self::Context<'_>,
+        action: &AIAgentAction,
+        conversation_id: AIConversationId,
+        ctx: &mut Self::Context<'_>,
     ) -> bool {
-        true
+        let mut surface = TuiToolExecutor::new(self.session.clone(), ctx);
+        let input = ExecuteActionInput {
+            action,
+            conversation_id,
+        };
+        AgentToolExecutor::should_autoexecute(&mut surface, input, ctx)
     }
 
     fn action_phase(&self, action: &AIAgentAction, ctx: &AppContext) -> RunningActionPhase {
@@ -421,10 +463,30 @@ impl SurfaceSpecificToolExecutor for TuiToolExecutor {
 
     fn should_autoexecute_shell(
         &mut self,
-        _input: ExecuteActionInput<'_>,
-        _ctx: &mut Self::Context<'_>,
+        input: ExecuteActionInput<'_>,
+        ctx: &mut Self::Context<'_>,
     ) -> bool {
-        true
+        let AIAgentActionType::RequestCommandOutput {
+            command,
+            is_read_only,
+            is_risky,
+            ..
+        } = &input.action.action
+        else {
+            return false;
+        };
+        let escape_char = ShellFamily::from(self.shell_type).escape_char();
+        BlocklistAIPermissions::as_ref(ctx)
+            .can_autoexecute_command(
+                &input.conversation_id,
+                command,
+                escape_char,
+                is_read_only.unwrap_or(false),
+                *is_risky,
+                None, // TUI has no terminal view; resolves to the default profile.
+                ctx,
+            )
+            .is_allowed()
     }
 
     fn preprocess_file_edits(
@@ -465,10 +527,26 @@ impl SurfaceSpecificToolExecutor for TuiToolExecutor {
 
     fn should_autoexecute_file_edits(
         &mut self,
-        _input: ExecuteActionInput<'_>,
-        _ctx: &mut Self::Context<'_>,
+        input: ExecuteActionInput<'_>,
+        ctx: &mut Self::Context<'_>,
     ) -> bool {
-        true
+        let AIAgentActionType::RequestFileEdits { file_edits, .. } = &input.action.action else {
+            return false;
+        };
+        let paths: Vec<std::path::PathBuf> = file_edits
+            .iter()
+            .filter_map(|edit| edit.file())
+            .map(|name| {
+                std::path::PathBuf::from(host_native_absolute_path(
+                    name,
+                    &self.shell_launch_data,
+                    &self.current_working_directory,
+                ))
+            })
+            .collect();
+        BlocklistAIPermissions::as_ref(ctx)
+            .can_write_files(&input.conversation_id, &paths, None, ctx)
+            .is_allowed()
     }
 }
 

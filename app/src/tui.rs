@@ -24,7 +24,7 @@ use chrono::Local;
 use input_view::{InputEvent, TuiInputView};
 pub(crate) use tool_model::{TuiToolActionEvent, TuiToolActionModel};
 use transcript_view::TuiTranscriptView;
-use warp_multi_agent_api::AgentType;
+use warp_multi_agent_api::{AgentType, ToolType};
 use warpui::r#async::Timer;
 use warpui::{ModelContext, ModelHandle, SingletonEntity};
 use warpui_core::elements::tui::{
@@ -54,6 +54,20 @@ use crate::ai_assistant::execution_context::{WarpAiExecutionContext, WarpAiOsCon
 /// The bottom input frame's height: one text row inside a single-cell rounded
 /// border (top + bottom), i.e. three rows total.
 const INPUT_ROWS: u16 = 3;
+
+/// The agent tools the v0 TUI can meaningfully execute. The long-running-command
+/// follow-up tools (read/write/transfer) are intentionally excluded until the TUI
+/// has a command registry; see the LRC follow-up.
+fn tui_supported_tools() -> Vec<ToolType> {
+    vec![
+        ToolType::RunShellCommand,
+        ToolType::ApplyFileDiffs,
+        ToolType::ReadFiles,
+        ToolType::Grep,
+        ToolType::FileGlob,
+        ToolType::FileGlobV2,
+    ]
+}
 
 /// App-level singleton owning the TUI app's single agent session.
 pub struct CoreTuiModel {
@@ -141,7 +155,7 @@ impl CoreTuiModel {
 
         let conversation_id = self.active_conversation_id.unwrap_or_else(|| {
             BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
-                history_model.start_new_conversation(owner.entity_id(), false, false, false, ctx)
+                history_model.start_new_conversation(owner.entity_id(), true, false, false, ctx)
             })
         });
 
@@ -736,7 +750,7 @@ fn tui_request_input(
             .clone(),
         shared_session_response_initiator: None,
         request_start_ts: Local::now(),
-        supported_tools_override: None,
+        supported_tools_override: Some(tui_supported_tools()),
     }
 }
 
@@ -783,7 +797,7 @@ fn tui_action_result_request_input(
             .clone(),
         shared_session_response_initiator: None,
         request_start_ts: Local::now(),
-        supported_tools_override: None,
+        supported_tools_override: Some(tui_supported_tools()),
     }
 }
 
