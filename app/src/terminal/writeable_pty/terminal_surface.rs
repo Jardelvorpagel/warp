@@ -47,17 +47,25 @@ pub(crate) enum PtySurfaceIntent {
 }
 
 /// A terminal front-end that a `TerminalManager<S>` can drive without knowing
-/// the concrete view type. The required [`pty_intent`](Self::pty_intent) maps a
-/// surface event to an optional [`PtySurfaceIntent`]; the lifecycle hooks let
-/// the manager notify the surface of session events.
+/// the concrete view type. Implementers must provide a conversion from their
+/// event type to an optional [`PtySurfaceIntent`] (enforced by the
+/// `From<&Self::Event>` bound), which the manager's PTY wiring uses to drive the
+/// PTY; the lifecycle hooks let the manager notify the surface of session
+/// events.
 ///
-/// Every method is required: each surface must consciously handle (or
-/// explicitly no-op) each session event rather than silently inheriting a
-/// default.
-pub(crate) trait TerminalSurface: Entity + Sized + 'static {
-    /// Translates a surface event into the PTY intent it should drive, if any.
-    fn pty_intent(event: &Self::Event) -> Option<PtySurfaceIntent>;
-
+/// Every hook is required and the conversion is mandatory: each surface must
+/// consciously handle (or explicitly no-op) each session event rather than
+/// silently inheriting a default.
+///
+/// This intentionally excludes shared-session orchestration. If a non-GUI
+/// surface (for example the TUI) needs shared sessions, add a separate
+/// shared-session surface/controller boundary for protocol state, selection,
+/// input edits, presence, and UI reactions instead of expanding this
+/// PTY/session-lifecycle trait into a GUI-shaped interface.
+pub(crate) trait TerminalSurface: Entity + Sized + 'static
+where
+    for<'a> Option<PtySurfaceIntent>: From<&'a Self::Event>,
+{
     /// Called once the shell has been determined and its PTY spawned.
     fn on_shell_determined(&mut self, ctx: &mut ViewContext<Self>);
 

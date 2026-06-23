@@ -178,8 +178,11 @@ impl Entity for RootTuiView {
     type Event = TuiRootEvent;
 }
 
-impl TerminalSurface for RootTuiView {
-    fn pty_intent(event: &Self::Event) -> Option<PtySurfaceIntent> {
+/// Projects the TUI root view's events onto the shared PTY intent vocabulary,
+/// used by the manager's PTY wiring. Every `TuiRootEvent` drives the PTY, so
+/// this never returns `None`.
+impl<'a> From<&'a TuiRootEvent> for Option<PtySurfaceIntent> {
+    fn from(event: &'a TuiRootEvent) -> Self {
         match event {
             TuiRootEvent::ExecuteCommand(command_event) => {
                 Some(PtySurfaceIntent::ExecuteCommand(command_event.clone()))
@@ -190,7 +193,9 @@ impl TerminalSurface for RootTuiView {
             TuiRootEvent::Resize(size_update) => Some(PtySurfaceIntent::Resize(*size_update)),
         }
     }
+}
 
+impl TerminalSurface for RootTuiView {
     fn on_shell_determined(&mut self, ctx: &mut ViewContext<Self>) {
         ctx.notify();
     }

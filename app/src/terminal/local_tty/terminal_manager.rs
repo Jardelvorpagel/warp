@@ -104,7 +104,7 @@ use crate::terminal::writeable_pty::terminal_manager_util::{
     init_pty_controller_model, init_remote_server_controller, wire_up_pty_controller_with_surface,
     wire_up_remote_server_controller_with_view,
 };
-use crate::terminal::writeable_pty::terminal_surface::TerminalSurface;
+use crate::terminal::writeable_pty::terminal_surface::{PtySurfaceIntent, TerminalSurface};
 pub(crate) use crate::terminal::writeable_pty::Message;
 use crate::terminal::{
     terminal_manager, ShellLaunchData, ShellLaunchState, SizeInfo, SizeUpdate, TerminalModel,
@@ -136,7 +136,10 @@ fn should_skip_sharer_op(is_ambient_session: bool, op: &CrdtOperation) -> bool {
 ///
 /// It also holds onto any data that needs to live as long as the session does
 /// (e.g. the event loop join handle).
-pub(crate) struct TerminalManager<S: TerminalSurface = TerminalView> {
+pub(crate) struct TerminalManager<S: TerminalSurface = TerminalView>
+where
+    for<'a> Option<PtySurfaceIntent>: From<&'a S::Event>,
+{
     event_loop_tx: Arc<Mutex<mio_channel::Sender<Message>>>,
     /// This is an `Option` so that we can take ownership of the inner
     /// `JoinHandle` in `TerminalManager::drop`.
@@ -184,7 +187,10 @@ pub(crate) struct TerminalManager<S: TerminalSurface = TerminalView> {
     session_sharer: Rc<RefCell<Option<ModelHandle<Network>>>>,
 }
 
-impl<S: TerminalSurface> Drop for TerminalManager<S> {
+impl<S: TerminalSurface> Drop for TerminalManager<S>
+where
+    for<'a> Option<PtySurfaceIntent>: From<&'a S::Event>,
+{
     fn drop(&mut self) {
         self.shutdown_event_loop();
     }
@@ -440,28 +446,6 @@ fn enqueue_init_script(
         event_loop_tx.send(Message::Input(shell_type.execute_command_bytes().into()))
     } else {
         Ok(())
-    }
-}
-
-impl<S: TerminalSurface> TerminalManager<S> {
-    /// Sends a shutdown message to the PTY event loop and waits for it to
-    /// process that event.
-    fn shutdown_event_loop(&mut self) {
-        let shutdown_res = self.event_loop_tx.lock().send(Message::Shutdown);
-        // Happens normally if the event loop has already been terminated (so the channel is now gone).
-        if let Err(e) = shutdown_res {
-            log::info!("Failed to send Shutdown {e:?}");
-        }
-
-        if let Some(join_handle) = self.event_loop_handle.take() {
-            if let Err(e) = join_handle.join() {
-                log::error!("Failed to join event loop handle {e:?}");
-            }
-        } else {
-            log::error!("No event loop handle to join when dropping terminal manager.")
-        }
-
-        self.inactive_pty_reads_rx.close();
     }
 }
 
@@ -802,7 +786,7 @@ impl TerminalManager<TerminalView> {
                 move |agent_view_controller, event, ctx| match event {
                     AgentViewControllerEvent::EnteredAgentView { .. } => {
                         if conversation_remote_update_guard.should_broadcast() {
-                            Self::send_selected_conversation_update_for_sharer(
+                            TerminalViewSessionSharing::send_selected_conversation_update_for_sharer(
                                 &session_sharer_for_conversation,
                                 &agent_view_controller,
                                 &ai_context_model_for_conversation,
@@ -816,7 +800,7 @@ impl TerminalManager<TerminalView> {
                         ..
                     } => {
                         if conversation_remote_update_guard.should_broadcast() {
-                            Self::send_selected_conversation_update_for_sharer(
+                            TerminalViewSessionSharing::send_selected_conversation_update_for_sharer(
                                 &session_sharer_for_conversation,
                                 &agent_view_controller,
                                 &ai_context_model_for_conversation,
@@ -849,7 +833,7 @@ impl TerminalManager<TerminalView> {
                     return;
                 }
 
-                Self::send_selected_conversation_update_for_sharer(
+                TerminalViewSessionSharing::send_selected_conversation_update_for_sharer(
                     &session_sharer_for_conversation,
                     &agent_view_controller_for_conversation,
                     &ai_context_model,
@@ -864,7 +848,7 @@ impl TerminalManager<TerminalView> {
         let ai_controller_for_sent_request = view.as_ref(ctx).ai_controller().clone();
         ctx.subscribe_to_model(&ai_controller_for_sent_request, move |_, event, ctx| {
             if let BlocklistAIControllerEvent::SentRequest { .. } = event {
-                Self::send_selected_conversation_update_for_sharer(
+                TerminalViewSessionSharing::send_selected_conversation_update_for_sharer(
                     &session_sharer_for_sent_request,
                     &agent_view_controller_for_sent_request,
                     &ai_context_model_for_sent_request,
@@ -918,7 +902,7 @@ impl TerminalManager<TerminalView> {
                             return;
                         }
 
-                        Self::send_selected_conversation_update_for_sharer(
+                        TerminalViewSessionSharing::send_selected_conversation_update_for_sharer(
                             &session_sharer_for_stream_init,
                             &agent_view_controller,
                             &ai_context_model,
@@ -1003,7 +987,7 @@ impl TerminalManager<TerminalView> {
         );
 
         // Always wire up the model but check the flag when a share is attempted.
-        Self::wire_up_session_sharer_with_view(
+        TerminalViewSessionSharing::wire_up_session_sharer_with_view(
             &view,
             prompt_type,
             session_sharer.clone(),
@@ -1013,7 +997,11 @@ impl TerminalManager<TerminalView> {
             ctx,
         );
 
-        Self::handle_network_status_events(&view, session_sharer.clone(), ctx);
+        TerminalViewSessionSharing::handle_network_status_events(
+            &view,
+            session_sharer.clone(),
+            ctx,
+        );
 
         // Assemble the manager and async-spawn the PTY via the shared
         // constructor. The view/agent/sharing wiring above is GUI-specific; the
@@ -1042,7 +1030,30 @@ impl TerminalManager<TerminalView> {
     }
 }
 
-impl<S: TerminalSurface> TerminalManager<S> {
+impl<S: TerminalSurface> TerminalManager<S>
+where
+    for<'a> Option<PtySurfaceIntent>: From<&'a S::Event>,
+{
+    /// Sends a shutdown message to the PTY event loop and waits for it to
+    /// process that event.
+    fn shutdown_event_loop(&mut self) {
+        let shutdown_res = self.event_loop_tx.lock().send(Message::Shutdown);
+        // Happens normally if the event loop has already been terminated (so the channel is now gone).
+        if let Err(e) = shutdown_res {
+            log::info!("Failed to send Shutdown {e:?}");
+        }
+
+        if let Some(join_handle) = self.event_loop_handle.take() {
+            if let Err(e) = join_handle.join() {
+                log::error!("Failed to join event loop handle {e:?}");
+            }
+        } else {
+            log::error!("No event loop handle to join when dropping terminal manager.")
+        }
+
+        self.inactive_pty_reads_rx.close();
+    }
+
     /// Returns the backing terminal model. Exposed so the object-safe
     /// `crate::terminal::TerminalManager` trait can be implemented for
     /// `TerminalManager<S>` from another module (e.g. the TUI) without access to
@@ -1469,6 +1480,27 @@ impl<S: TerminalSurface> TerminalManager<S> {
         event_loop.spawn()
     }
 
+    #[cfg(feature = "integration_tests")]
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
+    #[cfg(test)]
+    pub fn session_sharer(&self) -> Rc<RefCell<Option<ModelHandle<Network>>>> {
+        self.session_sharer.clone()
+    }
+}
+
+/// GUI-only shared-session wiring for the local terminal view.
+///
+/// Shared-session support is intentionally not part of `TerminalSurface`: this
+/// layer coordinates protocol state with GUI-only concepts like input editors,
+/// presence UI, toasts, and agent view models. If the TUI needs shared sessions,
+/// extract this protocol flow behind a dedicated shared-session surface/controller
+/// trait and implement that for both `TerminalView` and the TUI root surface.
+struct TerminalViewSessionSharing;
+
+impl TerminalViewSessionSharing {
     /// Streams all historical agent conversations from this terminal to viewers.
     /// This is called when starting a shared  session mid-conversation so that viewers
     /// can see all conversation history and properly continue conversations.
@@ -2218,7 +2250,7 @@ impl<S: TerminalSurface> TerminalManager<S> {
                 if has_active_cli_agent {
                     // Reuse the rich input submit pipeline so agent-specific
                     // strategies are applied. Bypasses the rich-input-UI side effects 
-  					// (telemetry, draft clear, editor buffer clear, pending-image consumption).
+      					// (telemetry, draft clear, editor buffer clear, pending-image consumption).
                     terminal_view.update(ctx, |view, ctx| {
                         view.submit_text_to_cli_agent_pty(request.prompt.clone(), ctx);
                     });
@@ -2795,16 +2827,6 @@ impl<S: TerminalSurface> TerminalManager<S> {
             }
         });
     }
-
-    #[cfg(feature = "integration_tests")]
-    pub fn pid(&self) -> Option<u32> {
-        self.pid
-    }
-
-    #[cfg(test)]
-    pub fn session_sharer(&self) -> Rc<RefCell<Option<ModelHandle<Network>>>> {
-        self.session_sharer.clone()
-    }
 }
 
 pub fn get_shell_starter(
@@ -2895,7 +2917,7 @@ impl crate::terminal::TerminalManager for TerminalManager<TerminalView> {
     ) {
         let shared_session_status = self.model.lock().shared_session_status().clone();
         if shared_session_status.is_sharer() {
-            Self::log_shared_session_lifecycle(
+            TerminalViewSessionSharing::log_shared_session_lifecycle(
                 &self.view,
                 &self.model,
                 "view_detached",
@@ -2915,7 +2937,7 @@ impl crate::terminal::TerminalManager for TerminalManager<TerminalView> {
                 )
             });
             // The window could close before the event from above is processed, so directly stop sharing here.
-            Self::end_shared_session(
+            TerminalViewSessionSharing::end_shared_session(
                 &self.view,
                 self.session_sharer.clone(),
                 SessionEndedReason::EndedBySharer,

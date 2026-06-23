@@ -31,13 +31,15 @@ pub fn wire_up_pty_controller_with_surface<T: EventLoopSender, S: TerminalSurfac
     sessions: ModelHandle<Sessions>,
     model_event_sender: Option<SyncSender<ModelEvent>>,
     ctx: &mut AppContext,
-) {
+) where
+    for<'a> Option<PtySurfaceIntent>: From<&'a S::Event>,
+{
     let controller_weak_handle = pty_controller.downgrade();
     let surface_weak_handle = surface.downgrade();
     let model_clone = model.clone();
 
     ctx.subscribe_to_view(surface, move |_surface, event, ctx| {
-        let Some(intent) = S::pty_intent(event) else {
+        let Some(intent) = Option::<PtySurfaceIntent>::from(event) else {
             return;
         };
 

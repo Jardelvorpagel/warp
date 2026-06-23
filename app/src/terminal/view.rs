@@ -28474,16 +28474,14 @@ fn is_rich_input_chip_in_cli_toolbar(app: &AppContext) -> bool {
         .any(|item| matches!(item, AgentToolbarItemKind::RichInput))
 }
 
-/// Drives the GUI terminal as a [`TerminalSurface`] so a generic
-/// `TerminalManager<TerminalView>` can own and drive it. The lifecycle hooks
-/// delegate to the view's existing methods; the unix poller hooks implement the
-/// password-notification and SSH-upload reactions the manager used to call
-/// directly.
+/// Projects the GUI terminal's event enum onto the shared PTY intent
+/// vocabulary, used by the manager's PTY wiring. Returns `None` for events that
+/// don't drive the PTY.
 #[cfg(not(target_family = "wasm"))]
-impl crate::terminal::writeable_pty::terminal_surface::TerminalSurface for TerminalView {
-    fn pty_intent(
-        event: &Self::Event,
-    ) -> Option<crate::terminal::writeable_pty::terminal_surface::PtySurfaceIntent> {
+impl<'a> From<&'a Event>
+    for Option<crate::terminal::writeable_pty::terminal_surface::PtySurfaceIntent>
+{
+    fn from(event: &'a Event) -> Self {
         use crate::terminal::writeable_pty::terminal_surface::PtySurfaceIntent as Intent;
         match event {
             Event::CtrlD => Some(Intent::CtrlD),
@@ -28507,7 +28505,15 @@ impl crate::terminal::writeable_pty::terminal_surface::TerminalSurface for Termi
             _ => None,
         }
     }
+}
 
+/// Drives the GUI terminal as a [`TerminalSurface`] so a generic
+/// `TerminalManager<TerminalView>` can own and drive it. The lifecycle hooks
+/// delegate to the view's existing methods; the unix poller hooks implement the
+/// password-notification and SSH-upload reactions the manager used to call
+/// directly.
+#[cfg(not(target_family = "wasm"))]
+impl crate::terminal::writeable_pty::terminal_surface::TerminalSurface for TerminalView {
     fn on_shell_determined(&mut self, ctx: &mut ViewContext<Self>) {
         if !self.model.lock().shared_session_status().is_viewer() {
             // Start a timer for the initial session bootstrapping, so that we can
