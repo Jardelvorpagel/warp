@@ -36,6 +36,7 @@ use warpui_core::{
 use crate::ai::blocklist::agent_view::AgentViewState;
 use crate::terminal::color;
 use crate::terminal::model::block::Block;
+use crate::terminal::model::blocks::BlockHeightItem;
 use crate::terminal::model::terminal_model::{TerminalInputState, TerminalModel};
 
 /// The bottom input frame's height: one text row inside a single-cell rounded
@@ -279,20 +280,13 @@ impl TuiBlockListElement {
         Self { model, colors }
     }
 
-    /// Computes the displayed height of each block (prompt+command + output),
-    /// skipping blocks the TUI does not render (see `block_display_rows`).
+    /// Sum of each rendered block's displayed rows, in block-list order
+    /// (see `ordered_block_rows`).
     fn block_heights(&self) -> Vec<u16> {
         let model = self.model.lock();
-        let agent_view_state = model.block_list().agent_view_state();
-        model
-            .block_list()
-            .blocks()
+        ordered_block_rows(&model)
             .iter()
-            .map(|block| {
-                block_display_rows(block, agent_view_state)
-                    .map(|(pc, out)| pc.saturating_add(out))
-                    .unwrap_or(0)
-            })
+            .map(|(_, pc, out)| pc.saturating_add(*out))
             .collect()
     }
 }
@@ -307,18 +301,13 @@ impl TuiElement for TuiBlockListElement {
             return;
         }
         let model = self.model.lock();
-        let blocks = model.block_list().blocks();
-        let agent_view_state = model.block_list().agent_view_state();
+        let items = ordered_block_rows(&model);
         let width = area.width;
 
-        // Compute each block's height (skipping blocks the TUI doesn't render).
-        let heights: Vec<u16> = blocks
+        // Per-rendered-block height (prompt+command rows + output rows), in order.
+        let heights: Vec<u16> = items
             .iter()
-            .map(|block| {
-                block_display_rows(block, agent_view_state)
-                    .map(|(pc, out)| pc.saturating_add(out))
-                    .unwrap_or(0)
-            })
+            .map(|(_, pc, out)| pc.saturating_add(*out))
             .collect();
         let total: u16 = heights.iter().copied().fold(0, u16::saturating_add);
         if total == 0 {
@@ -333,7 +322,7 @@ impl TuiElement for TuiBlockListElement {
         // Paint blocks top-to-bottom into the buffer, skipping clipped rows.
         let mut src_y: u16 = 0;
         let mut dst_y = dst_top;
-        for (block, &height) in blocks.iter().zip(&heights) {
+        for (&(block, pc_rows, out_rows), &height) in items.iter().zip(&heights) {
             if height == 0 {
                 continue;
             }
@@ -344,7 +333,6 @@ impl TuiElement for TuiBlockListElement {
             }
             // Partially clipped block: skip the clipped rows.
             let skip = top_clip.saturating_sub(src_y);
-            let (pc_rows, out_rows) = block_display_rows(block, agent_view_state).unwrap_or((0, 0));
 
             // Render prompt+command grid.
             let pc_skip = skip.min(pc_rows);
@@ -418,6 +406,44 @@ impl TuiElement for TuiAltScreenElement {
         let grid = model.alt_screen().grid_handler();
         grid.len_displayed().unwrap_or_else(|| grid.visible_rows()) as u16
     }
+}
+
+/// Walks the block list's ordered items and returns the terminal blocks the TUI
+/// should paint, each with its (prompt+command rows, output rows), in order.
+///
+/// This iterates the same `block_heights` sum tree the GUI's block list renders
+/// from (the `match` in `app/src/terminal/block_list_element.rs:3307`). Today
+/// only the `Block` arm renders; `RichContent` (agent/AI blocks) is the seam
+/// where interleaved agent output will be painted once the agent cluster lands.
+/// `Block` items map 1:1, in order, to `blocks()` by their running count.
+fn ordered_block_rows(model: &TerminalModel) -> Vec<(&Block, u16, u16)> {
+    let agent_view_state = model.block_list().agent_view_state();
+    let blocks = model.block_list().blocks();
+    let mut items = Vec::new();
+    let mut block_count = 0usize;
+    for height_item in model.block_list().block_heights().cursor::<(), ()>() {
+        match height_item {
+            BlockHeightItem::Block(_) => {
+                let index = block_count;
+                block_count += 1;
+                if let Some(block) = blocks.get(index) {
+                    if let Some((pc, out)) = block_display_rows(block, agent_view_state) {
+                        items.push((block, pc, out));
+                    }
+                }
+            }
+            // Agent/AI output interleaves here once the agent cluster lands: this
+            // is where a TUI-native AI block would be produced (GUI counterpart:
+            // block_list_element.rs:3484).
+            BlockHeightItem::RichContent(_) => {}
+            // Visual-only items the TUI prototype does not render.
+            BlockHeightItem::Gap(_)
+            | BlockHeightItem::RestoredBlockSeparator { .. }
+            | BlockHeightItem::InlineBanner { .. }
+            | BlockHeightItem::SubshellSeparator { .. } => {}
+        }
+    }
+    items
 }
 
 /// Returns the (prompt+command rows, output rows) the TUI should paint for
