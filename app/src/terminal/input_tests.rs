@@ -8661,3 +8661,24 @@ fn ctrl_enter_inserts_newline_in_normal_input_after_rich_input_closes() {
         });
     });
 }
+
+#[test]
+fn agent_mode_hint_options_use_build_anything_prefix() {
+    // Regression test for the reported placeholder copy bug: the new-conversation
+    // Agent Mode hints must read "Build anything ..." and must never use the old
+    // "Warp anything ..." wording.
+    assert!(
+        !AGENT_MODE_HINT_OPTIONS.is_empty(),
+        "expected at least one agent mode hint option"
+    );
+    for hint in AGENT_MODE_HINT_OPTIONS {
+        assert!(
+            hint.starts_with("Build anything"),
+            "agent mode hint should start with \"Build anything\", got: {hint:?}"
+        );
+        assert!(
+            !hint.contains("Warp anything"),
+            "agent mode hint should not contain the old \"Warp anything\" copy, got: {hint:?}"
+        );
+    }
+}
