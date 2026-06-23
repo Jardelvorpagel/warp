@@ -32,7 +32,7 @@ use crate::terminal::shell::ShellType;
 
 /// The TUI's single terminal session: a `TerminalModel` + PTY owned for the
 /// app's lifetime. Built once via [`build_session_core`]; the PTY is spawned
-/// asynchronously (shell determination may require WSL VM startup).
+/// asynchronously.
 pub struct TuiTerminalSession {
     model: Arc<FairMutex<TerminalModel>>,
     sessions: ModelHandle<Sessions>,

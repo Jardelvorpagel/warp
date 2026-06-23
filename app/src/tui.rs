@@ -1,11 +1,11 @@
 //! The headless `warp-tui` front-end: a real (headless) Warp app whose root
 //! window is a [`RootTuiView`] rendered through the `tui`-gated WarpUI backend.
 //!
-//! `RootTuiView` composes two child views — a [`TuiTranscriptView`] filling the
-//! space above a bottom-anchored single-row [`TuiInputView`] — and routes
-//! submissions into the shared [`TuiTerminalSession`]. A leading `!` runs the
-//! rest as a command through the persistent `TerminalModel`; plain text is
-//! appended to the local transcript. Keystrokes are forwarded to the PTY when a
+//! `RootTuiView` renders the shared [`TerminalModel`]'s block list above a
+//! bottom-anchored [`TuiInputView`] and routes submissions into the shared
+//! [`TuiTerminalSession`]. A leading `!` runs the rest as a command through the
+//! persistent `TerminalModel`; plain text is reserved for the future agent
+//! prompt and ignored for now. Keystrokes are forwarded to the PTY when a
 //! command is running or the alt-screen is active. [`init`] is called from
 //! `run_internal` once the headless app is up (see [`crate::run_tui`]). Ctrl-C
 //! quit is handled by the runtime's input loop.
@@ -13,7 +13,6 @@
 mod grid_render;
 mod input_view;
 mod session;
-mod transcript_view;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +20,6 @@ use std::time::Duration;
 use input_view::{InputEvent, TuiInputView};
 use parking_lot::FairMutex;
 use session::{encode_keydown, TuiTerminalSession};
-use transcript_view::TuiTranscriptView;
 use warpui_core::elements::tui::{
     TuiBuffer, TuiChildView, TuiColumn, TuiConstrainedBox, TuiConstraint, TuiElement,
     TuiEventContext, TuiPresentationContext, TuiRect, TuiSize,
@@ -49,29 +47,25 @@ const INTERRUPT_BYTE: u8 = 0x03;
 /// How often the background task checks for terminal size changes.
 const RESIZE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
-/// The root TUI view: a transcript that grows upward above a fixed,
-/// bottom-anchored input. It owns both child views and forwards the input's
-/// submissions into the shared terminal session.
+/// The root TUI view: the shared model's block list above a fixed,
+/// bottom-anchored input. It owns the input view and forwards its submissions
+/// into the shared terminal session.
 struct RootTuiView {
-    transcript: ViewHandle<TuiTranscriptView>,
     input: ViewHandle<TuiInputView>,
 }
 
 impl RootTuiView {
     fn new(ctx: &mut ViewContext<Self>) -> Self {
-        let transcript = ctx.add_tui_view(|_| TuiTranscriptView::default());
         let input = ctx.add_typed_action_tui_view(|_| TuiInputView::default());
 
-        ctx.subscribe_to_view(&input, |root, _input, event, ctx| match event {
+        ctx.subscribe_to_view(&input, |_root, _input, event, ctx| match event {
             InputEvent::Submitted(text) => {
+                // Only `!`-prefixed input runs as a shell command today; plain
+                // text is reserved for the future agent prompt and ignored.
                 if let Some(command) = text.strip_prefix('!') {
                     let command = command.to_string();
                     TuiTerminalSession::handle(ctx)
                         .update(ctx, |session, ctx| session.run_command(&command, ctx));
-                } else {
-                    let text = text.clone();
-                    root.transcript
-                        .update(ctx, |transcript, ctx| transcript.append(text, ctx));
                 }
             }
             InputEvent::Cancel => {
@@ -134,7 +128,7 @@ impl RootTuiView {
             |_, _| {},
         );
 
-        Self { transcript, input }
+        Self { input }
     }
 }
 
