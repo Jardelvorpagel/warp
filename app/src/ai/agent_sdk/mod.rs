@@ -1003,7 +1003,10 @@ impl AgentDriverRunner {
 
                 let task_id = args.task_id.as_ref().and_then(|s| s.parse().ok());
                 let should_share = (args.share.is_shared() || args.task_id.is_some())
-                    && FeatureFlag::AgentSharedSessions.is_enabled();
+                    && FeatureFlag::AgentSharedSessions.is_enabled()
+                    // Only try session sharing if a session-sharing server is configured.
+                    // Without a server, sharing would always fail and block the agent from starting.
+                    && warp_core::channel::ChannelState::session_sharing_server_url().is_some();
 
                 let third_party_harness_model_config = merged_config
                     .harness

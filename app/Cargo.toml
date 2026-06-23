@@ -23,6 +23,11 @@ path = "src/bin/oss.rs"
 test = false
 
 [[bin]]
+name = "oz-local-dev"
+path = "src/bin/oz_local_dev.rs"
+test = false
+
+[[bin]]
 name = "warp"
 path = "src/bin/local.rs"
 test = false
