@@ -152,6 +152,43 @@ impl BlockGrid {
         )
     }
 
+    /// Updates the cursor position cache for IME positioning without visually rendering the cursor.
+    ///
+    /// Some terminal programs (like Claude Code) hide the terminal cursor via `?25l` while
+    /// rendering their TUI, clearing `SHOW_CURSOR`. This prevents `draw_cursor` from being called,
+    /// leaving the position cache stale. Calling this method keeps the IME candidate window
+    /// anchored to the actual cursor location even when the cursor is visually hidden.
+    pub fn cache_cursor_ime_position(
+        &self,
+        grid_origin: Vector2F,
+        grid_render_params: &GridRenderParams,
+        ctx: &mut PaintContext,
+        terminal_view_id: EntityId,
+        app: &AppContext,
+    ) {
+        let cursor_display_point = match self.cursor_display_point() {
+            Some(CursorDisplayPoint::Visible(pt) | CursorDisplayPoint::HiddenCache(pt)) => pt,
+            None => return,
+        };
+        let cursor_style = CursorStyle {
+            shape: CursorShape::Hidden,
+            ..self.cursor_style()
+        };
+        render_cursor(
+            grid_render_params,
+            cursor_display_point,
+            false, // is_cursor_on_wide_char doesn't affect the position origin
+            cursor_style,
+            grid_render_params.size_info.padding_x_px(),
+            grid_origin,
+            ColorU::default(),
+            ctx,
+            terminal_view_id,
+            None,
+            app,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn draw_cursor(
         &self,
