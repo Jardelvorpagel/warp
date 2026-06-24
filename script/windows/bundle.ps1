@@ -170,6 +170,7 @@ if ($SKIP_BUILD_INSTALLER) {
         Write-Output '::echo::on'
         "target_profile_dir=$CARGO_TARGET_OUTPUT_DIR" >> "$env:GITHUB_OUTPUT"
         "binary_path=$BINARY_PATH" >> "$env:GITHUB_OUTPUT"
+        "pdb_file_path=$PDB_PATH" >> "$env:GITHUB_OUTPUT"
         Write-Output '::echo::off'
     }
     exit 0
@@ -178,6 +179,13 @@ if ($SKIP_BUILD_INSTALLER) {
 Write-Output "Built for $ARCH with executable at $BINARY_PATH"
 
 # Prepare bundled resources
+if ($env:SKIP_SETTINGS_SCHEMA -ne '1' -and -not $env:SETTINGS_SCHEMA_EXECUTABLE -and -not $env:SETTINGS_SCHEMA_SOURCE) {
+    if ($SKIP_BUILD_BINARY) {
+        Write-Error '-skip_build_binary requires SETTINGS_SCHEMA_SOURCE or SETTINGS_SCHEMA_EXECUTABLE.'
+        exit 1
+    }
+    $env:SETTINGS_SCHEMA_EXECUTABLE = $BINARY_PATH
+}
 $BUNDLED_RESOURCES_DIR = "$CARGO_TARGET_OUTPUT_DIR\resources"
 Write-Output "Preparing bundled resources..."
 & "$WINDOWS_INSTALLER_DIR\prepare_bundled_resources.ps1" -DestinationDir "$BUNDLED_RESOURCES_DIR" -Channel "$CHANNEL" -CargoProfile "$CARGO_PROFILE"
