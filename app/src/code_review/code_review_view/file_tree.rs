@@ -11,8 +11,9 @@ use indexmap::IndexMap;
 use warp_core::features::FeatureFlag;
 use warpui::elements::new_scrollable::{NewScrollable, ScrollableAppearance, SingleAxisConfig};
 use warpui::elements::{
-    Container, CrossAxisAlignment, DragBarSide, Flex, Hoverable, MainAxisAlignment, MainAxisSize,
-    MouseStateHandle, ParentElement, Resizable, ScrollbarWidth, Shrinkable, Text,
+    ConstrainedBox, Container, CrossAxisAlignment, DragBarSide, Empty, Flex, Hoverable,
+    MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Resizable, ScrollbarWidth,
+    Shrinkable, Text,
 };
 use warpui::fonts::Properties;
 use warpui::platform::Cursor;
@@ -21,8 +22,7 @@ use warpui::Element;
 use super::{CodeReviewAction, CodeReviewView, FileState, LoadedState};
 use crate::appearance::Appearance;
 use crate::code::editor::{add_color, remove_color};
-use crate::code::file_tree::row_renderer::{render_tree_row, TreeRowConfig, ITEM_PADDING};
-use crate::code::icon_from_file_path;
+use crate::code::file_tree::row_renderer::{render_tree_row, TreeRowConfig, FOLDER_INDENT, ITEM_FONT_SIZE, ITEM_PADDING};
 use crate::ui_components::icons::Icon;
 use crate::ui_components::item_highlight::{ImageOrIcon, ItemHighlightState};
 
@@ -330,7 +330,8 @@ impl CodeReviewView {
         .finish()
     }
 
-    /// Renders a file row with indent, file-type icon, filename, and +/- counts.
+    /// Renders a file row with +/- change counts at the start (replacing the file-type icon)
+    /// followed by the filename.  No trailing counts — code review only.
     #[allow(clippy::too_many_arguments)]
     fn render_file_tree_row(
         &self,
@@ -343,7 +344,6 @@ impl CodeReviewView {
         state: &LoadedState,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
-        // Re-use the per-file sidebar MouseStateHandle that already tracks hover for this file.
         let mouse_state = state
             .file_states
             .get(file_path)
@@ -351,36 +351,53 @@ impl CodeReviewView {
             .unwrap_or_default();
 
         let file_name = name.to_string();
-        let file_path_owned = file_path.to_string();
 
         Hoverable::new(mouse_state, move |mouse_state| {
             let item_highlight_state = ItemHighlightState::new(false, mouse_state);
+            let text_color = item_highlight_state.text_and_icon_color(appearance);
 
-            // Left side: tree row (indent + file-type icon + filename).
-            let file_icon = icon_from_file_path(&file_path_owned, appearance)
-                .map(ImageOrIcon::Image)
-                .unwrap_or(ImageOrIcon::Icon(Icon::File));
-            let config = TreeRowConfig {
-                depth,
-                name: file_name.clone(),
-                icon: file_icon,
-                is_expanded: None,
-                is_ignored: false,
-                item_highlight_state,
-            };
-            let inner_row = render_tree_row(config, appearance);
-
-            // Right side: +N / -N change counts.
-            let counts = render_change_counts(additions, deletions, appearance);
-
-            // Assemble: [shrinkable left row]  [fixed right counts]
             let mut row = Flex::row()
                 .with_main_axis_size(MainAxisSize::Max)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center);
-            row.add_child(Shrinkable::new(1., inner_row).finish());
-            if let Some(counts) = counts {
-                row.add_child(counts);
+
+            // Indentation spacer.
+            if depth > 0 {
+                row.add_child(
+                    Container::new(
+                        ConstrainedBox::new(Empty::new().finish())
+                            .with_width(depth as f32 * FOLDER_INDENT)
+                            .finish(),
+                    )
+                    .finish(),
+                );
             }
+
+            // Empty placeholder matching the chevron slot on dir rows so
+            // filenames stay left-aligned with directory names.
+            row.add_child(
+                Container::new(
+                    ConstrainedBox::new(Empty::new().finish())
+                        .with_width(FOLDER_INDENT)
+                        .with_height(FOLDER_INDENT)
+                        .finish(),
+                )
+                .with_margin_right(4.)
+                .finish(),
+            );
+
+            // +N / -M counts in the icon slot, then the filename.
+            if let Some(counts) = render_change_counts(additions, deletions, appearance) {
+                row.add_child(Container::new(counts).with_margin_right(8.).finish());
+            }
+            row.add_child(
+                Shrinkable::new(
+                    1.,
+                    Text::new_inline(file_name.clone(), appearance.ui_font_family(), ITEM_FONT_SIZE)
+                        .with_color(text_color)
+                        .finish(),
+                )
+                .finish(),
+            );
 
             apply_row_container(row.finish(), item_highlight_state, appearance)
         })
@@ -449,5 +466,5 @@ fn render_change_counts(
         );
     }
 
-    Some(Container::new(text.finish()).with_margin_left(8.).finish())
+    Some(text.finish())
 }
