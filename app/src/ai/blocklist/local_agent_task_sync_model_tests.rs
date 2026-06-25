@@ -85,8 +85,8 @@ fn context_window_exceeded_is_failed() {
     assert_update(
         classify_renderable_error(&RenderableAIError::ContextWindowExceeded("too big".into())),
         AgentTaskState::Failed,
-        Some(PlatformErrorCode::InternalError),
-        Some("Context window exceeded"),
+        Some(PlatformErrorCode::InvalidRequest),
+        Some("context window limit"),
     );
 }
 

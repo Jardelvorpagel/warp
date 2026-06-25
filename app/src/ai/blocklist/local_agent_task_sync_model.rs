@@ -446,11 +446,11 @@ pub(crate) fn classify_renderable_error(
                 PlatformErrorCode::InternalError,
             )),
         ),
-        RenderableAIError::ContextWindowExceeded(msg) => (
+        RenderableAIError::ContextWindowExceeded(_) => (
             AgentTaskState::Failed,
             Some(TaskStatusUpdate::with_error_code(
-                format!("Context window exceeded: {msg}"),
-                PlatformErrorCode::InternalError,
+                "The conversation history exceeded the model's context window limit. Start a new run with a shorter prompt or less context.",
+                PlatformErrorCode::InvalidRequest,
             )),
         ),
         RenderableAIError::InvalidApiKey { provider, .. } => (
