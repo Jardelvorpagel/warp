@@ -163,10 +163,9 @@ fn sort_nodes(nodes: &mut [CodeReviewTreeNode]) {
 
 // ─── Mouse-state management ───────────────────────────────────────────────────
 
-/// Inserts every directory path in the tree into `expanded_dirs`.
-///
-/// Existing entries are preserved so user-collapsed directories stay collapsed
-/// across diff reloads.  New directories (not yet seen) are added as expanded.
+/// Inserts every directory path in the tree into `expanded_dirs`, marking all
+/// of them as expanded.  Called on every diff reload, so any previously
+/// collapsed directory will be re-expanded when a new diff is loaded.
 pub(super) fn collect_expanded_dirs(
     nodes: &[CodeReviewTreeNode],
     expanded_dirs: &mut std::collections::HashSet<String>,
@@ -199,13 +198,15 @@ pub(super) fn rebuild_dir_mouse_states(
 
 impl CodeReviewView {
     /// Replaces the old flat `render_file_sidebar` with a collapsible file tree.
+    /// `tree` is the pre-built cache from `CodeReviewView::cached_sidebar_tree`,
+    /// avoiding a fresh allocation on every render frame.
     pub(super) fn render_file_tree_sidebar(
         &self,
+        tree: &[CodeReviewTreeNode],
         state: &LoadedState,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
-        let tree = build_code_review_tree(&state.file_states);
-        let tree_rows = self.render_tree_nodes(&tree, 0, state, appearance);
+        let tree_rows = self.render_tree_nodes(tree, 0, state, appearance);
 
         let mut column = Flex::column()
             .with_main_axis_alignment(MainAxisAlignment::Start)
@@ -306,7 +307,14 @@ impl CodeReviewView {
         appearance: &Appearance,
     ) -> Box<dyn Element> {
         let is_expanded = self.expanded_dirs.contains(path);
-        let mouse_state = self.dir_mouse_states.get(path).cloned().unwrap_or_default();
+        // dir_mouse_states is populated for all tree directories in the diff-load handler
+        // before any render of the sidebar occurs.  The fallback uses a handle created once
+        // during construction (never during render), satisfying the WarpUI constraint.
+        let mouse_state = self
+            .dir_mouse_states
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| self.sidebar_dir_fallback_mouse_state.clone());
         let dir_path = path.to_string();
         let dir_name = name.to_string();
 
@@ -386,8 +394,20 @@ impl CodeReviewView {
             );
 
             // +N / -M counts in the icon slot, then the filename.
+            // For pure renames (0 additions and 0 deletions) an empty placeholder keeps
+            // the filename column aligned with rows that do have counts.
             if let Some(counts) = render_change_counts(additions, deletions, appearance) {
                 row.add_child(Container::new(counts).with_margin_right(8.).finish());
+            } else {
+                row.add_child(
+                    Container::new(
+                        ConstrainedBox::new(Empty::new().finish())
+                            .with_width(FOLDER_INDENT)
+                            .finish(),
+                    )
+                    .with_margin_right(8.)
+                    .finish(),
+                );
             }
             row.add_child(
                 Shrinkable::new(
@@ -445,7 +465,7 @@ fn render_change_counts(
     }
 
     // Re-use the same font size as the row label for visual consistency.
-    let font_size = crate::code::file_tree::row_renderer::ITEM_FONT_SIZE * 0.9;
+    let font_size = ITEM_FONT_SIZE * 0.9;
     let mut text = Text::new("", appearance.ui_font_family(), font_size);
 
     if additions > 0 {

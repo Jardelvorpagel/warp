@@ -679,6 +679,12 @@ pub struct CodeReviewView {
     /// Per-directory [`MouseStateHandle`] for hover tracking in the sidebar tree.
     /// Rebuilt whenever the loaded diff changes; existing handles are preserved.
     dir_mouse_states: HashMap<String, MouseStateHandle>,
+    /// Cached file tree built from the loaded diff; avoids per-frame allocations.
+    /// Rebuilt in the diff-load handler alongside `expanded_dirs` and `dir_mouse_states`.
+    cached_sidebar_tree: Vec<file_tree::CodeReviewTreeNode>,
+    /// Pre-constructed fallback used when a dir path is absent from `dir_mouse_states`.
+    /// Created during construction so no `MouseStateHandle` is ever allocated during render.
+    sidebar_dir_fallback_mouse_state: MouseStateHandle,
 }
 
 impl CodeReviewView {
@@ -1371,6 +1377,8 @@ impl CodeReviewView {
             github_repo_model: None,
             expanded_dirs: HashSet::new(),
             dir_mouse_states: HashMap::new(),
+            cached_sidebar_tree: Vec::new(),
+            sidebar_dir_fallback_mouse_state: MouseStateHandle::default(),
         };
         view.set_active_repo_comment_model(comment_batch_model, ctx);
         if has_repo {
@@ -2585,6 +2593,7 @@ impl CodeReviewView {
                 let tree = file_tree::build_code_review_tree(&state.file_states);
                 file_tree::collect_expanded_dirs(&tree, &mut self.expanded_dirs);
                 file_tree::rebuild_dir_mouse_states(&tree, &mut self.dir_mouse_states);
+                self.cached_sidebar_tree = tree;
             }
         }
 
@@ -4507,7 +4516,7 @@ impl CodeReviewView {
         // When the flag is off, sidebar goes on the left (legacy).
         if !sidebar_on_right && self.file_sidebar_expanded && !state.file_states.is_empty() {
             sidebar_and_diffs_row.add_child(
-                Container::new(self.render_file_tree_sidebar(state, appearance)).finish(),
+                Container::new(self.render_file_tree_sidebar(&self.cached_sidebar_tree, state, appearance)).finish(),
             );
 
             let vertical_separator = ConstrainedBox::new(
@@ -4565,7 +4574,7 @@ impl CodeReviewView {
 
             sidebar_and_diffs_row.add_child(vertical_separator);
             sidebar_and_diffs_row.add_child(
-                Container::new(self.render_file_tree_sidebar(state, appearance)).finish(),
+                Container::new(self.render_file_tree_sidebar(&self.cached_sidebar_tree, state, appearance)).finish(),
             );
         }
 
