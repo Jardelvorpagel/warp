@@ -12316,7 +12316,6 @@ impl TerminalView {
                             );
                         });
 
-                        let sender_clone = model_event_sender.clone();
                         let update_finished_command_event =
                             persistence::ModelEvent::UpdateFinishedCommand {
                                 metadata: FinishedCommandMetadata {
@@ -12326,19 +12325,12 @@ impl TerminalView {
                                     session_id: active_session_id,
                                 },
                             };
-                        let _ = ctx.spawn(
-                            async move {
-                                // Sending over a sync sender can block the current thread, so we do this async.
-                                sender_clone.send(update_finished_command_event)
-                            },
-                            move |_, res, _| {
-                                if let Err(err) = res {
-                                    log::error!(
-                                        "Error sending UpdateFinishedCommand event: {err:?}"
-                                    );
-                                }
-                            },
-                        );
+                        // Use try_send to avoid losing the event on shutdown (same reasoning
+                        // as the SaveBlock try_send in terminal_pane.rs).
+                        if let Err(err) = model_event_sender.try_send(update_finished_command_event)
+                        {
+                            log::error!("Error sending UpdateFinishedCommand event: {err:?}");
+                        }
                     }
 
                     #[cfg(not(target_family = "wasm"))]

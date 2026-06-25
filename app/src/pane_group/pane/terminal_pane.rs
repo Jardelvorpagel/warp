@@ -1029,16 +1029,17 @@ fn handle_terminal_view_event(
                                     block: block.clone(),
                                     is_local: *is_local,
                                 });
-
-                                let sender_clone = sender.clone();
-                                let _ = ctx.spawn(async move {
-                                // Sending over a sync sender can block the current thread, so we do this async.
-                                sender_clone.send(block_completed_event)
-                            }, move |_, res, _| {
-                                if let Err(err) = res {
-                                    log::error!("Error sending block completed event for terminal id {terminal_pane_id:?} {err:?}");
+                                // Use try_send to avoid losing the block-save event on shutdown.
+                                // ctx.spawn runs on the foreground executor which is only driven by
+                                // UI events; if the user quits Warp while the UI is idle (e.g.,
+                                // right after exiting an alt-screen app like claude with no further
+                                // interaction), the spawned future is cancelled before the
+                                // SQLite thread receives the SaveBlock message.
+                                // try_send is non-blocking and succeeds as long as the 1024-slot
+                                // channel is not full, which is the case in practice.
+                                if let Err(err) = sender.try_send(block_completed_event) {
+                                    log::error!("Error sending block completed event for terminal id {terminal_pane_id:?}: {err:?}");
                                 }
-                            });
                             }
                         }
                         ctx.emit(pane_group::Event::ActiveSessionChanged);
