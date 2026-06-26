@@ -50,9 +50,7 @@ pub(crate) use self::environment_selector::{
 };
 use crate::ai::blocklist::agent_view::is_in_cloud_context;
 use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
-use crate::ai::blocklist::orchestration_topology::{
-    has_in_progress_descendant_conversation, is_descendant_conversation_id,
-};
+use crate::ai::blocklist::orchestration_topology::has_in_progress_descendant_conversation;
 use crate::ai::blocklist::prompt::prompt_alert::{PromptAlertEvent, PromptAlertView};
 use crate::ai::blocklist::usage::icon_for_context_window_usage;
 use crate::ai::blocklist::BlocklistAIInputModel;
@@ -783,12 +781,20 @@ impl AgentInputFooter {
         ctx.subscribe_to_model(
             &BlocklistAIHistoryModel::handle(ctx),
             |me, _, event, ctx| {
-                let is_relevant_child_event = me.is_relevant_orchestration_child_event(event, ctx);
-                if !event
+                if event
                     .terminal_view_id()
-                    .is_some_and(|id| id == me.terminal_view_id)
-                    && !is_relevant_child_event
+                    .is_some_and(|id| id != me.terminal_view_id)
                 {
+                    if matches!(
+                        event,
+                        BlocklistAIHistoryEvent::StartedNewConversation { .. }
+                            | BlocklistAIHistoryEvent::UpdatedConversationStatus { .. }
+                            | BlocklistAIHistoryEvent::RemoveConversation { .. }
+                            | BlocklistAIHistoryEvent::DeletedConversation { .. }
+                            | BlocklistAIHistoryEvent::RestoredConversations { .. }
+                    ) {
+                        me.sync_handoff_to_cloud_button(ctx);
+                    }
                     return;
                 }
                 me.update_ftu_callout_render_state(ctx);
@@ -800,19 +806,28 @@ impl AgentInputFooter {
                     | BlocklistAIHistoryEvent::ClearedConversationsInTerminalView { .. }
                     | BlocklistAIHistoryEvent::RemoveConversation { .. }
                     | BlocklistAIHistoryEvent::DeletedConversation { .. }
-                    | BlocklistAIHistoryEvent::RestoredConversations { .. }
-                    | BlocklistAIHistoryEvent::UpdatedAutoexecuteOverride { .. } => {
+                    | BlocklistAIHistoryEvent::RestoredConversations { .. } => {
                         me.sync_fast_forward_button(ctx);
                         me.sync_handoff_to_cloud_button(ctx);
                         me.update_context_window_button(ctx);
                         me.model_selector.update(ctx, |_, ctx| ctx.notify());
                         ctx.notify();
                     }
+                    BlocklistAIHistoryEvent::UpdatedConversationStatus { .. } => {
+                        me.sync_handoff_to_cloud_button(ctx);
+                        me.update_context_window_button(ctx);
+                        me.model_selector.update(ctx, |_, ctx| ctx.notify());
+                        ctx.notify();
+                    }
+                    BlocklistAIHistoryEvent::UpdatedAutoexecuteOverride { .. } => {
+                        me.sync_fast_forward_button(ctx);
+                        me.update_context_window_button(ctx);
+                        me.model_selector.update(ctx, |_, ctx| ctx.notify());
+                        ctx.notify();
+                    }
                     BlocklistAIHistoryEvent::UpdatedTodoList { .. }
-                    | BlocklistAIHistoryEvent::UpdatedConversationStatus { .. }
                     | BlocklistAIHistoryEvent::AppendedExchange { .. }
                     | BlocklistAIHistoryEvent::UpdatedStreamingExchange { .. } => {
-                        me.sync_handoff_to_cloud_button(ctx);
                         me.update_context_window_button(ctx);
                         me.model_selector.update(ctx, |_, ctx| ctx.notify());
                         ctx.notify();
@@ -2042,45 +2057,12 @@ impl AgentInputFooter {
             })
     }
 
-    /// Returns true when a child event should refresh this parent's handoff chip.
-    fn is_relevant_orchestration_child_event(
-        &self,
-        event: &BlocklistAIHistoryEvent,
-        app: &AppContext,
-    ) -> bool {
-        let history = BlocklistAIHistoryModel::as_ref(app);
-        let Some(active_conversation_id) = history.active_conversation_id(self.terminal_view_id)
-        else {
-            return false;
-        };
-        let is_descendant = |conversation_id| {
-            is_descendant_conversation_id(history, active_conversation_id, conversation_id)
-        };
-
-        match event {
-            BlocklistAIHistoryEvent::StartedNewConversation {
-                new_conversation_id,
-                ..
-            } => is_descendant(*new_conversation_id),
-            BlocklistAIHistoryEvent::UpdatedConversationStatus {
-                conversation_id, ..
-            }
-            | BlocklistAIHistoryEvent::RemoveConversation {
-                conversation_id, ..
-            }
-            | BlocklistAIHistoryEvent::DeletedConversation {
-                conversation_id, ..
-            } => is_descendant(*conversation_id),
-            BlocklistAIHistoryEvent::RestoredConversations {
-                conversation_ids, ..
-            } => conversation_ids.iter().copied().any(is_descendant),
-            _ => false,
-        }
-    }
-
     /// Updates the handoff chip disabled state and tooltip from child-agent status.
     fn sync_handoff_to_cloud_button(&self, ctx: &mut ViewContext<Self>) {
         let disabled = self.active_conversation_has_in_progress_children(ctx);
+        if self.handoff_to_cloud_button.as_ref(ctx).is_disabled() == disabled {
+            return;
+        }
         let tooltip = if disabled {
             HANDOFF_CHILD_AGENTS_IN_PROGRESS_TOOLTIP
         } else {

@@ -223,38 +223,34 @@ fn orchestration_aware_status_uses_aggregated_status_for_known_parent() {
     });
 }
 
+/// Verifies the handoff predicate terminates if the parent-child index contains a cycle.
 #[test]
-fn is_descendant_conversation_id_matches_nested_children() {
+fn has_in_progress_descendant_conversation_terminates_on_cycles() {
     App::test((), |mut app| async move {
         initialize_history_persistence_for_tests(&mut app);
         let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
         let (terminal_view_id, orchestrator_id, child_a, child_b) =
             build_orchestrator_with_two_children(&mut app, &history_model);
-        let grandchild = history_model.update(&mut app, |history_model, ctx| {
-            history_model.start_new_child_conversation(
+        history_model.update(&mut app, |history_model, ctx| {
+            history_model.update_conversation_status(
                 terminal_view_id,
-                "grandchild".to_string(),
                 child_a,
-                None,
+                ConversationStatus::Success,
                 ctx,
-            )
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_b,
+                ConversationStatus::Success,
+                ctx,
+            );
+            history_model.set_parent_for_conversation(orchestrator_id, child_a);
         });
 
         history_model.read(&app, |history_model, _| {
-            assert!(is_descendant_conversation_id(
+            assert!(!has_in_progress_descendant_conversation(
                 history_model,
                 orchestrator_id,
-                child_a,
-            ));
-            assert!(is_descendant_conversation_id(
-                history_model,
-                orchestrator_id,
-                grandchild,
-            ));
-            assert!(!is_descendant_conversation_id(
-                history_model,
-                child_b,
-                grandchild,
             ));
         });
     });
@@ -516,6 +512,48 @@ fn has_in_progress_descendant_conversation_matches_running_children_only() {
 
         history_model.read(&app, |history_model, _| {
             assert!(has_in_progress_descendant_conversation(
+                history_model,
+                orchestrator_id,
+            ));
+        });
+    });
+}
+
+/// Verifies removed running children no longer block handoff.
+#[test]
+fn has_in_progress_descendant_conversation_ignores_removed_children() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let (terminal_view_id, orchestrator_id, child_a, child_b) =
+            build_orchestrator_with_two_children(&mut app, &history_model);
+
+        history_model.update(&mut app, |history_model, ctx| {
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_a,
+                ConversationStatus::InProgress,
+                ctx,
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_b,
+                ConversationStatus::Success,
+                ctx,
+            );
+        });
+        history_model.read(&app, |history_model, _| {
+            assert!(has_in_progress_descendant_conversation(
+                history_model,
+                orchestrator_id,
+            ));
+        });
+
+        history_model.update(&mut app, |history_model, ctx| {
+            history_model.remove_conversation(child_a, terminal_view_id, ctx);
+        });
+        history_model.read(&app, |history_model, _| {
+            assert!(!has_in_progress_descendant_conversation(
                 history_model,
                 orchestrator_id,
             ));
