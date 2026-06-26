@@ -1964,6 +1964,12 @@ impl BlocklistAIController {
         conversation_id: AIConversationId,
         ctx: &mut ModelContext<Self>,
     ) {
+        let owns_conversation = BlocklistAIHistoryModel::as_ref(ctx)
+            .all_live_conversations_for_terminal_view(self.terminal_view_id)
+            .any(|conversation| conversation.id() == conversation_id);
+        if !owns_conversation {
+            return;
+        }
         let is_in_progress = BlocklistAIHistoryModel::as_ref(ctx)
             .conversation(&conversation_id)
             .is_some_and(|conversation| conversation.status().is_in_progress());
