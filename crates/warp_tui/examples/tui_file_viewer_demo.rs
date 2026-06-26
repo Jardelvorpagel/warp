@@ -218,7 +218,11 @@ impl TuiView for FileViewerView {
 
             if let Some(highlights) = highlights.as_ref() {
                 for (col, _) in line.chars().enumerate() {
-                    let offset = CharOffset::from(global + col + 2);
+                    // The highlight map is built with ByteOffset(N) but should use
+                    // ByteOffset(N+1) (tree-sitter byte N = buffer byte N+1). This shifts
+                    // all ranges by -1 char, so we look up at CharOffset(global + col + 1)
+                    // instead of +2 to stay in sync with the map's positions.
+                    let offset = CharOffset::from(global + col + 1);
                     if let Some(color) = highlights.get(&offset) {
                         color_cells.push((
                             row_in_area,
