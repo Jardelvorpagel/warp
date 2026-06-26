@@ -63,10 +63,13 @@ impl HighlightQuery {
                     .and_then(|inner| *inner);
 
                 if let Some(color) = color {
+                    // tree-sitter's byte position N corresponds to buffer ByteOffset N+1
+                    // because the parse callback does `bytes.seek(ByteOffset::from(byte_offset + 1))`.
+                    // Adding 1 here aligns the captured ranges with the buffer's CharOffset space.
                     let char_start =
-                        ByteOffset::from(insertion_range.start).to_buffer_char_offset(buffer);
+                        ByteOffset::from(insertion_range.start + 1).to_buffer_char_offset(buffer);
                     let char_end =
-                        ByteOffset::from(insertion_range.end).to_buffer_char_offset(buffer);
+                        ByteOffset::from(insertion_range.end + 1).to_buffer_char_offset(buffer);
                     if char_start < char_end {
                         range_map.insert(char_start..char_end, color);
                     }

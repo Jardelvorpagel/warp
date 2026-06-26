@@ -218,11 +218,10 @@ impl TuiView for FileViewerView {
 
             if let Some(highlights) = highlights.as_ref() {
                 for (col, _) in line.chars().enumerate() {
-                    // The highlight map is built with ByteOffset(N) but should use
-                    // ByteOffset(N+1) (tree-sitter byte N = buffer byte N+1). This shifts
-                    // all ranges by -1 char, so we look up at CharOffset(global + col + 1)
-                    // instead of +2 to stay in sync with the map's positions.
-                    let offset = CharOffset::from(global + col + 1);
+                    // CharOffset(global + col + 2): the buffer is 1-indexed with a
+                    // BlockMarker at CharOffset(1), so the char at 0-based string position
+                    // (global + col) lives at CharOffset(global + col + 2).
+                    let offset = CharOffset::from(global + col + 2);
                     if let Some(color) = highlights.get(&offset) {
                         color_cells.push((
                             row_in_area,
