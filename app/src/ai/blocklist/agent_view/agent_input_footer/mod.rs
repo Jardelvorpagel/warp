@@ -388,6 +388,7 @@ impl AgentInputFooter {
                 .with_tooltip(HANDOFF_TO_CLOUD_TOOLTIP)
                 .with_size(button_size)
                 .with_tooltip_alignment(TooltipAlignment::Left)
+                .with_disabled_theme(AgentInputButtonTheme)
                 .on_click(|ctx| {
                     ctx.dispatch_typed_action(AgentInputFooterAction::HandoffChipClicked);
                 })
