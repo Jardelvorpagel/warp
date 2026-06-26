@@ -130,6 +130,29 @@ where
         Ok(())
     }
 
+    /// Async variant of [`run_until`] for use in `App::test` async contexts.
+    ///
+    /// `run_until` blocks the thread on each `poll_event` call, which starves
+    /// the single-threaded `LocalExecutor` used by `App::test`.  This variant
+    /// polls with a short timeout (10 ms) and then yields to the executor so
+    /// any pending foreground futures (e.g. syntax-tree callbacks dispatched
+    /// from a background Tokio thread) get a chance to run between frames.
+    pub async fn run_until_async(
+        &mut self,
+        app: &mut App,
+        mut should_quit: impl FnMut(&App) -> bool,
+    ) -> io::Result<()> {
+        while !should_quit(app) {
+            self.draw_if_dirty(app)?;
+            // Poll with a short timeout so we don't monopolise the thread.
+            self.poll_and_dispatch(app, Duration::from_millis(10))?;
+            // Yield to the LocalExecutor so that foreground tasks spawned by
+            // background work (e.g. syntax-highlight callbacks) can run.
+            futures_lite::future::yield_now().await;
+        }
+        Ok(())
+    }
+
     /// The terminal this runtime draws to. Primarily useful for inspecting an
     /// in-memory terminal's captured output in tests.
     pub fn terminal(&self) -> &R {

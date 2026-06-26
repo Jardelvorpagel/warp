@@ -120,6 +120,9 @@ impl FileViewerView {
             });
             m.set_language_with_local_path(&path, ctx);
             m.reset(InitialBufferState::plain_text(&content), ctx);
+            // Kick off the async tree-sitter parse so highlights_in_ranges
+            // returns colors on the next render after the parse completes.
+            m.rebuild_layout_with_syntax_highlighting(ctx);
         });
 
         Self {
@@ -215,13 +218,16 @@ impl TuiView for FileViewerView {
 
             if let Some(highlights) = highlights.as_ref() {
                 for (col, _) in line.chars().enumerate() {
-                    let offset = CharOffset::from(global + col + 1);
+                    // The buffer has a BlockMarker sentinel at CharOffset(1),
+                    // so the first visible char is at CharOffset(2).
+                    // String index i → CharOffset(i + 2).
+                    let offset = CharOffset::from(global + col + 2);
                     if let Some(color) = highlights.get(&offset) {
-                        color_cells.push((
-                            row_in_area,
-                            gutter_width + col as u16,
-                            Color::Rgb(color.r, color.g, color.b),
-                        ));
+                        // Map to the nearest 256-color index for maximum
+                        // terminal compatibility (truecolor RGB also works but
+                        // requires COLORTERM=truecolor).
+                        let tui_color = rgb_to_256color(color.r, color.g, color.b);
+                        color_cells.push((row_in_area, gutter_width + col as u16, tui_color));
                     }
                 }
             }
@@ -337,6 +343,21 @@ impl TuiElement for FileViewerElement {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Color helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Map an sRGB triple to the nearest xterm-256 color index.
+/// Falls back to the 6×6×6 color cube (indices 16–231) which is supported by
+/// virtually every modern terminal emulator.
+fn rgb_to_256color(r: u8, g: u8, b: u8) -> Color {
+    // Map each channel to a 0-5 index in the 6×6×6 cube.
+    let ri = ((r as u16 * 5 + 127) / 255) as u8;
+    let gi = ((g as u16 * 5 + 127) / 255) as u8;
+    let bi = ((b as u16 * 5 + 127) / 255) as u8;
+    Color::Indexed(16 + 36 * ri + 6 * gi + bi)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -371,9 +392,27 @@ fn main() {
         });
 
         let mut runtime = TuiRuntime::enter(&app, window_id, root).expect("enter alternate screen");
+
+        // The background tree-sitter parse runs on a Tokio thread and posts its
+        // result via the foreground executor. Give Tokio time to finish (the
+        // parse of a typical source file takes <10 ms), then yield to the
+        // LocalExecutor so the result callback fires before the first frame.
+        // We use run_until_async with a 0-tick quit predicate to pump the
+        // executor without entering the interactive loop.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let mut ticks = 0u32;
+        runtime
+            .run_until_async(&mut app, |_| {
+                ticks += 1;
+                ticks > 20
+            })
+            .await
+            .expect("flush background tasks");
+
         let quit_for_loop = quit.clone();
         runtime
-            .run_until(&mut app, move |_| quit_for_loop.get())
+            .run_until_async(&mut app, move |_| quit_for_loop.get())
+            .await
             .expect("run TUI event loop");
     });
 }
