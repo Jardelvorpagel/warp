@@ -4459,7 +4459,7 @@ type WorkspaceSettings {
   llmSettings: LlmSettings!
   sandboxedAgentSettings: SandboxedAgentSettings
   secretRedactionSettings: SecretRedactionSettings!
-  teamByo: TeamByoSettings
+  teamByo(includeDisabled: Boolean = false): TeamByoSettings
   telemetrySettings: TelemetrySettings!
   ugcCollectionSettings: UgcCollectionSettings!
   usageBasedPricingSettings: UsageBasedPricingSettings!
