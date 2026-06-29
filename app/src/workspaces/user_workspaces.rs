@@ -1548,7 +1548,18 @@ impl UserWorkspaces {
     }
 
     /// Returns the current team's secret-less team-BYO projection, if any.
+    ///
+    /// Gated behind `FeatureFlag::TeamByo`: when the flag is off this returns
+    /// `None`, which is the single client seam for the whole Team BYO feature.
+    /// Every consumer (picker Team labels / credential icon, the "Provided by
+    /// your team" settings section, and the member allow-keys/endpoints policy
+    /// in `ApiKeysWidget` / `custom_inference_enabled`) flows through here, so a
+    /// disabled flag hides all of it. The server enforces the real policy
+    /// regardless of what the client renders.
     pub fn current_team_byo(&self) -> Option<&TeamByoSettings> {
+        if !FeatureFlag::TeamByo.is_enabled() {
+            return None;
+        }
         self.current_team()
             .and_then(|team| team.organization_settings.team_byo.as_ref())
     }
