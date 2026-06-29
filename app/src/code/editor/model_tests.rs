@@ -142,6 +142,33 @@ fn test_set_soft_wrap_does_not_modify_buffer() {
 }
 
 #[test]
+fn test_line_range_to_decoration_anchors_char_offsets() {
+    App::test((), |mut app| async move {
+        initialize_deps(&mut app);
+        let editor = mock_model(&mut app, "alpha\nbravo\ncharlie\n", ContentVersion::new());
+        layout_model(&mut app, &editor).await;
+
+        app.read(|ctx| {
+            let model = editor.as_ref(ctx);
+            let buffer = model.content.as_ref(ctx);
+            let overlay = Appearance::as_ref(ctx).theme().surface_2();
+
+            // Decorate the second logical line (index 1, "bravo\n"). The decoration
+            // must be anchored to the buffer char offsets of that line so it tracks
+            // the text under soft wrap rather than assuming one screen row per line.
+            let decoration = CodeEditorModel::line_range_to_decoration(buffer, 1..2, overlay);
+            let expected_start = Point::new(1, 0).to_buffer_char_offset(buffer);
+            let expected_end = Point::new(2, 0).to_buffer_char_offset(buffer);
+
+            assert_eq!(decoration.start, expected_start);
+            assert_eq!(decoration.end, expected_end);
+            // "bravo\n" is six characters, so the decorated char range spans six.
+            assert_eq!((decoration.end - decoration.start).as_usize(), 6);
+        });
+    })
+}
+
+#[test]
 fn test_toggle_comment() {
     App::test((), |mut app| async move {
         initialize_deps(&mut app);

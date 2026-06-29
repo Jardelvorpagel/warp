@@ -816,9 +816,14 @@ impl<V: EditorView> EditorWrapper<V> {
             // If the corresponding line in the editor element has a line decoration, we should apply the decoration
             // in the wrapper as well. This does assume the line could only have a single decoration. I think it's fine
             // given this is a wrapper specific to our code pane implementation.
+            // Line decorations are anchored to buffer char offsets, so match on the
+            // block's starting char offset rather than its (soft-wrap-dependent) line index.
+            let block_offset = block.viewport_item().block_offset();
             let overlay = line_decorations
                 .iter()
-                .filter(|decoration| decoration.start <= line_count && decoration.end > line_count)
+                .filter(|decoration| {
+                    decoration.start <= block_offset && decoration.end > block_offset
+                })
                 .map(|decoration| decoration.overlay)
                 .next();
 
@@ -1377,7 +1382,6 @@ impl<V: EditorView> Element for EditorWrapper<V> {
         // Added/replaced lines: one rect per LineDecoration range.
         {
             let model = self.model().as_ref(app);
-            let content = model.content();
             let y_adjustment = match &self.editor {
                 InnerEditor::Lens(element) => element
                     .starting_renderable_block_offset()
@@ -1385,9 +1389,19 @@ impl<V: EditorView> Element for EditorWrapper<V> {
                     .into_pixels(),
                 InnerEditor::FullEditor(_) => model.viewport().scroll_top(),
             };
+            // Line decorations are anchored to buffer char offsets, so resolve
+            // their vertical extent through the current layout. This keeps diff
+            // highlights aligned with their text under soft wrap (a logical line
+            // may span several visual rows) and as the editor is resized.
             for decoration in model.decorations().line_decoration_ranges() {
-                let start_y = content.y_offset_at_line(decoration.start);
-                let end_y = content.y_offset_at_line(decoration.end);
+                let Some((start_y, _)) = model.character_vertical_bounds(decoration.start) else {
+                    continue;
+                };
+                let end_y = model
+                    .character_vertical_bounds(decoration.end)
+                    .map(|(top, _)| top)
+                    .unwrap_or_else(|| model.height())
+                    .max(start_y);
                 ctx.scene
                     .draw_rect_without_hit_recording(RectF::new(
                         origin + vec2f(0., (start_y - y_adjustment).as_f32()),

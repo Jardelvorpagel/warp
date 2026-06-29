@@ -5031,18 +5031,27 @@ impl UpdateDecorationAfterLayout {
     }
 }
 
-/// A render-time line decoration, such as highlighting the line with active cursor.
+/// A render-time line decoration, such as highlighting the line with active cursor
+/// or a diff hunk's added/changed lines.
+///
+/// The decorated range is anchored to buffer **character offsets** (the start of
+/// the first decorated line up to the start of the line after the range) rather
+/// than line indices. This keeps the decoration aligned with its text under
+/// soft wrap: a logical line can occupy several visual rows, so the painter
+/// resolves these offsets to vertical positions through the current layout (see
+/// [`RenderState::character_vertical_bounds`]) instead of assuming one row per
+/// line.
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct LineDecoration {
-    /// Start of the decorated range (inclusive).
-    pub start: LineCount,
-    /// End of the decorated range (exclusive).
-    pub end: LineCount,
+    /// Start of the decorated range (inclusive), as a buffer char offset.
+    pub start: CharOffset,
+    /// End of the decorated range (exclusive), as a buffer char offset.
+    pub end: CharOffset,
     pub overlay: ThemeFill,
 }
 
 impl LineDecoration {
-    pub fn new(start: LineCount, end: LineCount, overlay: ThemeFill) -> Self {
+    pub fn new(start: CharOffset, end: CharOffset, overlay: ThemeFill) -> Self {
         debug_assert!(start <= end);
         Self {
             start,

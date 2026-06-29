@@ -1163,14 +1163,21 @@ impl CodeEditorModel {
                             &mut line_iterator,
                             appearance,
                         ) {
-                            Some(RenderableDiffHunk::Add { line_decoration }) => {
-                                (Vec::new(), Some(line_decoration), None::<Vec<Decoration>>)
+                            Some(RenderableDiffHunk::Add {
+                                line_range,
+                                overlay,
+                            }) => {
+                                let buffer = self.content.as_ref(ctx);
+                                let decoration =
+                                    Self::line_range_to_decoration(buffer, line_range, overlay);
+                                (Vec::new(), Some(decoration), None::<Vec<Decoration>>)
                             }
                             Some(RenderableDiffHunk::Deletion { removed_lines }) => {
                                 (removed_lines, None, None::<Vec<Decoration>>)
                             }
                             Some(RenderableDiffHunk::Replace {
-                                line_decoration,
+                                line_range,
+                                overlay,
                                 inline_highlights,
                                 mut removed_lines,
                             }) => {
@@ -1178,9 +1185,7 @@ impl CodeEditorModel {
                                 let should_highlight_changes = match focused_diff_index {
                                     Some(focused_index) => diff_index == focused_index,
                                     None => {
-                                        let new_lines = (line_decoration.end
-                                            - line_decoration.start)
-                                            .as_usize();
+                                        let new_lines = line_range.end - line_range.start;
                                         new_lines == 1 && removed_lines.len() == 1
                                     }
                                 };
@@ -1210,7 +1215,12 @@ impl CodeEditorModel {
                                     None
                                 };
 
-                                (removed_lines, Some(line_decoration), highlight_text)
+                                let decoration = {
+                                    let buffer = self.content.as_ref(ctx);
+                                    Self::line_range_to_decoration(buffer, line_range, overlay)
+                                };
+
+                                (removed_lines, Some(decoration), highlight_text)
                             }
                             None => (Vec::new(), None, None::<Vec<Decoration>>),
                         };
@@ -1261,6 +1271,22 @@ impl CodeEditorModel {
                 text: all_diffs_text_decorations,
             });
         });
+    }
+
+    /// Converts a logical (buffer) line range `[start_line, end_line)` into a
+    /// char-offset–anchored [`LineDecoration`]. The decoration spans from the
+    /// first char of `start_line` up to the first char of `end_line`
+    /// (exclusive). Anchoring to char offsets keeps the highlight aligned with
+    /// its text under soft wrap, where one logical line can span several visual
+    /// rows; the painter resolves the offsets through the current layout.
+    fn line_range_to_decoration(
+        buffer: &Buffer,
+        line_range: Range<usize>,
+        overlay: Fill,
+    ) -> LineDecoration {
+        let start = Point::new(line_range.start as u32, 0).to_buffer_char_offset(buffer);
+        let end = Point::new(line_range.end as u32, 0).to_buffer_char_offset(buffer);
+        LineDecoration::new(start, end, overlay)
     }
 
     /// Returns `true` if the diff navigation was toggled on. Returns `false` if the diff navigation
@@ -1796,12 +1822,11 @@ impl CodeEditorModel {
                     .selected_lines(ctx)
                     .into_iter()
                     .map(|line| {
-                        LineDecoration::new(
-                            // TODO(CLD-558)
-                            LineCount::from(line - 1),
-                            LineCount::from(line),
-                            overlay,
-                        )
+                        // TODO(CLD-558): `selected_lines` is 1-based, so the
+                        // highlighted line is `[line - 1, line)`. Anchor to char
+                        // offsets so the highlight tracks the line under wrap.
+                        let buffer = self.content.as_ref(ctx);
+                        Self::line_range_to_decoration(buffer, (line - 1)..line, overlay)
                     })
                     .collect(),
             )
