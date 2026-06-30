@@ -5991,7 +5991,12 @@ fn block_select_mouse_up_with_highlighted_link_does_not_redetermine_focus() {
                  (regression QUALITY-932: this would blur the terminal and clear the link tooltip)"
             );
 
-            // open_grid_link_tool_tip must still be set — it should not have been cleared.
+            // Belt-and-suspenders: verify block_select() itself did not clear open_grid_link_tool_tip.
+            // Note: in production the tooltip is cleared in on_blur(), which fires asynchronously
+            // after redetermine_global_focus() shifts focus — but on_blur() does not fire in the
+            // unit-test environment. This assertion therefore does not detect the focus-triggered
+            // clearing; the last_focus_ts assertion above is the primary signal. This check only
+            // confirms that block_select(MouseUp) does not clear the tooltip directly.
             assert!(
                 view.open_grid_link_tool_tip.is_some(),
                 "open_grid_link_tool_tip must remain set when highlighted_link is Some"
