@@ -635,6 +635,8 @@ impl CustomEndpointModal {
         // hostname that resolves to a private IP (DNS rebinding) is not blocked here.
         // This is an accepted V0 trade-off; future hardening could pin-check the resolved
         // address before sending the request.
+        // Redirects are disabled on the client (see client builder below) so a public URL
+        // that 30x-redirects to a private address cannot bypass the host check.
         if url.trim().is_empty() || api_key.trim().is_empty() || validate_url(&url).is_err() {
             return;
         }
@@ -651,8 +653,12 @@ impl CustomEndpointModal {
 
         let handle = ctx.spawn(
             async move {
+                // Disable redirects: a 30x to a private address could bypass
+                // the `validate_url` SSRF guard. A redirect response is therefore
+                // treated as a non-200 (connection could not be confirmed).
                 let client = match reqwest::Client::builder()
                     .timeout(Duration::from_secs(CONNECTION_TEST_TIMEOUT_SECS))
+                    .redirect(reqwest::redirect::Policy::none())
                     .build()
                 {
                     Ok(c) => c,
@@ -887,7 +893,11 @@ impl View for CustomEndpointModal {
                 );
             } else {
                 // Maintain the same bottom margin even when the button is hidden.
-                column.add_child(Container::new(Empty::new().finish()).with_margin_bottom(16.).finish());
+                column.add_child(
+                    Container::new(Empty::new().finish())
+                        .with_margin_bottom(16.)
+                        .finish(),
+                );
             }
         }
 

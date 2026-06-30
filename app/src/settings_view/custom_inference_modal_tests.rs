@@ -69,6 +69,19 @@ fn stale_result_is_dropped_when_status_is_not_testing() {
     }
 }
 
+#[test]
+fn redirect_response_treated_as_failed_status() {
+    // The reqwest client is built with `redirect::Policy::none()`, so a 30x
+    // response causes `send()` to return an `Err`, which maps to `success = false`
+    // and ultimately `ConnectionTestStatus::Failed`. This prevents a public URL
+    // that redirects to a private address from bypassing `validate_url`'s SSRF
+    // guard.
+    assert_eq!(
+        connection_status_from_result(false),
+        ConnectionTestStatus::Failed,
+    );
+}
+
 // --- validate_url tests (existing) ---
 
 #[test]
