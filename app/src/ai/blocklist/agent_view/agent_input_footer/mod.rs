@@ -747,20 +747,10 @@ impl AgentInputFooter {
         ctx.subscribe_to_model(
             &LLMPreferences::handle(ctx),
             |me, preferences, event, ctx| {
-                let LLMPreferencesEvent::UpdatedActiveAgentModeLLM = event else {
+                if !llm_preferences_event_affects_long_context_warning(event) {
                     return;
-                };
-                let (effective_model_provider, effective_model_threshold) = {
-                    let active_base_model = preferences
-                        .as_ref(ctx)
-                        .get_active_base_model(ctx, Some(me.terminal_view_id));
-                    (
-                        active_base_model.provider.clone(),
-                        active_base_model.context_window.long_context_threshold,
-                    )
-                };
-                me.long_context_warning_state
-                    .update_effective_model(effective_model_provider, effective_model_threshold);
+                }
+                me.sync_long_context_warning_from_effective_model(preferences.as_ref(ctx), ctx);
                 me.update_context_window_button(ctx);
             },
         );
@@ -916,12 +906,16 @@ impl AgentInputFooter {
             None
         };
 
-        let (effective_model_provider, effective_model_threshold) = {
-            let active_base_model =
-                LLMPreferences::as_ref(ctx).get_active_base_model(ctx, Some(terminal_view_id));
+        let (effective_model_provider, effective_model_threshold, is_custom_endpoint) = {
+            let preferences = LLMPreferences::as_ref(ctx);
+            let active_base_model = preferences.get_active_base_model(ctx, Some(terminal_view_id));
+            let is_custom_endpoint = preferences
+                .custom_llm_info_for_id(&active_base_model.id)
+                .is_some();
             (
                 active_base_model.provider.clone(),
                 active_base_model.context_window.long_context_threshold,
+                is_custom_endpoint,
             )
         };
         let total_input_tokens = BlocklistAIHistoryModel::as_ref(ctx)
@@ -949,6 +943,7 @@ impl AgentInputFooter {
             long_context_warning_state: LongContextWarningState::new(
                 effective_model_provider,
                 effective_model_threshold,
+                is_custom_endpoint,
                 total_input_tokens,
             ),
             model_selector: profile_model_selector_full,
@@ -1110,6 +1105,22 @@ impl AgentInputFooter {
             .map_or(0, |conversation| conversation.total_input_tokens());
         self.long_context_warning_state
             .set_total_input_tokens(total_input_tokens);
+    }
+
+    fn sync_long_context_warning_from_effective_model(
+        &mut self,
+        preferences: &LLMPreferences,
+        app: &AppContext,
+    ) {
+        let active_base_model = preferences.get_active_base_model(app, Some(self.terminal_view_id));
+        let is_custom_endpoint = preferences
+            .custom_llm_info_for_id(&active_base_model.id)
+            .is_some();
+        self.long_context_warning_state.update_effective_model(
+            active_base_model.provider.clone(),
+            active_base_model.context_window.long_context_threshold,
+            is_custom_endpoint,
+        );
     }
 
     fn has_active_cli_agent_input_session(&self, app: &AppContext) -> bool {

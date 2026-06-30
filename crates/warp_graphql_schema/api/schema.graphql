@@ -828,12 +828,6 @@ type ConversationUsageMetadata {
   """
   totalInputTokens: Int!
 
-  """
-  Input tokens of the latest primary-agent LLM call in the latest successfully
-  persisted request that had Warp-charged or BYOK usage; 0 otherwise.
-  """
-  totalInputTokens: Int!
-
   """The total number of inference credits spent so far in the conversation"""
   creditsSpent: Float!
 
