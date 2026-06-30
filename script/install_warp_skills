@@ -45,17 +45,37 @@ if [[ -n "${pinned_ref}" ]]; then
   source_spec="${SKILLS_REPO}#${pinned_ref}"
 fi
 
-# Match the install target chosen for common skills (project by default).
-target_args=()
+# Install into the same target as the common skills (project by default).
 if [[ "${WARP_COMMON_SKILLS_INSTALL_TARGET:-}" = "global" ]]; then
-  target_args=(--global)
+  target_dir="${HOME}/.agents/skills"
+else
+  target_dir="${REPO_ROOT}/.agents/skills"
 fi
 
-# Clone uses the developer's git auth (SSH or the gh credential helper).
-cd "${REPO_ROOT}"
-if npx --yes "skills@${SKILLS_CLI_VERSION}" add "${source_spec}" \
-  --agent warp --skill '*' --yes --copy "${target_args[@]}"; then
-  notice "installed pinned skills from ${source_spec}."
+# Run the install inside a throwaway temp dir so the skills CLI's own
+# skills-lock.json is never written into this repo (which would mutate the
+# committed common-skills skills-lock.json), then copy only the resulting
+# skill directories into the target. The clone uses the developer's git auth
+# (SSH or the gh credential helper).
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/warp-skills.XXXXXX")"
+trap 'rm -rf "${tmp_dir}"' EXIT
+
+if ( cd "${tmp_dir}" && npx --yes "skills@${SKILLS_CLI_VERSION}" add "${source_spec}" \
+  --agent warp --skill '*' --yes --copy ) && [[ -d "${tmp_dir}/.agents/skills" ]]; then
+  mkdir -p "${target_dir}"
+  installed=0
+  for skill_dir in "${tmp_dir}"/.agents/skills/*/; do
+    [[ -d "${skill_dir}" ]] || continue
+    skill_name="$(basename "${skill_dir}")"
+    rm -rf "${target_dir:?}/${skill_name}"
+    cp -R "${skill_dir%/}" "${target_dir}/${skill_name}"
+    installed=1
+  done
+  if [[ "${installed}" -eq 1 ]]; then
+    notice "installed pinned skills from ${source_spec} into ${target_dir}."
+  else
+    notice "not installed (no skills found) — skipping."
+  fi
 else
   notice "not installed (no access) — skipping."
 fi
