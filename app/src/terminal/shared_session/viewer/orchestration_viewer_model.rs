@@ -10,10 +10,8 @@
 //! conversations; the streamer is a shared singleton.
 //! Pill clicks navigate via `SwapPaneToConversation`.
 use std::collections::HashMap;
-use std::time::Duration;
 
 use session_sharing_protocol::common::SessionId;
-use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::{Entity, EntityId, ModelContext, SingletonEntity, WeakViewHandle};
 
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
@@ -25,9 +23,6 @@ use crate::ai::blocklist::orchestration_event_streamer::{
 use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::server::server_api::ServerApiProvider;
 use crate::terminal::{Event as TerminalViewEvent, TerminalView};
-
-/// Refetch cadence for children whose claim-time `session_id` is not yet known.
-const PENDING_SESSION_ID_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Per-child orchestration metadata, keyed by `AmbientAgentTaskId`.
 struct ChildAgentEntry {
@@ -51,9 +46,6 @@ pub struct OrchestrationViewerModel {
     /// Secondary index keyed by stringified `run_id`, used by the
     /// broadcast event handler. Kept in sync with `children`.
     children_by_run_id: HashMap<String, AmbientAgentTaskId>,
-    /// Periodic timer fetching the claim-time `session_id` for
-    /// not-yet-claimed children.
-    pending_session_id_poll_handle: Option<SpawnedFutureHandle>,
     /// Test-only: counts `spawn_task_metadata_fetch` invocations.
     #[cfg(test)]
     metadata_fetch_dispatch_count: usize,
@@ -95,7 +87,6 @@ impl OrchestrationViewerModel {
             terminal_view,
             children: HashMap::new(),
             children_by_run_id: HashMap::new(),
-            pending_session_id_poll_handle: None,
             #[cfg(test)]
             metadata_fetch_dispatch_count: 0,
         };
@@ -340,8 +331,6 @@ impl OrchestrationViewerModel {
                 entry.pane_materialization_requested = true;
                 self.request_child_pane_materialization(conversation_id, sid, ctx);
             }
-            // Re-arm the session_id timer; no-op once all children are materialized.
-            self.maybe_schedule_pending_session_id_poll(ctx);
             return;
         }
 
@@ -426,63 +415,6 @@ impl OrchestrationViewerModel {
         if let Some(sid) = session_id {
             self.request_child_pane_materialization(conversation_id, sid, ctx);
         }
-
-        // Arm the session_id refetch timer.
-        self.maybe_schedule_pending_session_id_poll(ctx);
-    }
-
-    // ---- Pending-session_id polling
-
-    /// True iff at least one tracked child is still pending materialization.
-    fn has_pending_session_id_children(&self) -> bool {
-        self.children
-            .values()
-            .any(|entry| entry.session_id.is_none() || !entry.pane_materialization_requested)
-    }
-
-    /// Schedules the next session_id refetch tick.
-    /// Safe to call unconditionally — bails when not needed.
-    fn maybe_schedule_pending_session_id_poll(&mut self, ctx: &mut ModelContext<Self>) {
-        if self.pending_session_id_poll_handle.is_some() {
-            return;
-        }
-        if !self.has_pending_session_id_children() {
-            return;
-        }
-        let handle = ctx.spawn(
-            async {
-                Timer::after(PENDING_SESSION_ID_POLL_INTERVAL).await;
-            },
-            |me, _, ctx| {
-                me.pending_session_id_poll_handle = None;
-                me.run_pending_session_id_poll(ctx);
-            },
-        );
-        self.pending_session_id_poll_handle = Some(handle);
-    }
-
-    /// Body of the session_id timer tick. Refetches metadata for every
-    /// child still missing a `session_id`/pane, then reschedules until
-    /// the pending set is empty.
-    fn run_pending_session_id_poll(&mut self, ctx: &mut ModelContext<Self>) {
-        let pending: Vec<AmbientAgentTaskId> = self
-            .children
-            .iter()
-            .filter(|(_, entry)| {
-                entry.session_id.is_none() || !entry.pane_materialization_requested
-            })
-            .map(|(task_id, _)| *task_id)
-            .collect();
-
-        if pending.is_empty() {
-            return;
-        }
-
-        for task_id in pending {
-            self.spawn_task_metadata_fetch(task_id, "PendingSessionIdPoll", ctx);
-        }
-
-        self.maybe_schedule_pending_session_id_poll(ctx);
     }
 
     /// Backfills `parent_agent_id` on viewer-created children once the
