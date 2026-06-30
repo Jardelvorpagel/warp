@@ -2092,7 +2092,8 @@ impl AgentInputFooter {
             BlocklistAIHistoryModel::as_ref(ctx).active_conversation(self.terminal_view_id)
         {
             let usage = conversation.context_window_usage();
-            let show_long_context_warning = self.long_context_warning_state.is_visible();
+            let show_long_context_warning = FeatureFlag::LongContextWarning.is_enabled()
+                && self.long_context_warning_state.is_visible();
             let icon = icon_for_context_window_usage(usage, show_long_context_warning);
             let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
 
