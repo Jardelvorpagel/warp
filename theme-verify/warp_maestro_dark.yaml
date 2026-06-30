@@ -1,0 +1,25 @@
+name: Warp Maestro Dark
+accent: "#C59FFF"
+cursor: "#C59FFF"
+background: "#1E1E1D"
+foreground: "#F5F5F5"
+details: darker
+terminal_colors:
+  normal:
+    black: "#1E1E1D"
+    red: "#FF5233"
+    green: "#45BB00"
+    yellow: "#FFBD17"
+    blue: "#3B7DFF"
+    magenta: "#C59FFF"
+    cyan: "#19C3D4"
+    white: "#D5D5D5"
+  bright:
+    black: "#6E6E6E"
+    red: "#FF7A63"
+    green: "#6FE03A"
+    yellow: "#FFD45E"
+    blue: "#6FA1FF"
+    magenta: "#D2B5FF"
+    cyan: "#7FE7F2"
+    white: "#FFFFFF"
