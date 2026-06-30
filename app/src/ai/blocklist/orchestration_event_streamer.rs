@@ -42,8 +42,6 @@ const RESTORE_FETCH_PERMANENT_BACKOFF_STEPS: &[u64] = &[30];
 const SSE_DRAIN_INTERVAL_MS: u64 = 500;
 /// Cap killed-run tombstones while keeping normal sessions well below the limit.
 const MAX_KILLED_RUN_IDS: usize = 1024;
-/// Maximum number of explicit run IDs the server accepts on a `run_ids[]` SSE stream.
-const MAX_RUN_ID_STREAM_FILTER: usize = 100;
 /// Max child runs fetched per cold-start `?ancestor_run_id=` REST seed in
 /// viewer mode. Matches the legacy `OrchestrationViewerModel` poller's value
 /// (the server caps at 100 anyway).
@@ -324,11 +322,6 @@ enum DesiredSseFilter {
     Filter(AgentEventFilter),
     /// Nothing to watch yet (no watched run IDs); do not open a stream.
     NoFilter,
-    /// The conversation is a parent with more watched children than the
-    /// explicit `run_ids[]` stream allows and parent-family ancestor
-    /// streaming is unavailable. The payload is the watched-run-id total,
-    /// used only for diagnostics.
-    UnsupportedRunIdCount(usize),
 }
 
 impl OrchestrationEventStreamer {
@@ -611,8 +604,7 @@ impl OrchestrationEventStreamer {
 
     /// Completes the wait-time parent registration fetch. A non-empty
     /// `children` list confirms the conversation is an orchestrator: install
-    /// the children and reevaluate eligibility, which (with
-    /// `OwnerOrchestrationAncestorStreamer` on) opens the
+    /// the children and reevaluate eligibility, which opens the
     /// `AncestorRunId { include_self: true }` stream that thereafter tracks
     /// all children dynamically. Empty children means it is not a parent; an
     /// error is a graceful no-op (the next wait re-checks).
@@ -643,9 +635,9 @@ impl OrchestrationEventStreamer {
         self.apply_task_children(conversation_id, &task, base_cursor);
         // Mirror `register_watched_run_id`: also watch `self_run_id` so the
         // parent's own inbox is delivered if `desired_sse_filter` falls back to
-        // `RunIds` (i.e. `OwnerOrchestrationAncestorStreamer` disabled, where
-        // the filter would otherwise watch only children). A no-op in the
-        // ancestor-stream path, which already covers self via `include_self`.
+        // `RunIds` (i.e. when the parent has no self run id yet). A no-op in
+        // the ancestor-stream path, which already covers self via
+        // `include_self`.
         self.ensure_self_run_id_watched(conversation_id, ctx);
         self.reevaluate_eligibility(conversation_id, ctx);
     }
@@ -1691,7 +1683,7 @@ impl OrchestrationEventStreamer {
         ctx: &warpui::AppContext,
     ) -> DesiredSseFilter {
         let is_parent = self.is_parent_agent_conversation(conversation_id, ctx);
-        if is_parent && FeatureFlag::OwnerOrchestrationAncestorStreamer.is_enabled() {
+        if is_parent {
             if let Some(self_run_id) = self.self_run_id(conversation_id, ctx) {
                 return DesiredSseFilter::Filter(AgentEventFilter::AncestorRunId {
                     ancestor_run_id: self_run_id,
@@ -1699,13 +1691,9 @@ impl OrchestrationEventStreamer {
                 });
             }
         }
-
         let run_ids = self.run_ids_for_sse(conversation_id);
         if run_ids.is_empty() {
             return DesiredSseFilter::NoFilter;
-        }
-        if is_parent && run_ids.len() > MAX_RUN_ID_STREAM_FILTER {
-            return DesiredSseFilter::UnsupportedRunIdCount(run_ids.len());
         }
         DesiredSseFilter::Filter(AgentEventFilter::RunIds(run_ids))
     }
@@ -1891,15 +1879,6 @@ impl OrchestrationEventStreamer {
         let filter = match self.desired_sse_filter(conversation_id, ctx) {
             DesiredSseFilter::Filter(filter) => filter,
             DesiredSseFilter::NoFilter => return,
-            DesiredSseFilter::UnsupportedRunIdCount(count) => {
-                log::error!(
-                    "Owner-side SSE delivery blocked for {conversation_id:?}: {count} watched \
-                     run IDs exceed the {MAX_RUN_ID_STREAM_FILTER} explicit-run-id limit and \
-                     parent-family ancestor streaming is disabled; enable \
-                     OwnerOrchestrationAncestorStreamer to deliver events for large orchestrators"
-                );
-                return;
-            }
         };
 
         let cursor = self
@@ -1991,7 +1970,6 @@ impl OrchestrationEventStreamer {
             }
             // Nothing watchable tears down through the eligibility predicate.
             DesiredSseFilter::NoFilter => false,
-            DesiredSseFilter::UnsupportedRunIdCount(_) => true,
         }
     }
 
