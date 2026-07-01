@@ -471,6 +471,65 @@ impl OrchestrationMessageDisplayMode {
     }
 }
 
+/// Controls what happens when an orchestration run-wide model is not available
+/// for the chosen run target (e.g. a cloud agent run requesting a model Oz does
+/// not accept, or a local-only model selected for a cloud run).
+#[derive(
+    Default,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    PartialEq,
+    Copy,
+    Clone,
+    EnumIter,
+    schemars::JsonSchema,
+    settings_value::SettingsValue,
+)]
+#[schemars(
+    description = "What happens when an orchestration model is unavailable for the run target.",
+    rename_all = "snake_case"
+)]
+pub enum OrchestrationInvalidModelBehavior {
+    /// Block the run and surface a clear error so the user can pick a valid
+    /// model (default).
+    #[default]
+    Block,
+    /// Automatically substitute a valid model and proceed.
+    AutoSelect,
+}
+
+settings::macros::implement_setting_for_enum!(
+    OrchestrationInvalidModelBehavior,
+    AISettings,
+    SupportedPlatforms::ALL,
+    SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+    private: false,
+    toml_path: "agents.warp_agent.other.orchestration_invalid_model_behavior",
+    description: "What happens when an orchestration model is unavailable for the run target.",
+);
+
+impl OrchestrationInvalidModelBehavior {
+    /// Display name for the settings dropdown.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            OrchestrationInvalidModelBehavior::Block => "Block with an error",
+            OrchestrationInvalidModelBehavior::AutoSelect => "Auto-select a valid model",
+        }
+    }
+
+    pub fn command_palette_description(&self) -> &'static str {
+        match self {
+            OrchestrationInvalidModelBehavior::Block => {
+                "Set unavailable orchestration model behavior: block with an error"
+            }
+            OrchestrationInvalidModelBehavior::AutoSelect => {
+                "Set unavailable orchestration model behavior: auto-select a valid model"
+            }
+        }
+    }
+}
+
 /// Controls what happens when a user submits a new prompt while the agent is
 /// still responding to an earlier prompt.
 ///
@@ -1477,6 +1536,10 @@ define_settings_group!(AISettings, settings: [
 
     // Controls how orchestration message bodies are expanded by default.
     orchestration_message_display_mode: OrchestrationMessageDisplayMode,
+
+    // Controls what happens when an orchestration run-wide model is unavailable
+    // for the chosen run target (block with an error vs. auto-select a valid model).
+    orchestration_invalid_model_behavior: OrchestrationInvalidModelBehavior,
 
     // Default behavior when the user submits a new prompt while the agent is still
     // responding. Per-conversation overrides live on `QueuedQueryModel`; this

@@ -602,6 +602,17 @@ pub fn is_model_in_filtered_choices<V: View>(
     is_local: bool,
     ctx: &mut ViewContext<V>,
 ) -> bool {
+    is_model_in_filtered_choices_in_app(model_id, harness_type, is_local, ctx)
+}
+
+/// `&AppContext` variant of [`is_model_in_filtered_choices`] so non-view callers
+/// (e.g. the orchestration executor pre-flight) can share the same logic.
+fn is_model_in_filtered_choices_in_app(
+    model_id: &str,
+    harness_type: &str,
+    is_local: bool,
+    ctx: &AppContext,
+) -> bool {
     let harness = Harness::parse_orchestration_harness(harness_type);
     match harness {
         Some(Harness::Oz) | None => {
@@ -621,6 +632,70 @@ pub fn is_model_in_filtered_choices<V: View>(
                 .is_some_and(|models| models.iter().any(|m| m.id == model_id))
         }
     }
+}
+
+/// Returns a user-facing reason when the run-wide `model_id` is not available
+/// for the chosen orchestration run target, or `None` when it's acceptable.
+///
+/// Mirrors the server's pre-spawn model validation (warp-server `AddTask`) so we
+/// fail fast with an actionable message instead of dispatching children the
+/// server would reject:
+/// - Empty/unset (inherit the default) and `auto*` models are always allowed.
+/// - Validation fails open until the server model catalog has loaded.
+/// - Remote + Oz harness validates against the *raw* Oz cloud catalog
+///   ([`LLMPreferences::is_oz_cloud_agent_model_available`]), which excludes
+///   local-only custom endpoints/routers so they aren't mistaken for
+///   Oz-available.
+/// - Non-Oz harnesses and local runs use the existing harness-filtered
+///   membership check (local custom models are legitimately runnable locally).
+pub fn unavailable_model_reason(
+    model_id: &str,
+    harness_type: &str,
+    is_local: bool,
+    ctx: &AppContext,
+) -> Option<String> {
+    let trimmed = model_id.trim();
+    // Unset means "inherit the default", and `auto*` models are always accepted
+    // by the server (id.IsAuto()).
+    if trimmed.is_empty() || trimmed.starts_with("auto") {
+        return None;
+    }
+
+    let harness = Harness::parse_orchestration_harness(harness_type);
+    let is_oz = matches!(harness, Some(Harness::Oz) | None);
+
+    if !is_local && is_oz {
+        let llm_prefs = LLMPreferences::as_ref(ctx);
+        // Fail open until the catalog has been fetched, to avoid false
+        // rejections before the first model-choices response.
+        if !llm_prefs.oz_cloud_agent_model_catalog_loaded()
+            || llm_prefs.is_oz_cloud_agent_model_available(trimmed)
+        {
+            return None;
+        }
+        let suggestions = llm_prefs.oz_cloud_agent_model_suggestions(3);
+        return Some(unavailable_model_message(trimmed, "cloud agents", &suggestions));
+    }
+
+    if is_model_in_filtered_choices_in_app(model_id, harness_type, is_local, ctx) {
+        return None;
+    }
+    Some(unavailable_model_message(trimmed, "this run", &[]))
+}
+
+/// Builds the user-facing "model unavailable" message, including optional
+/// suggestions and a pointer to the auto-select setting (surfaced when the
+/// behavior is `Block`).
+fn unavailable_model_message(model_id: &str, target: &str, suggestions: &[String]) -> String {
+    let mut message = format!("Model \"{model_id}\" isn't available for {target}.");
+    if !suggestions.is_empty() {
+        message.push_str(&format!(" Try one of: {}.", suggestions.join(", ")));
+    }
+    message.push_str(
+        " Leave the model unset to use the default, or turn on auto-select for \
+         unavailable models in Settings \u{2192} Agents (also in the Command Palette).",
+    );
+    message
 }
 
 /// Returns the default model_id for the given harness.
