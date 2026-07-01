@@ -1610,7 +1610,14 @@ pub fn apply_execution_mode_change<A: OrchestrationControlAction, V: View>(
             }
         }
     }
-    if !is_model_in_filtered_choices(&state.model_id, &state.harness_type, is_local, ctx) {
+    // Only auto-reset an invalid model under auto-select. Under Block, leave it
+    // in place so the accept gate surfaces the error instead of silently
+    // switching to a valid model (e.g. `auto`).
+    if matches!(
+        AISettings::as_ref(ctx).orchestration_invalid_model_behavior,
+        OrchestrationInvalidModelBehavior::AutoSelect
+    ) && !is_model_in_filtered_choices(&state.model_id, &state.harness_type, is_local, ctx)
+    {
         let reset_id = fallback_base_model_id(ctx)
             .filter(|id| is_model_in_filtered_choices(id, &state.harness_type, is_local, ctx))
             .or_else(|| first_filtered_model_id(&state.harness_type, ctx))
@@ -1618,7 +1625,7 @@ pub fn apply_execution_mode_change<A: OrchestrationControlAction, V: View>(
         state.model_id = reset_id;
     }
     // Under auto-select, replace a model that is valid locally but not for the
-    // new (e.g. cloud) target with a valid fallback. No-op under Block.
+    // new (e.g. cloud) target with the configured fallback. No-op under Block.
     maybe_auto_select_valid_model(state, ctx);
     if let Some(handle) = &handles.model_picker {
         populate_model_picker_for_harness(
@@ -1657,14 +1664,22 @@ pub fn repopulate_all_pickers<A: OrchestrationControlAction, V: View>(
     if let Some(handle) = &handles.harness_picker {
         populate_harness_picker(handle, &state.harness_type, is_local, ctx);
     }
-    // Reset model if it disappeared from the harness's catalog.
-    if !is_model_in_filtered_choices(&state.model_id, &state.harness_type, is_local, ctx) {
+    // Reset the model if it disappeared from the harness's catalog — but only
+    // under auto-select. Under Block, leave an unavailable model in place so the
+    // accept gate can surface the error instead of silently switching to a valid
+    // model (e.g. `auto`).
+    if matches!(
+        AISettings::as_ref(ctx).orchestration_invalid_model_behavior,
+        OrchestrationInvalidModelBehavior::AutoSelect
+    ) && !is_model_in_filtered_choices(&state.model_id, &state.harness_type, is_local, ctx)
+    {
         if let Some(first_id) = first_filtered_model_id(&state.harness_type, ctx) {
             state.model_id = first_id;
         }
     }
     // Under auto-select, replace a model unavailable for the target (e.g. a
-    // local-only model on a cloud run) with a valid fallback. No-op under Block.
+    // local-only model on a cloud run) with the configured fallback. No-op under
+    // Block.
     maybe_auto_select_valid_model(state, ctx);
     if let Some(handle) = &handles.model_picker {
         populate_model_picker_for_harness(
