@@ -28,7 +28,7 @@ use crate::ai::agent::{
 };
 use crate::ai::auth_secret_types::auth_secret_types_for_harness;
 use crate::ai::blocklist::inline_action::orchestration_controls::{
-    unavailable_model_reason, OrchestrationEditState,
+    resolve_orchestration_fallback_model_id, unavailable_model_reason, OrchestrationEditState,
 };
 use crate::ai::blocklist::{BlocklistAIHistoryModel, BlocklistAIPermissions};
 use crate::ai::cloud_agent_settings::CloudAgentSettings;
@@ -37,7 +37,6 @@ use crate::ai::document::plan_publication::{
 };
 use crate::ai::local_harness_setup::local_harness_product_disabled_message;
 use crate::settings::{AISettings, OrchestrationInvalidModelBehavior};
-use crate::LLMPreferences;
 
 /// Per-child spawn timeout. If a child agent doesn't report back within
 /// this window (e.g. binary not found, server error), the slot is failed
@@ -197,13 +196,9 @@ impl RunAgentsExecutor {
                     return receiver;
                 }
                 OrchestrationInvalidModelBehavior::AutoSelect => {
-                    // Substitute the Oz default; an empty default means "inherit".
-                    let fallback = LLMPreferences::as_ref(ctx).oz_cloud_default_agent_model_id();
-                    request.model_id = if fallback.trim().is_empty() {
-                        String::new()
-                    } else {
-                        fallback
-                    };
+                    // Substitute the user's configured fallback model (or the Oz
+                    // default); an empty result means "inherit the default".
+                    request.model_id = resolve_orchestration_fallback_model_id(ctx);
                 }
             }
         }

@@ -94,9 +94,9 @@ use crate::settings::{
     CodebaseContextEnabled, FileBasedMcpEnabled, GitOperationsAutogenEnabled,
     IncludeAgentCommandsInHistory, InputSettings, IntelligentAutosuggestionsEnabled,
     LongRunningCommandSubmissionMode, MemoryEnabled, NLDInTerminalEnabled,
-    NaturalLanguageAutosuggestionsEnabled, OrchestrationInvalidModelBehavior,
-    OrchestrationMessageDisplayMode, PromptSubmissionMode, RuleSuggestionsEnabled,
-    SharedBlockTitleGenerationEnabled, ShouldRenderCLIAgentToolbar,
+    NaturalLanguageAutosuggestionsEnabled, OrchestrationFallbackModelId,
+    OrchestrationInvalidModelBehavior, OrchestrationMessageDisplayMode, PromptSubmissionMode,
+    RuleSuggestionsEnabled, SharedBlockTitleGenerationEnabled, ShouldRenderCLIAgentToolbar,
     ShouldRenderUseAgentToolbarForUserCommands, ShouldShowOzUpdatesInZeroState, ShowAgentTips,
     ShowConversationHistory, ShowHintText, ThinkingDisplayMode, VoiceInputEnabled,
     WarpDriveContextEnabled,
@@ -171,6 +171,7 @@ const PRIMARY_HEADER_FONT_SIZE: f32 = 24.;
 
 const AI_SETTINGS_DROPDOWN_WIDTH: f32 = 250.;
 const AI_SETTINGS_DROPDOWN_MAX_HEIGHT: f32 = 250.;
+const ORCHESTRATION_FALLBACK_DEFAULT_LABEL: &str = "Use the recommended default";
 const CONTEXT_WINDOW_SLIDER_WIDTH: f32 = 220.;
 const CONTEXT_WINDOW_INPUT_BOX_WIDTH: f32 = 120.;
 
@@ -739,6 +740,7 @@ pub struct AISettingsPageView {
     thinking_display_mode_dropdown: ViewHandle<Dropdown<AISettingsPageAction>>,
     orchestration_message_display_mode_dropdown: ViewHandle<Dropdown<AISettingsPageAction>>,
     orchestration_invalid_model_behavior_dropdown: ViewHandle<Dropdown<AISettingsPageAction>>,
+    orchestration_fallback_model_dropdown: ViewHandle<Dropdown<AISettingsPageAction>>,
     default_prompt_submission_mode_dropdown: ViewHandle<Dropdown<AISettingsPageAction>>,
     lrc_submission_mode_dropdown: ViewHandle<Dropdown<AISettingsPageAction>>,
     #[cfg(feature = "local_fs")]
@@ -928,6 +930,18 @@ impl AISettingsPageView {
                 );
             });
         }
+
+        let orchestration_fallback_model_dropdown = ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = Dropdown::new(ctx);
+            dropdown.set_top_bar_max_width(AI_SETTINGS_DROPDOWN_WIDTH);
+            dropdown.set_menu_width(AI_SETTINGS_DROPDOWN_WIDTH, ctx);
+            dropdown.set_menu_max_height(AI_SETTINGS_DROPDOWN_MAX_HEIGHT, ctx);
+            dropdown
+        });
+        Self::refresh_orchestration_fallback_model_menu(
+            &orchestration_fallback_model_dropdown,
+            ctx,
+        );
 
         let default_prompt_submission_mode_dropdown =
             OtherAIWidget::create_default_prompt_submission_mode_dropdown(ctx);
@@ -1186,6 +1200,10 @@ impl AISettingsPageView {
                 LLMPreferencesEvent::UpdatedAvailableLLMs => {
                     Self::refresh_base_model_menu(&me.base_model_dropdown, ctx);
                     Self::refresh_coding_model_menu(&me.coding_model_dropdown, ctx);
+                    Self::refresh_orchestration_fallback_model_menu(
+                        &me.orchestration_fallback_model_dropdown,
+                        ctx,
+                    );
                     me.sync_context_window_editor(ctx, false);
                 }
                 LLMPreferencesEvent::UpdatedActiveAgentModeLLM => {
@@ -1283,6 +1301,10 @@ impl AISettingsPageView {
                     );
                     Self::refresh_base_model_menu(&me.base_model_dropdown, ctx);
                     Self::refresh_coding_model_menu(&me.coding_model_dropdown, ctx);
+                    Self::refresh_orchestration_fallback_model_menu(
+                        &me.orchestration_fallback_model_dropdown,
+                        ctx,
+                    );
                     Self::refresh_mcp_allowlist_dropdown(&me.mcp_allowlist_dropdown, ctx);
                     Self::refresh_mcp_denylist_dropdown(&me.mcp_denylist_dropdown, ctx);
                     me.sync_context_window_editor(ctx, true);
@@ -1382,6 +1404,12 @@ impl AISettingsPageView {
                                 ctx,
                             );
                         },
+                    );
+                }
+                AISettingsChangedEvent::OrchestrationFallbackModelId { .. } => {
+                    Self::refresh_orchestration_fallback_model_menu(
+                        &me.orchestration_fallback_model_dropdown,
+                        ctx,
                     );
                 }
                 AISettingsChangedEvent::PromptSubmissionMode { .. } => {
@@ -2019,6 +2047,7 @@ impl AISettingsPageView {
             thinking_display_mode_dropdown,
             orchestration_message_display_mode_dropdown,
             orchestration_invalid_model_behavior_dropdown,
+            orchestration_fallback_model_dropdown,
             default_prompt_submission_mode_dropdown,
             lrc_submission_mode_dropdown,
             #[cfg(feature = "local_fs")]
@@ -3155,6 +3184,50 @@ impl AISettingsPageView {
         ctx.notify();
     }
 
+    /// Populates the orchestration fallback-model dropdown with a "use the
+    /// recommended default" entry followed by the models available for cloud
+    /// agents, selecting the currently-configured fallback.
+    pub fn refresh_orchestration_fallback_model_menu(
+        menu: &ViewHandle<Dropdown<AISettingsPageAction>>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        menu.update(ctx, |menu, ctx| {
+            if AISettings::as_ref(ctx).is_any_ai_enabled(ctx) {
+                menu.set_enabled(ctx);
+            } else {
+                menu.set_disabled(ctx);
+            }
+
+            let mut items = vec![DropdownItem::new(
+                ORCHESTRATION_FALLBACK_DEFAULT_LABEL,
+                AISettingsPageAction::SetOrchestrationFallbackModelId(String::new()),
+            )];
+            let models: Vec<(String, String)> = LLMPreferences::as_ref(ctx)
+                .oz_cloud_agent_models()
+                .into_iter()
+                .map(|llm| (llm.menu_display_name(), llm.id.to_string()))
+                .collect();
+            for (display_name, id) in models {
+                items.push(DropdownItem::new(
+                    display_name,
+                    AISettingsPageAction::SetOrchestrationFallbackModelId(id),
+                ));
+            }
+            menu.set_items(items, ctx);
+
+            let current = AISettings::as_ref(ctx)
+                .orchestration_fallback_model_id
+                .value()
+                .clone();
+            menu.set_selected_by_action(
+                AISettingsPageAction::SetOrchestrationFallbackModelId(current),
+                ctx,
+            );
+            ctx.notify();
+        });
+        ctx.notify();
+    }
+
     fn refresh_autonomy_dropdown_menu(
         menu: &ViewHandle<Dropdown<AISettingsPageAction>>,
         ctx: &mut ViewContext<Self>,
@@ -3637,6 +3710,7 @@ pub enum AISettingsPageAction {
     SetThinkingDisplayMode(ThinkingDisplayMode),
     SetOrchestrationMessageDisplayMode(OrchestrationMessageDisplayMode),
     SetOrchestrationInvalidModelBehavior(OrchestrationInvalidModelBehavior),
+    SetOrchestrationFallbackModelId(String),
     SetPromptSubmissionMode(PromptSubmissionMode),
     SetLongRunningCommandSubmissionMode(LongRunningCommandSubmissionMode),
     AttemptLoginGatedUpgrade,
@@ -4116,6 +4190,14 @@ impl TypedActionView for AISettingsPageView {
                     report_if_error!(settings
                         .orchestration_invalid_model_behavior
                         .set_value(*mode, ctx));
+                });
+                ctx.notify();
+            }
+            AISettingsPageAction::SetOrchestrationFallbackModelId(model_id) => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings
+                        .orchestration_fallback_model_id
+                        .set_value(model_id.clone(), ctx));
                 });
                 ctx.notify();
             }
@@ -7435,7 +7517,7 @@ impl SettingsWidget for OtherAIWidget {
             appearance,
             "Unavailable orchestration model",
             Some(
-                "What happens when an agent's model isn't available for the run target: block with an error or auto-select a valid model.",
+                "What happens when an agent's model isn't available for the run target: block the run or use a fallback model.",
             ),
             None,
             LocalOnlyIconState::for_setting(
@@ -7447,6 +7529,29 @@ impl SettingsWidget for OtherAIWidget {
             (!is_any_ai_enabled).then(|| appearance.theme().disabled_ui_text_color()),
             &view.orchestration_invalid_model_behavior_dropdown,
         ));
+
+        // Only show the fallback-model picker when the behavior is to use a
+        // fallback model (not when blocking).
+        if ai_settings.orchestration_invalid_model_behavior
+            == OrchestrationInvalidModelBehavior::AutoSelect
+        {
+            column.add_child(render_dropdown_item(
+                appearance,
+                "Fallback model",
+                Some(
+                    "The model to use when an agent's selected model isn't available for the run target.",
+                ),
+                None,
+                LocalOnlyIconState::for_setting(
+                    OrchestrationFallbackModelId::storage_key(),
+                    OrchestrationFallbackModelId::sync_to_cloud(),
+                    &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                    app,
+                ),
+                (!is_any_ai_enabled).then(|| appearance.theme().disabled_ui_text_color()),
+                &view.orchestration_fallback_model_dropdown,
+            ));
+        }
 
         // TODO: OpenConversationLayoutPreference should not depend on local_fs, but it lives under the external editor settings
         // which does require local_fs. It was a mistake to put it there, but now we keep it there for backward compatibility.

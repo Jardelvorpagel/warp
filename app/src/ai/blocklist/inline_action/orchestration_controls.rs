@@ -697,10 +697,36 @@ fn unavailable_model_message(model_id: &str, target: &str, suggestions: &[String
         message.push_str(&format!(" Try one of: {}.", suggestions.join(", ")));
     }
     message.push_str(
-        " Leave the model unset to use the default, or turn on auto-select for \
+        " Leave the model unset to use the default, or enable a fallback model for \
          unavailable models in Settings \u{2192} Agents (also in the Command Palette).",
     );
     message
+}
+
+/// Resolves the model to substitute under
+/// [`OrchestrationInvalidModelBehavior::AutoSelect`]. Prefers the user's
+/// configured fallback model (`orchestration_fallback_model_id`) when it is set
+/// and available for cloud agents; otherwise uses the Oz cloud default, or an
+/// empty string (inherit the default) as a last resort.
+pub fn resolve_orchestration_fallback_model_id(ctx: &AppContext) -> String {
+    let llm_prefs = LLMPreferences::as_ref(ctx);
+    let configured = AISettings::as_ref(ctx)
+        .orchestration_fallback_model_id
+        .value()
+        .trim()
+        .to_string();
+    if !configured.is_empty()
+        && (configured.starts_with("auto")
+            || llm_prefs.is_oz_cloud_agent_model_available(&configured))
+    {
+        return configured;
+    }
+    let default = llm_prefs.oz_cloud_default_agent_model_id();
+    if default.trim().is_empty() {
+        String::new()
+    } else {
+        default
+    }
 }
 
 /// Under the [`OrchestrationInvalidModelBehavior::AutoSelect`] setting,
@@ -721,7 +747,7 @@ pub fn maybe_auto_select_valid_model(state: &mut OrchestrationEditState, ctx: &A
     if unavailable_model_reason(&state.model_id, &state.harness_type, is_local, ctx).is_none() {
         return false;
     }
-    let fallback = LLMPreferences::as_ref(ctx).oz_cloud_default_agent_model_id();
+    let fallback = resolve_orchestration_fallback_model_id(ctx);
     let new_id =
         if unavailable_model_reason(&fallback, &state.harness_type, is_local, ctx).is_none() {
             fallback

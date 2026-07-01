@@ -513,18 +513,18 @@ impl OrchestrationInvalidModelBehavior {
     /// Display name for the settings dropdown.
     pub fn display_name(&self) -> &'static str {
         match self {
-            OrchestrationInvalidModelBehavior::Block => "Block with an error",
-            OrchestrationInvalidModelBehavior::AutoSelect => "Auto-select a valid model",
+            OrchestrationInvalidModelBehavior::Block => "Block the run",
+            OrchestrationInvalidModelBehavior::AutoSelect => "Use a fallback model",
         }
     }
 
     pub fn command_palette_description(&self) -> &'static str {
         match self {
             OrchestrationInvalidModelBehavior::Block => {
-                "Set unavailable orchestration model behavior: block with an error"
+                "Set unavailable orchestration model behavior: block the run"
             }
             OrchestrationInvalidModelBehavior::AutoSelect => {
-                "Set unavailable orchestration model behavior: auto-select a valid model"
+                "Set unavailable orchestration model behavior: use a fallback model"
             }
         }
     }
@@ -1538,8 +1538,21 @@ define_settings_group!(AISettings, settings: [
     orchestration_message_display_mode: OrchestrationMessageDisplayMode,
 
     // Controls what happens when an orchestration run-wide model is unavailable
-    // for the chosen run target (block with an error vs. auto-select a valid model).
+    // for the chosen run target (block the run vs. use a fallback model).
     orchestration_invalid_model_behavior: OrchestrationInvalidModelBehavior,
+
+    // The model to fall back to when an orchestration model is unavailable and
+    // `orchestration_invalid_model_behavior` is `Use a fallback model`. An empty
+    // value means "let Warp pick the default".
+    orchestration_fallback_model_id: OrchestrationFallbackModelId {
+        type: String,
+        default: String::new(),
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        private: false,
+        toml_path: "agents.warp_agent.other.orchestration_fallback_model_id",
+        description: "The model to fall back to when an orchestration model is unavailable and auto-select is enabled. Empty means use the default.",
+    }
 
     // Default behavior when the user submits a new prompt while the agent is still
     // responding. Per-conversation overrides live on `QueuedQueryModel`; this

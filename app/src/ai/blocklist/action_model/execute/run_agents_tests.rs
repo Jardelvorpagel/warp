@@ -19,7 +19,7 @@ use crate::ai::cloud_agent_settings::CloudAgentSettings;
 use crate::ai::document::ai_document_model::{AIDocumentModel, AIDocumentSaveStatus};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::execution_profiles::RunAgentsPermission;
-use crate::ai::llms::ModelsByFeature;
+use crate::ai::llms::{LLMPreferences, ModelsByFeature};
 use crate::ai::mcp::templatable_manager::TemplatableMCPServerManager;
 use crate::appearance::Appearance;
 use crate::auth::auth_manager::AuthManager;

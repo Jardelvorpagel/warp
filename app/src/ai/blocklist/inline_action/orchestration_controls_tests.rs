@@ -406,4 +406,47 @@ mod model_availability_gate_tests {
             });
         });
     }
+
+    fn set_fallback_model(app: &mut App, model_id: &str) {
+        AISettings::handle(app).update(app, |settings, ctx| {
+            settings
+                .orchestration_fallback_model_id
+                .set_value(model_id.to_string(), ctx)
+                .expect("set fallback model");
+        });
+    }
+
+    #[test]
+    fn auto_select_uses_configured_fallback_model() {
+        App::test((), |mut app| async move {
+            setup(&mut app, catalog("valid-a", &["valid-a", "valid-b"]));
+            set_behavior(&mut app, OrchestrationInvalidModelBehavior::AutoSelect);
+            // Configure an explicit fallback distinct from the catalog default.
+            set_fallback_model(&mut app, "valid-b");
+
+            app.update(|ctx| {
+                let mut state = remote_oz_state("bad-model");
+                // Substitution uses the configured fallback, not the default.
+                assert!(maybe_auto_select_valid_model(&mut state, ctx));
+                assert_eq!(state.model_id, "valid-b");
+            });
+        });
+    }
+
+    #[test]
+    fn auto_select_falls_back_to_default_when_configured_fallback_unavailable() {
+        App::test((), |mut app| async move {
+            setup(&mut app, catalog("valid-a", &["valid-a", "valid-b"]));
+            set_behavior(&mut app, OrchestrationInvalidModelBehavior::AutoSelect);
+            // A configured fallback that isn't a valid cloud model is ignored in
+            // favor of the Oz default.
+            set_fallback_model(&mut app, "also-bad");
+
+            app.update(|ctx| {
+                let mut state = remote_oz_state("bad-model");
+                assert!(maybe_auto_select_valid_model(&mut state, ctx));
+                assert_eq!(state.model_id, "valid-a");
+            });
+        });
+    }
 }

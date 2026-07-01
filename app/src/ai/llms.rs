@@ -809,6 +809,18 @@ impl LLMPreferences {
             .any(|llm| llm.id.as_str() == id && llm.disable_reason.is_none())
     }
 
+    /// The enabled Oz cloud agent-mode models, for building the orchestration
+    /// fallback-model picker. Uses the *raw* server catalog (excludes local-only
+    /// custom endpoints/routers) so only models valid for cloud agents appear.
+    pub fn oz_cloud_agent_models(&self) -> Vec<&LLMInfo> {
+        self.models_by_feature
+            .agent_mode
+            .choices
+            .iter()
+            .filter(|llm| llm.disable_reason.is_none())
+            .collect()
+    }
+
     /// A small sample of currently-available Oz cloud agent-mode model ids, for
     /// building actionable "try one of these" error messages.
     pub fn oz_cloud_agent_model_suggestions(&self, limit: usize) -> Vec<String> {
