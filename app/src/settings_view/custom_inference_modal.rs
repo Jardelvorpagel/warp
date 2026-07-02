@@ -666,8 +666,8 @@ impl CustomEndpointModal {
 
         let handle = ctx.spawn(
             async move {
-                // Disable redirects: a 30x to a private address could bypass
-                // the `validate_url` SSRF guard. A redirect response is therefore
+                // Disable redirects: a 30x to a private address would bypass
+                // the `validate_url` check. A redirect response is therefore
                 // treated as a non-200 (connection could not be confirmed).
                 let client = match reqwest::Client::builder()
                     .timeout(Duration::from_secs(CONNECTION_TEST_TIMEOUT_SECS))
