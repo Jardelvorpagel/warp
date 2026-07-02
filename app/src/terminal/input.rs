@@ -7420,21 +7420,27 @@ impl Input {
     }
 
     /// Enable the cloud-followup input, preserving any un-submitted draft the user typed.
-    /// Resets the frozen/pending viewer visual state (interaction state + text colors).
+    /// Re-enables edits and restores the normal text colors.
     ///
-    /// If the input is frozen in the ephemeral *loading* state — i.e. a prompt was already
-    /// submitted/in-flight when the session ended — the stale loading text is cleared so the
-    /// user gets a fresh followup input. A normal editable draft lives in the regular buffer
-    /// (not the ephemeral overlay), so it is preserved. Unconditional clearing is only correct
-    /// once a followup has actually been submitted — see
-    /// [`Self::reset_after_cloud_followup_submission`].
+    /// If the input was frozen in its loading state — i.e. a prompt was already submitted/in-flight
+    /// when the session ended, leaving the editor `Selectable` — the stale loading text is cleared
+    /// so the user gets a fresh followup input. A genuine un-submitted draft leaves the editor
+    /// `Editable`, so it is preserved. Unconditional clearing is only correct once a followup has
+    /// actually been submitted — see [`Self::reset_after_cloud_followup_submission`].
     pub fn enable_cloud_followup_input(&mut self, ctx: &mut ViewContext<Self>) {
-        let is_frozen_loading = self.editor.as_ref(ctx).is_in_ephemeral_loading_state(ctx);
+        // A frozen in-flight prompt (already submitted when the session ended) leaves the editor
+        // non-editable in its loading state (`Selectable`), whereas a genuine un-submitted draft
+        // stays `Editable`. Clear only the frozen case so the user gets a fresh followup input,
+        // while preserving a real draft. Sample the state before re-enabling edits below.
+        let was_frozen = matches!(
+            self.editor.as_ref(ctx).interaction_state(ctx),
+            InteractionState::Selectable
+        );
         self.editor.update(ctx, |editor, ctx| {
             // Re-enable edits BEFORE clearing: buffer edits are ignored while the editor is
             // in the frozen loading state (Selectable), so the clear must run after this.
             editor.set_interaction_state(InteractionState::Editable, ctx);
-            if is_frozen_loading {
+            if was_frozen {
                 editor.clear_buffer_and_reset_undo_stack(ctx);
             }
 
