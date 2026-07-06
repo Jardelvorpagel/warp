@@ -1,5 +1,7 @@
 use std::path::{Path, MAIN_SEPARATOR};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use instant::Instant;
 
 use super::*;
 
@@ -102,9 +104,7 @@ fn multi_term_queries_require_all_terms() {
     let paths = matched_paths(&engine, usize::MAX);
     assert_eq!(
         paths,
-        vec![format!(
-            "src{MAIN_SEPARATOR}search{MAIN_SEPARATOR}model.rs"
-        )]
+        vec![format!("src{MAIN_SEPARATOR}search{MAIN_SEPARATOR}model.rs")]
     );
 }
 

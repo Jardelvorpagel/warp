@@ -12983,6 +12983,7 @@ version = "0.1.0"
 dependencies = [
  "command",
  "ignore",
+ "instant",
  "log",
  "nucleo",
  "tempfile",
@@ -15241,6 +15242,7 @@ dependencies = [
  "smallvec 1.15.1",
  "smol_str",
  "static_assertions",
+ "streaming_file_search",
  "string-offset",
  "strum 0.27.1",
  "strum_macros 0.27.1",

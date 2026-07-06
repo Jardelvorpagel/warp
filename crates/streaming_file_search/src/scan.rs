@@ -147,7 +147,13 @@ pub(crate) fn start_scan(root: PathBuf, injector: Injector<FileCandidate>) -> Sc
 /// Streams tracked and untracked (non-ignored) files from `git ls-files`.
 fn stream_git_files(root: &Path, injector: &Injector<FileCandidate>, state: &ScanState) {
     let mut child = match Command::new("git")
-        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
         .current_dir(root)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -183,7 +189,7 @@ fn stream_git_files(root: &Path, injector: &Injector<FileCandidate>, state: &Sca
         // `git ls-files` always emits `/`-separated paths; normalize to the
         // platform separator to match the eager index's path format.
         if MAIN_SEPARATOR != '/' {
-            relative_path = relative_path.replace('/', &MAIN_SEPARATOR.to_string());
+            relative_path = relative_path.replace('/', std::path::MAIN_SEPARATOR_STR);
         }
         push_candidate(injector, relative_path, false);
     }

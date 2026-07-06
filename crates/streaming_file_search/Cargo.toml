@@ -14,4 +14,5 @@ log.workspace = true
 nucleo.workspace = true
 
 [dev-dependencies]
+instant.workspace = true
 tempfile.workspace = true
