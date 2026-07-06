@@ -911,6 +911,13 @@ pub enum FeatureFlag {
     /// collapsible tree with typed colors and per-row Copy JSON, instead of
     /// a flat pretty-printed blob.
     McpJsonTreeView,
+
+    /// Replaces the eager repo-index-backed file search for local cmd-O and
+    /// the `@` context menu with an on-the-fly streaming search engine
+    /// (`streaming_file_search` crate). When disabled, both consumers use the
+    /// existing `RepoMetadataModel`-backed data path unchanged. Remote/SSH
+    /// sessions always use the existing path regardless of this flag.
+    StreamingFileSearch,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
