@@ -110,7 +110,11 @@ pub enum LocalCodeEditorEvent {
     FailedToLoad {
         error: Rc<FileLoadError>,
     },
-    FileSaved,
+    FileSaved {
+        /// Whether the save was triggered by auto-save. Used to suppress the
+        /// "File saved." toast, which should only appear for manual (cmd-s) saves.
+        auto_saved: bool,
+    },
     FailedToSave {
         error: Rc<FileSaveError>,
     },
@@ -293,6 +297,10 @@ pub struct LocalCodeEditorView {
     hover_debounce_tx: async_channel::Sender<CharOffset>,
     /// Channel for debouncing auto-save requests while the user types.
     auto_save_debounce_tx: async_channel::Sender<()>,
+    /// Set while an auto-save (debounced or focus-change) is in flight so the
+    /// resulting `FileSaved` event can be marked as an auto-save and suppress
+    /// the success toast.
+    auto_save_in_flight: bool,
     /// State for the LSP hover tooltip.
     pub(super) lsp_hover_state: LspHoverState,
     /// Pending scroll position to apply after the file is loaded. This is used when
@@ -344,7 +352,11 @@ impl LocalCodeEditorView {
                     // Queue a debounced auto-save while the user types. The
                     // debounced path saves without running the LSP formatter,
                     // matching VS Code's `files.autoSave: afterDelay` behavior.
-                    if *CodeSettings::as_ref(ctx).auto_save {
+                    // A `Some` `diff_type` means this editor is showing a
+                    // pending accept/reject diff (e.g. an agent "edit-file"
+                    // proposal), which must never auto-save. Editable
+                    // code-review diffs use `diff_type = None` and stay eligible.
+                    if me.diff_type.is_none() && *CodeSettings::as_ref(ctx).auto_save {
                         let _ = me.auto_save_debounce_tx.try_send(());
                     }
                 }
@@ -517,6 +529,7 @@ impl LocalCodeEditorView {
             context_menu_state: Default::default(),
             hover_debounce_tx,
             auto_save_debounce_tx,
+            auto_save_in_flight: false,
             lsp_hover_state: LspHoverState::None,
             pending_scroll_on_load: None,
             processed_diagnostics: Vec::new(),
@@ -1164,6 +1177,9 @@ impl LocalCodeEditorView {
         };
 
         if let Err(err) = result {
+            // A synchronous save failure means no async `FileSaved` will arrive,
+            // so clear the auto-save marker here.
+            self.auto_save_in_flight = false;
             log::error!("Failed to save file: {err:?}");
             ctx.emit(LocalCodeEditorEvent::FailedToSave {
                 error: Rc::new(err),
@@ -1182,6 +1198,13 @@ impl LocalCodeEditorView {
             return;
         }
 
+        // Never auto-save a pending accept/reject diff (e.g. an agent
+        // "edit-file" proposal). Editable code-review diffs use `diff_type =
+        // None` and remain eligible.
+        if self.diff_type.is_some() {
+            return;
+        }
+
         if self.is_remote_disconnected(ctx) || !self.has_unsaved_changes(ctx) {
             return;
         }
@@ -1190,7 +1213,9 @@ impl LocalCodeEditorView {
             return;
         };
 
-        // Skip LSP formatting for delay-based auto-saves.
+        // Skip LSP formatting for delay-based auto-saves. Mark this as an
+        // auto-save so the "File saved." toast is suppressed.
+        self.auto_save_in_flight = true;
         self.perform_save(file_id, ctx);
     }
 
@@ -1203,10 +1228,18 @@ impl LocalCodeEditorView {
     /// files) and `RemoteDisconnected` are expected no-ops; real save failures
     /// still surface via `FailedToSave` events.
     fn auto_save_on_focus_change(&mut self, ctx: &mut ViewContext<Self>) {
-        if !*CodeSettings::as_ref(ctx).auto_save || !self.has_unsaved_changes(ctx) {
+        // Never auto-save a pending accept/reject diff (see
+        // `auto_save_after_delay`); editable code-review diffs use `diff_type =
+        // None` and remain eligible.
+        if !*CodeSettings::as_ref(ctx).auto_save
+            || self.diff_type.is_some()
+            || !self.has_unsaved_changes(ctx)
+        {
             return;
         }
 
+        // Mark this as an auto-save so the "File saved." toast is suppressed.
+        self.auto_save_in_flight = true;
         let _ = self.save_local(ctx);
     }
 
@@ -1647,11 +1680,15 @@ impl LocalCodeEditorView {
                 GlobalBufferModelEvent::FileSaved {
                     content_version, ..
                 } => {
+                    // Consume the auto-save marker: suppress the toast for
+                    // auto-saves, show it for manual (cmd-s) saves.
+                    let auto_saved = std::mem::take(&mut me.auto_save_in_flight);
                     me.base_content_version = Some(*content_version);
                     me.has_remote_conflict = false;
-                    ctx.emit(LocalCodeEditorEvent::FileSaved);
+                    ctx.emit(LocalCodeEditorEvent::FileSaved { auto_saved });
                 }
                 GlobalBufferModelEvent::FailedToSave { error, .. } => {
+                    me.auto_save_in_flight = false;
                     me.base_content_version = GlobalBufferModel::as_ref(ctx).base_version(file_id);
                     ctx.emit(LocalCodeEditorEvent::FailedToSave {
                         error: error.clone(),

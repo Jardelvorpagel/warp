@@ -27,7 +27,7 @@ pub enum LocalCodeEditorEvent {
     #[allow(dead_code)]
     FailedToLoad { error: Rc<FileLoadError> },
     #[allow(dead_code)]
-    FileSaved,
+    FileSaved { auto_saved: bool },
     #[allow(dead_code)]
     FailedToSave { error: Rc<FileSaveError> },
     #[allow(dead_code)]

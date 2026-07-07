@@ -3202,7 +3202,7 @@ impl CodeReviewView {
         ctx: &mut ViewContext<Self>,
     ) {
         match event {
-            LocalCodeEditorEvent::FileSaved => {
+            LocalCodeEditorEvent::FileSaved { .. } => {
                 send_telemetry_from_ctx!(
                     CodeReviewTelemetryEvent::FileSaved {
                         is_local: self.repo_is_local(),

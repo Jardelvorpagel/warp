@@ -61,6 +61,7 @@ use crate::quit_warning::UnsavedStateSummary;
 use crate::search::files::icon::icon_from_file_path;
 use crate::search::ItemHighlightState;
 use crate::server::telemetry::CodeContextDestination;
+use crate::settings::CodeSettings;
 use crate::tab::TAB_BAR_BORDER_HEIGHT;
 use crate::terminal::cli_agent::{
     build_selection_line_range_prompt, build_selection_substring_prompt,
@@ -530,10 +531,14 @@ impl CodeView {
                     ctx,
                 );
             }
-            LocalCodeEditorEvent::FileSaved => {
+            LocalCodeEditorEvent::FileSaved { auto_saved } => {
                 me.sync_active_tab_location(ctx);
                 me.set_title_after_content_update(ctx);
-                CodeView::display_save_success(ctx.window_id(), ctx);
+                // Only surface the success toast for manual (cmd-s) saves;
+                // auto-saves persist silently.
+                if !*auto_saved {
+                    CodeView::display_save_success(ctx.window_id(), ctx);
+                }
                 ctx.notify();
             }
             LocalCodeEditorEvent::FailedToSave { error: err } => {
@@ -983,6 +988,15 @@ impl CodeView {
     fn has_unsaved_changes(tab: &TabData, ctx: &AppContext) -> bool {
         let local_editor = tab.editor_view.as_ref(ctx);
         local_editor.has_unsaved_changes(ctx)
+    }
+
+    /// Whether to render the transient "unsaved changes" indicator for a tab.
+    ///
+    /// When auto-save is enabled, edits are persisted automatically (debounced
+    /// while typing and on focus loss), so showing the dot would just make it
+    /// flicker on and off as the user types. In that case we hide it entirely.
+    fn show_unsaved_indicator(tab: &TabData, app: &AppContext) -> bool {
+        !*CodeSettings::as_ref(app).auto_save && Self::has_unsaved_changes(tab, app)
     }
 
     /// Check whether there are unsaved changes and reset the pane title accordingly.
@@ -1717,7 +1731,7 @@ impl CodeView {
                             index,
                             is_active,
                             tab_handle.is_hovered(),
-                            Self::has_unsaved_changes(tab_data, app),
+                            Self::show_unsaved_indicator(tab_data, app),
                             appearance,
                             app,
                         ))
@@ -1925,7 +1939,7 @@ impl CodeView {
         let tab_handle = tab.map(|tab| tab.mouse_state_handles.tab_handle.clone());
 
         // Check unsaved changes for the active tab.
-        let has_unsaved = tab.is_some_and(|tab| Self::has_unsaved_changes(tab, app));
+        let has_unsaved = tab.is_some_and(|tab| Self::show_unsaved_indicator(tab, app));
 
         // Build the center title element, with a hover tooltip showing the full path.
         let title_element: Box<dyn Element> = match tab_handle {
