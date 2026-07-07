@@ -34,6 +34,7 @@ use crate::features::FeatureFlag;
 use crate::launch_configs::launch_config::LaunchConfig;
 use crate::menu::{MenuAction, MenuItem, MenuItemFields};
 use crate::pane_group::{PaneGroup, PaneId};
+use crate::settings::CodeSettings;
 use crate::shell_indicator::ShellIndicatorType;
 use crate::terminal::shared_session::render_util::shared_session_indicator_color;
 use crate::terminal::view::TerminalViewState;
@@ -984,10 +985,13 @@ impl<'a> TabComponent<'a> {
                 }
             })
             .unwrap_or(false);
-        let active_pane_has_unsaved_code_changes = tab
-            .pane_group
-            .as_ref(ctx)
-            .has_active_code_pane_with_unsaved_changes(ctx);
+        // Auto-save persists edits automatically, so suppress the tab-level
+        // unsaved indicator to avoid it flickering on and off as the user types.
+        let active_pane_has_unsaved_code_changes = !*CodeSettings::as_ref(ctx).auto_save
+            && tab
+                .pane_group
+                .as_ref(ctx)
+                .has_active_code_pane_with_unsaved_changes(ctx);
         let is_being_shared = tab
             .pane_group
             .as_ref(ctx)
