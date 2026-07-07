@@ -1165,6 +1165,44 @@ impl CodeView {
             if summary.should_display_warning(ctx)
                 && ChannelState::channel() != Channel::Integration
             {
+                // With auto-save enabled, closing a file that has a backing path
+                // shouldn't block on the "unsaved changes" dialog just because
+                // the debounce hasn't fired yet — the edits will be persisted
+                // anyway. Flush them and close (mirroring the dialog's "Save
+                // changes" action), marking the saves as auto-saves so they stay
+                // silent. Untitled files (no path) still prompt, since auto-save
+                // can't persist them without a Save As.
+                let tab_has_backing_file = self
+                    .tab_at(index)
+                    .is_some_and(|tab| tab.editor_view.as_ref(ctx).file_id().is_some());
+                if *CodeSettings::as_ref(ctx).auto_save && tab_has_backing_file {
+                    if is_clearing_group {
+                        let unsaved_indices = self.unsaved_indices(ctx);
+                        for &unsaved_index in &unsaved_indices {
+                            if let Some(tab) = self.tab_group.get(unsaved_index) {
+                                if tab.editor_view.as_ref(ctx).file_id().is_some() {
+                                    tab.editor_view.update(ctx, |editor, _| {
+                                        editor.mark_next_save_as_auto_save()
+                                    });
+                                }
+                            }
+                        }
+                        self.clear_tab_group_with_intent(
+                            unsaved_indices,
+                            0,
+                            Some(PendingSaveIntent::Save),
+                            ctx,
+                        );
+                    } else {
+                        if let Some(tab) = self.tab_at(index) {
+                            tab.editor_view
+                                .update(ctx, |editor, _| editor.mark_next_save_as_auto_save());
+                        }
+                        self.remove_tab_with_intent(index, Some(PendingSaveIntent::Save), ctx);
+                    }
+                    return;
+                }
+
                 let handle_save_intent = |intent: PendingSaveIntent| {
                     let handle = ctx.handle().clone();
                     move |ctx: &mut AppContext| {

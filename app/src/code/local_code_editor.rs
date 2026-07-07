@@ -1264,6 +1264,13 @@ impl LocalCodeEditorView {
         }
     }
 
+    /// Marks the next save as an auto-save so the resulting `FileSaved` event
+    /// suppresses the "File saved." toast. Used by the close flow when auto-save
+    /// is enabled, so closing a file flushes edits silently.
+    pub fn mark_next_save_as_auto_save(&mut self) {
+        self.auto_save_in_flight = true;
+    }
+
     pub fn is_new_file(&self) -> bool {
         self.is_new_file
     }
