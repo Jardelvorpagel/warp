@@ -47,7 +47,8 @@ pub use collapsible::tui_collapsible;
 pub use constrained_box::TuiConstrainedBox;
 pub use container::TuiContainer;
 pub use event::{
-    TuiDispatchEventResult, TuiEvent, TuiEventContext, TuiEventDispatchResult, TuiScrollDelta,
+    TuiDispatchEventResult, TuiEvent, TuiEventContext, TuiEventDispatchResult, TuiPointerShape,
+    TuiScrollDelta,
 };
 pub use event_handler::TuiEventHandler;
 pub use flex::TuiFlex;

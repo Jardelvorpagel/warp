@@ -156,9 +156,12 @@ fn footer_model_token_usage(
         .collect()
 }
 
-/// Compact conversation-level usage totals for lightweight displays (e.g. the
-/// TUI footer's usage entry): total tokens and accumulated dollar cost across
-/// all models, from the per-request usage reported by `StreamFinished`.
+/// Cross-model usage totals for compact displays (e.g. the TUI footer's
+/// usage entry).
+///
+/// A projection summed on demand from the conversation's existing
+/// `total_token_usage_by_model` state — named so the underlying
+/// `warp_multi_agent_api::TokenUsage` rows don't leak through `tui_export`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ConversationUsageTotals {
     /// Total input + output tokens across all models.
@@ -3506,8 +3509,9 @@ impl AIConversation {
         self.total_token_usage_by_model.values().cloned().collect()
     }
 
-    /// Returns the accumulated token and dollar-cost totals across all models,
-    /// for compact usage displays (e.g. the TUI footer's usage entry).
+    /// Sums the existing `total_token_usage_by_model` state into compact
+    /// cross-model totals for lightweight displays (e.g. the TUI footer's
+    /// usage entry).
     pub fn usage_totals(&self) -> ConversationUsageTotals {
         let mut totals = ConversationUsageTotals::default();
         for usage in self.total_token_usage_by_model.values() {

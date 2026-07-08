@@ -27,7 +27,7 @@ use std::sync::MutexGuard;
 
 use super::{
     TuiBuffer, TuiConstraint, TuiElement, TuiEvent, TuiEventContext, TuiLayoutContext,
-    TuiPresentationContext, TuiRect, TuiRectExt, TuiSize,
+    TuiPointerShape, TuiPresentationContext, TuiRect, TuiRectExt, TuiSize,
 };
 use crate::elements::{MouseState, MouseStateHandle};
 use crate::AppContext;
@@ -38,6 +38,7 @@ pub struct TuiHoverable {
     child: Box<dyn TuiElement>,
     state: MouseStateHandle,
     on_click: Option<ClickCallback>,
+    pointer_shape: Option<TuiPointerShape>,
 }
 
 impl TuiHoverable {
@@ -47,6 +48,7 @@ impl TuiHoverable {
             child,
             state,
             on_click: None,
+            pointer_shape: None,
         }
     }
 
@@ -57,6 +59,14 @@ impl TuiHoverable {
         callback: impl FnMut(&mut TuiEventContext, &AppContext) + 'static,
     ) -> Self {
         self.on_click = Some(Box::new(callback));
+        self
+    }
+
+    /// Requests `shape` for the host-terminal pointer while this element is
+    /// hovered (e.g. [`TuiPointerShape::Hand`] for clickable affordances),
+    /// mirroring the GUI `Hoverable`'s `with_cursor`.
+    pub fn with_pointer_shape(mut self, shape: TuiPointerShape) -> Self {
+        self.pointer_shape = Some(shape);
         self
     }
 
@@ -105,6 +115,14 @@ impl TuiElement for TuiHoverable {
                 state.is_hovered = is_hovered;
                 drop(state);
                 event_ctx.notify();
+            }
+            // Requested on every move while hovered (not just transitions):
+            // the runtime resolves the shape per pointer event, resetting to
+            // the default whenever no hovered element requests one.
+            if is_hovered {
+                if let Some(shape) = self.pointer_shape {
+                    event_ctx.request_pointer_shape(shape);
+                }
             }
             // Mouse moves are never consumed so sibling hoverables can track
             // their own transitions from the same event.

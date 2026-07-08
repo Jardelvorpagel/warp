@@ -39,6 +39,7 @@ The reusable piece both sub-issues consume:
 - `format_cost(cost_in_cents)` → `$0.03` (two decimals).
 - `TokenCostToggle` — shared tokens⇄cost state owned by `TuiTerminalSessionView`, plus a render helper that wraps the footer entry in the hover/click element (`TuiHoverable`/`TuiEventHandler` from `crates/warpui_core/src/elements/tui/`). The `MouseStateHandle` must be owned by the view, not created inline during render.
 - Styles come from `TuiUiBuilder` (`dim_text_style`/`muted_text_style`), matching the mock's `#8e8e8e`.
+- The entry shows a pointing-hand mouse pointer while hovered. This is new TUI-core plumbing mirroring the GUI `Hoverable`'s `with_cursor`: `TuiPointerShape` + `TuiHoverable::with_pointer_shape` request a shape into `TuiEventContext` during mouse-move dispatch (first request wins, so the innermost hovered element prevails), and `TuiScreen` syncs the host terminal via the OSC 22 pointer-shape sequence — emitted only on changes, reset to `default` when nothing requests a shape and on terminal restore (`CrosstermModeControl::leave`). Terminals without OSC 22 support (it's honored by kitty/WezTerm/foot/xterm-class emulators) ignore the sequence.
 
 ### 3. Footer entry (CODE-1831, `terminal_session_view.rs`)
 
@@ -54,6 +55,7 @@ The reusable piece both sub-issues consume:
 ## Testing and validation
 
 - Unit tests in sibling `_tests.rs` files per repo convention (`usage_tests.rs`, extend `terminal_session_view` and `agent_block_tests.rs`): formatter edge cases (0/singular/abbreviation/rounding), footer hidden before first usage event, footer entry renders token form then cost form after a click event dispatch, summary section extracted only for finished exchanges with usage, dim styling sourced from theme.
+- Pointer-shape tests in `warpui_core`: `hoverable_tests.rs` (hovered moves request the configured shape, first request wins) and `runtime/mod_tests.rs` (mouse moves over a hand-pointer hoverable emit OSC 22 once per change and reset on leave, against the in-memory terminal).
 - App-side tests in `conversation_tests.rs`: per-exchange `token_usage`/cost captured from `stream_finished`, totals accumulate across requests.
 - Commands: `cargo nextest run -p warp_tui`, `cargo nextest run -p warp` (touched test files), `cargo clippy -p warp_tui --all-targets -- -D warnings`, `./script/format` — all must pass before each PR (presubmit requirement).
 - Manual: `./script/run-tui`; send a prompt; verify footer count appears and updates, click toggles `4 tok` ⇄ `$0.03` and back, summary row appears after completion; compare against Figma frames `323:17499`/`323:17607`.
