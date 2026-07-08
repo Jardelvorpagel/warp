@@ -401,8 +401,11 @@ pub struct RunAgentArgs {
 
     /// Execution harness for the agent run.
     ///
-    /// "oz" (default) uses Warp's built-in agent infrastructure.
-    /// "claude" delegates to the `claude` CLI.
+    /// Controls which agent CLI executes the prompt:
+    /// - "oz" (default): Warp's built-in agent infrastructure
+    /// - "claude" (alias "claude-code"): delegates to the `claude` CLI
+    /// - "opencode" (alias "open-code"): delegates to the `opencode` CLI
+    /// - "codex": delegates to the `codex` CLI
     #[arg(long = "harness", value_name = "HARNESS", default_value_t = Harness::Oz, hide = true)]
     pub harness: Harness,
 
@@ -554,8 +557,12 @@ pub struct RunCloudArgs {
 
     /// Execution harness for the agent run.
     ///
-    /// "oz" (default) uses Warp's built-in agent infrastructure.
-    /// "claude" delegates to the `claude` CLI.
+    /// Controls which agent CLI executes the prompt:
+    /// - "oz" (default): Warp's built-in agent infrastructure
+    /// - "claude" (alias "claude-code"): delegates to the `claude` CLI
+    /// - "opencode" (alias "open-code"): delegates to the `opencode` CLI
+    /// - "gemini": delegates to the `gemini` CLI
+    /// - "codex": delegates to the `codex` CLI
     #[arg(long = "harness", value_name = "HARNESS", default_value_t = Harness::Oz, hide = true)]
     pub harness: Harness,
 
@@ -563,6 +570,9 @@ pub struct RunCloudArgs {
     ///
     /// Resolved server-side and injected into the agent container.
     /// Only valid when --harness is set to "claude".
+    ///
+    /// Use `oz secret list` to see available secrets, or `oz secret create`
+    /// to store a new Anthropic API key or Claude OAuth token.
     #[arg(long = "claude-auth-secret", value_name = "NAME", hide = true)]
     pub claude_auth_secret: Option<String>,
 }

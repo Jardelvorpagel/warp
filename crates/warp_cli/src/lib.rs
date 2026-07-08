@@ -357,6 +357,24 @@ impl Args {
             command = command.mut_subcommand("harness-support", |c| c.hide(true));
         }
 
+        // Show --harness (and the related --claude-auth-secret) flags when the
+        // AgentHarness feature is enabled. The flags are statically hidden so they
+        // don't surface before the feature lands; this block makes them visible once
+        // it's on.
+        if FeatureFlag::AgentHarness.is_enabled() {
+            command = command.mut_subcommand("agent", |agent_cmd| {
+                agent_cmd
+                    .mut_subcommand("run", |run_cmd| {
+                        run_cmd.mut_arg("harness", |arg| arg.hide(false))
+                    })
+                    .mut_subcommand("run-cloud", |cloud_cmd| {
+                        cloud_cmd
+                            .mut_arg("harness", |arg| arg.hide(false))
+                            .mut_arg("claude-auth-secret", |arg| arg.hide(false))
+                    })
+            });
+        }
+
         // Hide the conversation subcommand and --conversation flag from help text.
         if !FeatureFlag::ConversationApi.is_enabled() {
             command = command.mut_subcommand("run", |run_cmd| {
