@@ -6,7 +6,8 @@ use warpui::ViewContext;
 
 use crate::send_telemetry_from_ctx;
 use crate::server::telemetry::{LinkOpenMethod, TelemetryEvent};
-use crate::terminal::model::grid::grid_handler::Link;
+use crate::terminal::model::ansi::PointerShape;
+use crate::terminal::model::grid::grid_handler::{Link, TermMode};
 use crate::terminal::model::index::Point;
 use crate::terminal::model::terminal_model::{WithinBlock, WithinModel};
 use crate::terminal::model::RespectObfuscatedSecrets;
@@ -265,6 +266,25 @@ impl Deref for HighlightedLinkOption {
 }
 
 impl super::TerminalView {
+    /// The cursor for a pointer shape requested by the running program via
+    /// OSC 22, if the request should currently be honored.
+    ///
+    /// The shape is only honored while the program is tracking the mouse (some
+    /// mouse-reporting mode is active). Programs that restyle the pointer on
+    /// hover necessarily enable mouse reporting (they can't track the pointer
+    /// otherwise), and this keeps a stale shape from hijacking Warp's normal
+    /// cursor behavior (text selection, link hover) once a program stops using
+    /// the mouse.
+    fn program_requested_cursor(model: &TerminalModel) -> Option<Cursor> {
+        let shape = model.pointer_shape()?;
+        if !model.is_term_mode_set(TermMode::MOUSE_MODE) {
+            return None;
+        }
+        match shape {
+            PointerShape::PointingHand => Some(Cursor::PointingHand),
+        }
+    }
+
     pub(super) fn maybe_link_hover(
         &mut self,
         position: &Option<WithinModel<Point>>,
@@ -275,7 +295,9 @@ impl super::TerminalView {
         if self.terminal_is_selecting(&self.model.lock(), ctx)
             || self.is_navigated_away_from_window(ctx)
         {
-            if self.highlighted_link.take(&mut self.model.lock()).is_some() {
+            let link_removed = self.highlighted_link.take(&mut self.model.lock()).is_some();
+            let pointer_cleared = std::mem::take(&mut self.program_pointer_cursor_active);
+            if link_removed || pointer_cleared {
                 ctx.reset_cursor();
                 ctx.notify();
             }
@@ -284,7 +306,9 @@ impl super::TerminalView {
 
         // If the mouse isn't in the terminal view, we're not hovering any link.
         let Some(position) = position else {
-            if self.highlighted_link.take(&mut self.model.lock()).is_some() {
+            let link_removed = self.highlighted_link.take(&mut self.model.lock()).is_some();
+            let pointer_cleared = std::mem::take(&mut self.program_pointer_cursor_active);
+            if link_removed || pointer_cleared {
                 ctx.reset_cursor();
                 // Clear last_hover_fragment_boundary when mouse is out of block bounds.
                 self.last_hover_fragment_boundary = None;
@@ -349,6 +373,35 @@ impl super::TerminalView {
             }
             _ => (),
         };
+
+        // Apply any pointer shape the running program requested via OSC 22. A
+        // hovered link keeps priority (its own pointing-hand cursor was set
+        // above), and text selection is handled by the early return at the top
+        // of this method.
+        if self.highlighted_link.is_some() {
+            // The link-hover cursor owns the pointer while a link is highlighted.
+            self.program_pointer_cursor_active = false;
+        } else {
+            match Self::program_requested_cursor(&self.model.lock()) {
+                Some(cursor) => {
+                    // Set the cursor if the override isn't already showing, or
+                    // if the link unhover above just downgraded it to the
+                    // default arrow.
+                    if !self.program_pointer_cursor_active || new_cursor_shape.is_some() {
+                        new_cursor_shape = Some(cursor);
+                        self.program_pointer_cursor_active = true;
+                    }
+                }
+                None => {
+                    // The override no longer applies (the program reset the
+                    // shape or stopped mouse reporting); restore the default
+                    // cursor.
+                    if std::mem::take(&mut self.program_pointer_cursor_active) {
+                        new_cursor_shape.get_or_insert(Cursor::Arrow);
+                    }
+                }
+            }
+        }
 
         if let Some(new_cursor_shape) = new_cursor_shape {
             ctx.set_cursor_shape(new_cursor_shape);
@@ -671,15 +724,25 @@ impl super::TerminalView {
         ctx: &mut ViewContext<Self>,
     ) {
         let mut model = self.model.lock();
-        if self.highlighted_link.take(&mut model).is_some() {
+        let link_removed = self.highlighted_link.take(&mut model).is_some();
+        if link_removed {
             ctx.reset_cursor();
             ctx.notify();
         }
 
         if let Some(new_link) = link_result {
             self.highlighted_link.set(new_link, &mut model);
+            self.program_pointer_cursor_active = false;
             ctx.set_cursor_shape(Cursor::PointingHand);
             ctx.notify();
+        } else if link_removed {
+            // The removed link's pointing-hand cursor was just reset; re-apply
+            // any pointer shape the running program requested via OSC 22.
+            if let Some(cursor) = Self::program_requested_cursor(&model) {
+                self.program_pointer_cursor_active = true;
+                ctx.set_cursor_shape(cursor);
+                ctx.notify();
+            }
         }
     }
 }

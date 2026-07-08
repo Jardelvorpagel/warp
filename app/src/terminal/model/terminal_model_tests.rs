@@ -932,6 +932,37 @@ fn test_reset_state() {
 }
 
 #[test]
+fn pointer_shape_reset_on_alt_screen_exit() {
+    let mut terminal = TerminalModel::mock(None, None);
+
+    terminal.enter_alt_screen(true);
+    terminal.set_pointer_shape(Some(ansi::PointerShape::PointingHand));
+    assert_eq!(
+        terminal.pointer_shape(),
+        Some(ansi::PointerShape::PointingHand)
+    );
+
+    terminal.unset_mode(ansi::Mode::SwapScreen {
+        save_cursor_and_clear_screen: true,
+    });
+    assert_eq!(terminal.pointer_shape(), None);
+}
+
+#[test]
+fn pointer_shape_reset_on_terminal_reset() {
+    let mut terminal = TerminalModel::mock(None, None);
+
+    terminal.set_pointer_shape(Some(ansi::PointerShape::PointingHand));
+    assert_eq!(
+        terminal.pointer_shape(),
+        Some(ansi::PointerShape::PointingHand)
+    );
+
+    terminal.reset_state();
+    assert_eq!(terminal.pointer_shape(), None);
+}
+
+#[test]
 fn test_exit_alt_screen_on_command_finished() {
     let mut terminal: TerminalModel = TerminalModel::mock(None, None);
     terminal.start_command_execution();

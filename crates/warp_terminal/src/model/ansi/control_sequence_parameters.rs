@@ -44,6 +44,19 @@ pub enum CursorShape {
     Hidden,
 }
 
+/// A mouse pointer shape requested by a terminal program via the OSC 22
+/// escape sequence (the kitty pointer-shape protocol, originally proposed by
+/// xterm).
+///
+/// Only shapes Warp can render with a native platform cursor are represented;
+/// see https://sw.kovidgoyal.net/kitty/pointer-shapes/ for the full protocol.
+#[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
+pub enum PointerShape {
+    /// A pointing hand, e.g. for clickable buttons or links (protocol name
+    /// `pointer`; legacy xterm aliases `hand`/`hand2`).
+    PointingHand,
+}
+
 /// Terminal modes.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Mode {

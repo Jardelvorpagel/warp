@@ -198,6 +198,54 @@ fn percent_decode_utf8(input: &str) -> Option<String> {
     String::from_utf8(decoded).ok()
 }
 
+/// The action to take in response to an OSC 22 (mouse pointer shape) payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PointerShapeAction {
+    /// A supported shape was requested; set it.
+    Set(PointerShape),
+    /// Restore the default pointer shape.
+    Reset,
+    /// The payload doesn't affect the current shape; do nothing.
+    Ignore,
+}
+
+/// Parse the payload of an OSC 22 sequence (`OSC 22 ; <payload> ST`), which
+/// requests a mouse pointer shape.
+///
+/// This is a pragmatic subset of the kitty pointer-shape protocol
+/// (https://sw.kovidgoyal.net/kitty/pointer-shapes/):
+/// - A plain (optionally `=`-prefixed) shape name sets the shape. `pointer`
+///   and the legacy xterm aliases `hand`/`hand2` map to the pointing-hand
+///   cursor; an empty name or `default` restores the default cursor.
+/// - Any other name is treated as a reset rather than keeping a
+///   previously-requested shape visible, since Warp can't render it.
+/// - Stack pushes/pops (`>`/`<` prefixes) and queries (`?` prefix) are
+///   silently ignored.
+fn parse_osc_22_pointer_shape(payload: &[u8]) -> PointerShapeAction {
+    // Note `first()` is `None` for an empty payload, which resets the shape.
+    match payload.first() {
+        Some(b'>') | Some(b'<') | Some(b'?') => PointerShapeAction::Ignore,
+        Some(b'=') => parse_pointer_shape_name(&payload[1..]),
+        Some(_) | None => parse_pointer_shape_name(payload),
+    }
+}
+
+/// Maps an OSC 22 shape name to the pointer shape action it requests.
+fn parse_pointer_shape_name(name: &[u8]) -> PointerShapeAction {
+    if name.is_empty() || name.eq_ignore_ascii_case(b"default") {
+        PointerShapeAction::Reset
+    } else if name.eq_ignore_ascii_case(b"pointer")
+        || name.eq_ignore_ascii_case(b"hand")
+        || name.eq_ignore_ascii_case(b"hand2")
+    {
+        PointerShapeAction::Set(PointerShape::PointingHand)
+    } else {
+        // A shape Warp can't render (e.g. `wait`, `crosshair`). Reset instead
+        // of leaving a previously-requested shape visible.
+        PointerShapeAction::Reset
+    }
+}
+
 fn parse_number(input: &[u8]) -> Option<u8> {
     if input.is_empty() {
         return None;
@@ -930,6 +978,22 @@ where
                     }
                 }
                 unhandled(params);
+            }
+
+            // OSC 22: Mouse pointer shape (kitty pointer-shape protocol,
+            // originally proposed by xterm).
+            // Format: OSC 22 ; <shape-name> ST
+            // Reference: https://sw.kovidgoyal.net/kitty/pointer-shapes/
+            b"22" => {
+                // A missing payload (`OSC 22 ST`) is treated like an empty
+                // one, which resets the shape. Shape names can't contain `;`,
+                // so any additional params are junk and ignored.
+                let payload = params.get(1).copied().unwrap_or_default();
+                match parse_osc_22_pointer_shape(payload) {
+                    PointerShapeAction::Set(shape) => self.handler.set_pointer_shape(Some(shape)),
+                    PointerShapeAction::Reset => self.handler.set_pointer_shape(None),
+                    PointerShapeAction::Ignore => (),
+                }
             }
 
             // Set cursor style.

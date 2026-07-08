@@ -25,6 +25,7 @@ struct MockHandler {
     d_proto_hooks: Vec<DProtoHook>,
     pluggable_notifications: Vec<(Option<String>, String)>,
     cwd_updates: Vec<String>,
+    pointer_shapes: Vec<Option<PointerShape>>,
     registered_session_ids: HashSet<SessionId>,
     should_validate_dcs_hook_session_id: bool,
 }
@@ -250,6 +251,10 @@ impl Handler for MockHandler {
         self.cwd_updates.push(path);
     }
 
+    fn set_pointer_shape(&mut self, shape: Option<PointerShape>) {
+        self.pointer_shapes.push(shape);
+    }
+
     fn set_keyboard_enhancement_flags(
         &mut self,
         _mode: KeyboardModes,
@@ -274,6 +279,7 @@ impl Default for MockHandler {
             d_proto_hooks: Vec::new(),
             pluggable_notifications: Vec::new(),
             cwd_updates: Vec::new(),
+            pointer_shapes: Vec::new(),
             registered_session_ids: HashSet::new(),
             should_validate_dcs_hook_session_id: true,
         }
@@ -1252,4 +1258,81 @@ fn parse_osc7_empty_payload_ignored() {
     let (_, handler) = parse_bytes(bytes);
 
     assert!(handler.cwd_updates.is_empty());
+}
+
+#[test]
+fn parse_osc22_supported_shape_names_set_pointing_hand() {
+    // `pointer` is the kitty/CSS name; `hand`/`hand2` are legacy xterm
+    // aliases; `=` is the protocol's explicit "set" prefix. Names are matched
+    // case-insensitively.
+    for name in ["pointer", "hand", "hand2", "=pointer", "POINTER"] {
+        let bytes = format!("\x1b]22;{name}\x1b\\");
+        let (_, handler) = parse_bytes(bytes.as_bytes());
+
+        assert_eq!(
+            handler.pointer_shapes,
+            vec![Some(PointerShape::PointingHand)],
+            "OSC 22;{name} should set the pointing-hand shape"
+        );
+    }
+}
+
+#[test]
+fn parse_osc22_empty_and_default_payloads_reset() {
+    for payload in ["", "default", "=", "DEFAULT"] {
+        let bytes = format!("\x1b]22;{payload}\x07");
+        let (_, handler) = parse_bytes(bytes.as_bytes());
+
+        assert_eq!(
+            handler.pointer_shapes,
+            vec![None],
+            "OSC 22;{payload:?} should reset the shape"
+        );
+    }
+}
+
+#[test]
+fn parse_osc22_missing_payload_resets() {
+    // A bare `OSC 22 ST` with no `;` at all is treated like an empty payload.
+    let bytes: &[u8] = b"\x1b]22\x07";
+    let (_, handler) = parse_bytes(bytes);
+
+    assert_eq!(handler.pointer_shapes, vec![None]);
+}
+
+#[test]
+fn parse_osc22_unsupported_shape_names_reset() {
+    // Warp can't render these shapes; resetting avoids leaving a
+    // previously-requested shape visible.
+    for name in ["wait", "crosshair", "no-such-shape"] {
+        let bytes = format!("\x1b]22;{name}\x07");
+        let (_, handler) = parse_bytes(bytes.as_bytes());
+
+        assert_eq!(
+            handler.pointer_shapes,
+            vec![None],
+            "OSC 22;{name} should reset the shape"
+        );
+    }
+}
+
+#[test]
+fn parse_osc22_push_pop_and_query_payloads_ignored() {
+    // Stack pushes (`>`), pops (`<`), and queries (`?`) are not supported and
+    // must not change the current shape.
+    for payload in [
+        ">pointer",
+        ">wait,pointer",
+        "<",
+        "?__current__",
+        "?pointer,wait",
+    ] {
+        let bytes = format!("\x1b]22;{payload}\x07");
+        let (_, handler) = parse_bytes(bytes.as_bytes());
+
+        assert!(
+            handler.pointer_shapes.is_empty(),
+            "OSC 22;{payload} should be ignored"
+        );
+    }
 }

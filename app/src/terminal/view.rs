@@ -2582,6 +2582,11 @@ pub struct TerminalView {
 
     last_hover_fragment_boundary: Option<WithinModel<FragmentBoundary>>,
 
+    /// Whether the mouse cursor is currently overridden by a pointer shape the
+    /// running program requested via OSC 22. Used to avoid redundant cursor
+    /// updates and to reset the cursor once the override no longer applies.
+    program_pointer_cursor_active: bool,
+
     bootstrap_start: Option<Instant>,
     is_login_shell_bootstrapped: bool,
     /// Set when a pending command is submitted to the shell. Cleared on the
@@ -4317,6 +4322,7 @@ impl TerminalView {
             find_link_tx,
             highlighted_link: HighlightedLinkOption::default(),
             last_hover_fragment_boundary: None,
+            program_pointer_cursor_active: false,
             bootstrap_start: None,
             is_login_shell_bootstrapped: false,
             awaiting_pending_command_completion: false,
@@ -9501,6 +9507,7 @@ impl TerminalView {
             // The mouse cursor may have been over the tooltip before it was dismissed. Reset it to
             // clear any lingering alternate pointers.
             ctx.reset_cursor();
+            self.program_pointer_cursor_active = false;
         }
         was_open
     }
@@ -18435,6 +18442,7 @@ impl TerminalView {
 
         if self.highlighted_link.take(&mut self.model.lock()).is_some() {
             ctx.reset_cursor();
+            self.program_pointer_cursor_active = false;
             ctx.notify();
         }
     }
@@ -18592,6 +18600,10 @@ impl TerminalView {
             } else {
                 ctx.reset_cursor();
             }
+            // Either the secret-hover cursor owns the pointer now, or the
+            // cursor was just reset; a subsequent mouse move re-applies any
+            // program-requested pointer shape.
+            self.program_pointer_cursor_active = false;
             ctx.notify();
         }
     }

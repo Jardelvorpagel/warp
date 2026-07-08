@@ -406,4 +406,10 @@ pub trait Handler {
     /// - OSC 9: Simple notification with just a body (iTerm2/Windows Terminal style)
     /// - OSC 777: Notification with title and body (urxvt style)
     fn pluggable_notification(&mut self, _title: Option<String>, _body: String) {}
+
+    /// Callback for the OSC 22 (mouse pointer shape) escape sequence.
+    ///
+    /// `Some(shape)` when the program requested a supported shape; `None` when
+    /// the shape was reset to the default.
+    fn set_pointer_shape(&mut self, _shape: Option<PointerShape>) {}
 }

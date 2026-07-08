@@ -406,6 +406,13 @@ pub struct TerminalModel {
     /// color based on the theme.
     override_colors: color::OverrideList,
 
+    /// The mouse pointer shape most recently requested by the running program
+    /// via an OSC 22 escape sequence (kitty pointer-shape protocol), if any.
+    ///
+    /// Cleared when the program leaves the alternate screen and on a full
+    /// terminal reset.
+    pointer_shape: Option<ansi::PointerShape>,
+
     pub(crate) event_proxy: ChannelEventListener,
 
     /// The pending `SSHValue`, if any, of the active session. This is a temporary value that's
@@ -1071,6 +1078,7 @@ impl TerminalModel {
             custom_title: None,
             colors,
             override_colors: color::OverrideList::empty(),
+            pointer_shape: None,
             event_proxy,
             pending_ssh_wrapper_session: None,
             pending_shell_launch_data: None,
@@ -1959,6 +1967,12 @@ impl TerminalModel {
         self.alt_screen_active
     }
 
+    /// The mouse pointer shape most recently requested by the running program
+    /// via an OSC 22 escape sequence, if any.
+    pub fn pointer_shape(&self) -> Option<ansi::PointerShape> {
+        self.pointer_shape
+    }
+
     pub fn set_pending_shell_launch_data(&mut self, shell_launch_data: ShellLaunchData) {
         self.active_shell_launch_data = Some(shell_launch_data.clone());
         self.pending_shell_launch_data = Some(shell_launch_data);
@@ -2136,6 +2150,10 @@ impl TerminalModel {
         self.alt_screen_mut().grid_handler_mut().evict_all_images();
 
         self.alt_screen_active = false;
+
+        // Any pointer shape the program requested applies to its (alt-screen)
+        // UI; don't leak it into the block list after the program exits.
+        self.pointer_shape = None;
 
         if restore_cursor {
             self.block_list.active_block_mut().restore_cursor_position();
@@ -2536,6 +2554,10 @@ impl ansi::Handler for TerminalModel {
         delegate!(self.set_cursor_shape(shape));
     }
 
+    fn set_pointer_shape(&mut self, shape: Option<ansi::PointerShape>) {
+        self.pointer_shape = shape;
+    }
+
     fn input(&mut self, c: char) {
         // TODO: we should figure out what it means to be simultaneously expecting
         // in-band command output and completions data, which is technically possible
@@ -2724,6 +2746,7 @@ impl ansi::Handler for TerminalModel {
     fn reset_state(&mut self) {
         self.title_stack = Vec::new();
         self.title = None;
+        self.pointer_shape = None;
 
         self.alt_screen.reset_state();
         self.block_list.reset_state();
