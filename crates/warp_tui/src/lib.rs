@@ -16,6 +16,7 @@ pub mod session;
 mod telemetry;
 mod tui_builder;
 mod ui;
+mod usage;
 
 mod conversation_selection;
 mod exit_confirmation;

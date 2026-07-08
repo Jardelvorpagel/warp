@@ -10,10 +10,11 @@ use warp::settings::{AISettings, AISettingsChangedEvent};
 use warp::tui_export::{
     AIAgentPtyWriteMode, ActiveSession, ActiveSessionEvent, AgentInteractionMetadata,
     AgentViewEntryOrigin, BlocklistAIActionModel, BlocklistAIContextModel, BlocklistAIController,
-    BlocklistAIHistoryModel, BlocklistAIInputModel, CancellationReason, CommandExecutionSource,
-    ConversationSelection, ConversationSelectionHandle, ExecuteCommandEvent,
-    GetRelevantFilesController, LLMPreferences, LLMPreferencesEvent, ModelEvent, PtyIntent,
-    PtyIntentEvent, ShellCommandExecutorEvent, TerminalModel, TerminalSurface, TerminalSurfaceInit,
+    BlocklistAIHistoryEvent, BlocklistAIHistoryModel, BlocklistAIInputModel, CancellationReason,
+    CommandExecutionSource, ConversationSelection, ConversationSelectionHandle,
+    ConversationUsageTotals, ExecuteCommandEvent, GetRelevantFilesController, LLMPreferences,
+    LLMPreferencesEvent, ModelEvent, PtyIntent, PtyIntentEvent, ShellCommandExecutorEvent,
+    TerminalModel, TerminalSurface, TerminalSurfaceInit,
 };
 use warp_editor::model::CoreEditorModel;
 use warpui::SingletonEntity;
@@ -36,6 +37,7 @@ use crate::keybindings::TUI_BINDING_GROUP;
 use crate::transcript_view::TuiTranscriptView;
 use crate::tui_builder::TuiUiBuilder;
 use crate::ui::abbreviate_home_prefix;
+use crate::usage::TokenCostToggle;
 
 /// Width used before the first layout pass pushes the real terminal width into the editor.
 const INITIAL_INPUT_WIDTH: u16 = 80;
@@ -88,6 +90,8 @@ pub(crate) struct TuiTerminalSessionView {
     /// Armed by a ctrl-c press; a second press while armed exits the TUI.
     /// The footer shows [`CTRL_C_EXIT_HINT`] while armed.
     exit_confirmation: ExitConfirmation,
+    /// Tokens⇄cost display state for the footer's clickable usage entry.
+    usage_toggle: TokenCostToggle,
 }
 
 /// Registers the session surface's keybindings. Called once at TUI startup
@@ -242,6 +246,25 @@ impl TuiTerminalSessionView {
             ActiveSessionEvent::UpdatedPwd => ctx.notify(),
             ActiveSessionEvent::Bootstrapped => {}
         });
+        // The footer's usage entry shows the selected conversation's token/cost
+        // totals: re-render when that conversation's usage metadata updates.
+        ctx.subscribe_to_model(
+            &BlocklistAIHistoryModel::handle(ctx),
+            |view, _, event, ctx| {
+                if let BlocklistAIHistoryEvent::ConversationUsageMetadataUpdated {
+                    conversation_id,
+                } = event
+                {
+                    let selected = view
+                        .conversation_selection
+                        .as_ref(ctx)
+                        .selected_conversation_id(ctx);
+                    if selected == Some(*conversation_id) {
+                        ctx.notify();
+                    }
+                }
+            },
+        );
 
         ctx.spawn_stream_local(wakeups_rx, |_, _, ctx| ctx.notify(), |_, _| {});
         // Focus the input view so the keymap responder chain is
@@ -257,6 +280,7 @@ impl TuiTerminalSessionView {
             active_session,
             terminal_surface_id,
             exit_confirmation: ExitConfirmation::default(),
+            usage_toggle: TokenCostToggle::default(),
         }
     }
 
@@ -360,7 +384,28 @@ impl TuiTerminalSessionView {
                     .finish(),
             );
         }
+        // Usage entry: the selected conversation's token/cost totals, hidden
+        // until any usage has been reported.
+        if let Some(totals) = self.selected_conversation_usage_totals(ctx) {
+            footer = footer
+                .child(TuiText::new(" • ").with_style(dim).truncate().finish())
+                .child(self.usage_toggle.render_entry(totals));
+        }
         footer
+    }
+
+    /// The selected conversation's accumulated usage totals, or `None` (entry
+    /// hidden) until any usage has been reported.
+    fn selected_conversation_usage_totals(
+        &self,
+        ctx: &AppContext,
+    ) -> Option<ConversationUsageTotals> {
+        let totals = self
+            .conversation_selection
+            .as_ref(ctx)
+            .selected_conversation(ctx)?
+            .usage_totals();
+        (totals != ConversationUsageTotals::default()).then_some(totals)
     }
 
     /// Sends a prompt to the selected conversation, creating one if needed.

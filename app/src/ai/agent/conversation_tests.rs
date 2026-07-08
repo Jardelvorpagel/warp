@@ -7,7 +7,8 @@ use warpui::{App, SingletonEntity};
 
 use super::{
     artifact_from_fork_proto, footer_model_token_usage, AIConversation,
-    AIConversationAutoexecuteMode, AIConversationId, ConversationStatus, RestoreConversationError,
+    AIConversationAutoexecuteMode, AIConversationId, ConversationStatus, ConversationUsageTotals,
+    RestoreConversationError,
 };
 use crate::ai::artifacts::Artifact;
 use crate::ai::llms::LLMPreferences;
@@ -371,6 +372,61 @@ fn update_cost_and_usage_uses_fallback_label_for_unknown_custom_endpoint() {
                 .get("primary_agent"),
             Some(&9)
         );
+    });
+}
+
+fn stream_token_usage(
+    model_id: &str,
+    total_input: u32,
+    output: u32,
+    cost_in_cents: f32,
+) -> api::response_event::stream_finished::TokenUsage {
+    api::response_event::stream_finished::TokenUsage {
+        model_id: model_id.to_string(),
+        total_input,
+        output,
+        input_cache_read: 0,
+        input_cache_write: 0,
+        cost_in_cents,
+    }
+}
+
+#[test]
+fn usage_totals_accumulates_tokens_and_cost_across_requests_and_models() {
+    App::test((), |app| async move {
+        let mut conversation = AIConversation::new(false, false);
+        assert_eq!(
+            conversation.usage_totals(),
+            ConversationUsageTotals::default()
+        );
+
+        app.read(|ctx| {
+            conversation
+                .update_cost_and_usage_for_request(
+                    None,
+                    vec![
+                        stream_token_usage("model-a", 100, 20, 1.5),
+                        stream_token_usage("model-b", 10, 5, 0.5),
+                    ],
+                    None,
+                    false,
+                    ctx,
+                )
+                .expect("token usage should update");
+            conversation
+                .update_cost_and_usage_for_request(
+                    None,
+                    vec![stream_token_usage("model-a", 50, 10, 1.2)],
+                    None,
+                    false,
+                    ctx,
+                )
+                .expect("token usage should update");
+        });
+
+        let totals = conversation.usage_totals();
+        assert_eq!(totals.total_tokens, 195);
+        assert!((totals.cost_in_cents - 3.2).abs() < 1e-6);
     });
 }
 

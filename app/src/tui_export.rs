@@ -2,7 +2,7 @@
 
 pub use crate::ai::agent::api::ServerConversationToken;
 pub use crate::ai::agent::conversation::{
-    AIConversationAutoexecuteMode, AIConversationId, ConversationStatus,
+    AIConversationAutoexecuteMode, AIConversationId, ConversationStatus, ConversationUsageTotals,
 };
 pub use crate::ai::agent::task::TaskId;
 pub use crate::ai::agent::{

@@ -156,6 +156,17 @@ fn footer_model_token_usage(
         .collect()
 }
 
+/// Compact conversation-level usage totals for lightweight displays (e.g. the
+/// TUI footer's usage entry): total tokens and accumulated dollar cost across
+/// all models, from the per-request usage reported by `StreamFinished`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ConversationUsageTotals {
+    /// Total input + output tokens across all models.
+    pub total_tokens: u64,
+    /// Total cost across all models, in US cents.
+    pub cost_in_cents: f64,
+}
+
 // basic info for creating a dummy command block based on an exchange's inputs
 pub(crate) struct CommandBlockInfo {
     pub(crate) command: String,
@@ -3493,6 +3504,17 @@ impl AIConversation {
     #[allow(dead_code)]
     pub fn total_token_usage(&self) -> Vec<TokenUsage> {
         self.total_token_usage_by_model.values().cloned().collect()
+    }
+
+    /// Returns the accumulated token and dollar-cost totals across all models,
+    /// for compact usage displays (e.g. the TUI footer's usage entry).
+    pub fn usage_totals(&self) -> ConversationUsageTotals {
+        let mut totals = ConversationUsageTotals::default();
+        for usage in self.total_token_usage_by_model.values() {
+            totals.total_tokens += u64::from(usage.total_input) + u64::from(usage.output);
+            totals.cost_in_cents += f64::from(usage.cost_in_cents);
+        }
+        totals
     }
 
     /// Normalize all newlines to CRLF so restored blocks render lines starting at column 0,
