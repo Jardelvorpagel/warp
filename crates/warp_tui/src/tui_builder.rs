@@ -103,9 +103,15 @@ impl TuiUiBuilder {
     }
 
     /// The warping indicator's base fill (spinner glyph and "Warping" text):
-    /// the terminal palette's normal yellow, per the TUI design.
+    /// the brand Lilac-200, per the updated TUI branding.
+    ///
+    /// TODO: this hardcodes Lilac-200 (`#D2B5FF`) because the theme's terminal
+    /// palette has no `lilac` token yet (the closest slots, `normal.magenta`
+    /// `#FF8FFD` and `normal.cyan` `#D0D1FE`, don't match). Swap this for the
+    /// theme token once the palette gains a lilac entry. The TUI is
+    /// dark-mode-only today, so a single dark-mode value is safe in the interim.
     fn warping_base_fill(&self) -> ThemeFill {
-        ThemeFill::from(self.warp_theme.terminal_colors().normal.yellow)
+        ThemeFill::from(ColorU::from_u32(0xD2B5FFFF))
     }
 
     /// The warping indicator's base color as a solid color, for per-glyph
@@ -156,3 +162,7 @@ impl TuiUiBuilder {
 fn cell_color(fill: ThemeFill) -> Color {
     CoreFill::from(fill).into()
 }
+
+#[cfg(test)]
+#[path = "tui_builder_tests.rs"]
+mod tests;
