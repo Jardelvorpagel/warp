@@ -402,10 +402,39 @@ impl SkillManager {
                 self.bundled_skills.remote_active_skill_by_path(remote, ctx)
             }),
             SkillReference::BundledSkillId(id) => {
-                self.bundled_skills.active_skill(id, path_origin, ctx)
+                self.bundled_skills
+                    .active_skill(id, path_origin, ctx)
+                    .or_else(|| {
+                        // The model sometimes calls `read_skill` with `bundled_skill_id`
+                        // set to the NAME of a file-based (`.agents/skills`) skill instead
+                        // of a real bundled catalog id. Fall back to a same-named file/user
+                        // skill for the active execution host so the read succeeds instead
+                        // of surfacing a spurious `@warp-skill:<id>` error.
+                        self.file_skill_by_name_for_origin(id, path_origin)
+                    })
             }
         };
         skill.ok_or_else(|| ActiveSkillLookupError::for_reference(reference, path_origin))
+    }
+
+    /// Finds a file-based skill by its `name` that belongs to the active
+    /// execution host. When multiple file skills share a name, selection is
+    /// deterministic: best (lowest) provider rank first, then path order.
+    fn file_skill_by_name_for_origin(
+        &self,
+        name: &str,
+        path_origin: &SkillPathOrigin,
+    ) -> Option<&ParsedSkill> {
+        self.skills_by_name
+            .get(name)?
+            .iter()
+            .filter(|path| path_matches_origin(path, path_origin))
+            .filter_map(|path| self.skills_by_path.get(path))
+            .min_by(|a, b| {
+                provider_rank(a.provider)
+                    .cmp(&provider_rank(b.provider))
+                    .then_with(|| a.path.display_path().cmp(&b.path.display_path()))
+            })
     }
 
     /// Returns a local bundled skill by ID only if its activation condition is met.
@@ -645,6 +674,19 @@ impl Entity for SkillManager {
 }
 
 impl SingletonEntity for SkillManager {}
+
+/// Returns true when a file-skill path belongs to the given execution host origin.
+fn path_matches_origin(path: &LocalOrRemotePath, path_origin: &SkillPathOrigin) -> bool {
+    match (path, path_origin) {
+        (LocalOrRemotePath::Local(_), SkillPathOrigin::Local) => true,
+        (LocalOrRemotePath::Remote(remote), SkillPathOrigin::Remote { host_id }) => {
+            remote.host_id == *host_id
+        }
+        (LocalOrRemotePath::Local(_), SkillPathOrigin::Remote { .. })
+        | (LocalOrRemotePath::Remote(_), SkillPathOrigin::Local)
+        | (_, SkillPathOrigin::RestoredDisplayOnly | SkillPathOrigin::Unavailable) => false,
+    }
+}
 
 fn path_matches_reference_location(path: &LocalOrRemotePath, reference: &SkillReference) -> bool {
     match (path, reference) {

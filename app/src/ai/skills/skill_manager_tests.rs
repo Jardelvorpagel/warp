@@ -1226,6 +1226,53 @@ fn active_skill_by_reference_with_origin_returns_typed_lookup_errors() {
     });
 }
 
+// Repro for the "@warp-skill:<id>" failed-read bug: the model calls read_skill
+// with `bundled_skill_id` set to the NAME of a file-based (.agents/skills) skill.
+// Today the BundledSkillId reference only consults the bundled catalog, so a
+// same-named file/user skill is not found and the read fails with a red X.
+//
+// This test FAILS before the fix (returns Err(NotFound)) and PASSES after a
+// graceful fallback to `skills_by_name`.
+#[test]
+fn bundled_id_reference_falls_back_to_same_named_file_skill() {
+    let file_skill = ParsedSkill {
+        name: "spec-driven-implementation".to_string(),
+        description: "file-based skill".to_string(),
+        path: LocalOrRemotePath::Local(
+            dirs::home_dir()
+                .unwrap()
+                .join(".agents/skills/spec-driven-implementation/SKILL.md"),
+        ),
+        content: "# spec-driven-implementation".to_string(),
+        line_range: None,
+        provider: SkillProvider::Agents,
+        scope: SkillScope::Home,
+    };
+    let reference = SkillReference::BundledSkillId("spec-driven-implementation".to_string());
+
+    App::test((), |mut app| async move {
+        app.add_singleton_model(DirectoryWatcher::new);
+        app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(|_| DetectedRepositories::default());
+        app.add_singleton_model(RepoMetadataModel::new);
+        app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
+        app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
+        let handle = app.add_singleton_model(SkillManager::new);
+
+        handle.update(&mut app, |manager, _| {
+            manager.add_skill_for_testing(file_skill.clone());
+        });
+
+        let resolved = handle.read(&app, |manager, ctx| {
+            manager
+                .active_skill_by_reference_with_origin(&reference, &SkillPathOrigin::Local, ctx)
+                .map(|skill| skill.content.clone())
+        });
+
+        assert_eq!(resolved, Ok("# spec-driven-implementation".to_string()));
+    });
+}
+
 // Remote home snapshots use the shared skill indexes and must remain host scoped.
 #[test]
 fn remote_home_skills_are_host_scoped_replaceable_and_path_invokable() {
