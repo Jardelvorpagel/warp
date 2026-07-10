@@ -22,6 +22,7 @@ use pathfinder_geometry::vector::vec2f;
 use ui_components::{button, Component as _, Options as _};
 use warp_core::channel::ChannelState;
 use warp_core::ui::theme::color::internal_colors;
+use warp_errors::report_error;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::elements::new_scrollable::SingleAxisConfig;
 use warpui::elements::{
@@ -126,7 +127,7 @@ use crate::view_components::compactible_action_button::{
     CompactibleActionButton, RenderCompactibleActionButton, SMALL_SIZE_SWITCH_THRESHOLD,
 };
 use crate::workspace::WorkspaceAction;
-use crate::{report_error, AIAgentTodoList, FeatureFlag};
+use crate::{AIAgentTodoList, FeatureFlag};
 
 const BLOCKED_ACTION_MESSAGE_FOR_UPLOADING_ARTIFACT: &str = "Grant access to upload this artifact?";
 
@@ -782,12 +783,17 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                             ));
                         }
                         AIAgentOutputMessageType::Action(AIAgentAction {
-                            action: AIAgentActionType::StartRecording { .. },
+                            action: AIAgentActionType::StartRecording { summary, .. },
                             id,
                             ..
                         }) => {
                             should_render_footer = false;
-                            output_items.add_child(render_start_recording(props, id, app));
+                            output_items.add_child(render_start_recording(
+                                props,
+                                id,
+                                summary.as_deref(),
+                                app,
+                            ));
                         }
                         AIAgentOutputMessageType::Action(AIAgentAction {
                             action: AIAgentActionType::StopRecording { .. },
@@ -1236,6 +1242,7 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                             invalid_api_key_button_handle: &props
                                 .state_handles
                                 .invalid_api_key_button_handle,
+                            subscribe_button_handle: &props.state_handles.subscribe_button_handle,
                             aws_bedrock_credentials_error_view: props
                                 .aws_bedrock_credentials_error_view,
                             icon_right_margin: 16.,
@@ -1831,7 +1838,7 @@ fn read_skill_display_text(
 ) -> String {
     skill
         .map(|s| format!("/{}", s.name))
-        .unwrap_or_else(|| skill_reference.to_string())
+        .unwrap_or_else(|| skill_reference.display_label())
 }
 
 fn render_read_skill(
@@ -2936,13 +2943,17 @@ fn render_upload_artifact(
 
     renderable_action.render(app).finish()
 }
-fn recording_summary(props: Props, app: &AppContext) -> String {
-    // TODO(vkodithala): Replace conversation.title() with StartRecording's agent-supplied description once available.
-    props
+
+fn recording_summary(props: Props, agent_summary: Option<&str>, app: &AppContext) -> String {
+    let title = props
         .model
         .conversation(app)
-        .and_then(|conversation| conversation.title())
-        .filter(|title| !title.trim().is_empty())
+        .and_then(|conversation| conversation.title());
+    agent_summary
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| title.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+        .map(ToString::to_string)
         .unwrap_or_else(|| "Recording computer-use session".to_string())
 }
 
@@ -3060,6 +3071,7 @@ fn recording_card(
 fn render_start_recording(
     props: Props,
     action_id: &AIAgentActionId,
+    agent_summary: Option<&str>,
     app: &AppContext,
 ) -> Box<dyn Element> {
     let result = props
@@ -3070,7 +3082,7 @@ fn render_start_recording(
             AIAgentActionResultType::StartRecording(result) => Some(result),
             _ => None,
         });
-    let text = start_recording_card_text(&recording_summary(props, app), result);
+    let text = start_recording_card_text(&recording_summary(props, agent_summary, app), result);
     recording_card(text, None, app)
 }
 

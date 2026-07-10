@@ -18,6 +18,7 @@ use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::WarpTheme;
+use warp_errors::report_error;
 use warp_multi_agent_api::response_event::stream_finished;
 use warp_multi_agent_api::response_event::stream_finished::TokenUsage;
 use warp_multi_agent_api::{self as api};
@@ -75,7 +76,7 @@ use crate::terminal::model::block::{
 };
 use crate::ui_components::icons::Icon;
 use crate::workspaces::user_profiles::UserProfileWithUID;
-use crate::{report_error, BlocklistAIHistoryModel, GlobalResourceHandlesProvider};
+use crate::{BlocklistAIHistoryModel, GlobalResourceHandlesProvider};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TodoStatus {
@@ -168,6 +169,25 @@ fn footer_model_token_usage(
         .into_values()
         .chain(custom_usage.into_values())
         .collect()
+}
+
+/// Conversation usage totals for compact displays (e.g. the TUI footer's
+/// usage entry).
+///
+/// A projection computed on demand from existing conversation state — named
+/// so the underlying types don't leak through `tui_export`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ConversationUsageTotals {
+    /// Total credits spent (inference + platform), from the server's
+    /// cumulative usage metadata — the same number the GUI's usage footer
+    /// shows as "Credits spent (total)" and the conversation details panel
+    /// shows as "Credits used".
+    pub credits_spent: f32,
+    /// Total provider cost across all models, in US cents. Fractional —
+    /// per-request provider costs are routinely sub-cent — and `f32` to match
+    /// both the upstream `TokenUsage.cost_in_cents` proto float it sums and
+    /// `credits_spent` above.
+    pub cost_in_cents: f32,
 }
 
 // basic info for creating a dummy command block based on an exchange's inputs
@@ -3656,6 +3676,20 @@ impl AIConversation {
     #[allow(dead_code)]
     pub fn total_token_usage(&self) -> Vec<TokenUsage> {
         self.total_token_usage_by_model.values().cloned().collect()
+    }
+
+    /// Compact usage totals for lightweight displays (e.g. the TUI footer's
+    /// usage entry): the GUI-consistent credits total plus the accumulated
+    /// provider dollar cost from the per-request `StreamFinished` usage rows.
+    pub fn usage_totals(&self) -> ConversationUsageTotals {
+        let mut totals = ConversationUsageTotals {
+            credits_spent: self.inference_credits_spent() + self.platform_credits_spent(),
+            cost_in_cents: 0.0,
+        };
+        for usage in self.total_token_usage_by_model.values() {
+            totals.cost_in_cents += usage.cost_in_cents;
+        }
+        totals
     }
 
     /// Normalize all newlines to CRLF so restored blocks render lines starting at column 0,
