@@ -2490,13 +2490,6 @@ pub(crate) fn app_callbacks(
 
             let summary = UnsavedStateSummary::for_window(window_id, ctx);
 
-            send_telemetry_from_app_ctx!(
-                TelemetryEvent::UserInitiatedClose {
-                    initiated_on: CloseTarget::Window,
-                },
-                ctx
-            );
-
             // Don't show dialog on integration test. Machine can't press buttons.
             if !is_integration_test && summary.should_display_warning(ctx) {
                 let shown = summary
@@ -2534,13 +2527,6 @@ pub(crate) fn app_callbacks(
             if source == TerminationRequestSource::System {
                 return ApproveTerminateResult::Terminate;
             }
-
-            send_telemetry_from_app_ctx!(
-                TelemetryEvent::UserInitiatedClose {
-                    initiated_on: CloseTarget::App,
-                },
-                ctx
-            );
 
             // If there's a pending autoupdate, apply that before showing the unsaved changes
             // dialog. We apply the update first so that the dialog can force-terminate.

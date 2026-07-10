@@ -1860,18 +1860,7 @@ impl AIBlock {
             self.time_to_last_token = Some(latency);
         }
 
-        let was_autodetected_ai_query = self.model.was_autodetected_ai_query(ctx);
-        let client_exchange_id = self.client_ids.client_exchange_id.to_string();
-        let conversation_id = self.client_ids.conversation_id;
-        let time_to_first_token_ms = self
-            .time_to_first_token
-            .get()
-            .map(|duration| duration.num_milliseconds() as u128);
-        let time_to_last_token_ms = self
-            .time_to_last_token
-            .map(|duration| duration.num_milliseconds() as u128);
         let status = self.model.status(ctx);
-        let is_udi_enabled = InputSettings::as_ref(ctx).is_universal_developer_input_enabled(ctx);
 
         match status {
             AIBlockOutputStatus::Pending => {
@@ -1885,23 +1874,8 @@ impl AIBlock {
             }
             AIBlockOutputStatus::Complete { output } => {
                 let output = output.get();
-                let server_output_id = self.model.server_output_id(ctx);
                 self.handle_updated_output(&output, ctx);
                 self.handle_complete_output(&output, ctx);
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::AgentModeCreatedAIBlock {
-                        client_exchange_id,
-                        was_autodetected_ai_query,
-                        conversation_id,
-                        time_to_first_token_ms,
-                        time_to_last_token_ms,
-                        server_output_id,
-                        was_user_facing_error: false,
-                        cancelled: false,
-                        is_udi_enabled,
-                    },
-                    ctx
-                );
             }
             AIBlockOutputStatus::Cancelled { partial_output, .. } => {
                 if let Some(output) = partial_output.as_ref() {
@@ -1910,39 +1884,8 @@ impl AIBlock {
                 }
                 self.spawn_link_detection(ctx);
                 self.finish(FinishReason::Cancelled, ctx);
-
-                let server_output_id = self.model.server_output_id(ctx);
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::AgentModeCreatedAIBlock {
-                        client_exchange_id,
-                        conversation_id,
-                        was_autodetected_ai_query,
-                        time_to_first_token_ms,
-                        time_to_last_token_ms,
-                        server_output_id,
-                        was_user_facing_error: false,
-                        cancelled: true,
-                        is_udi_enabled,
-                    },
-                    ctx
-                );
             }
             AIBlockOutputStatus::Failed { error, .. } => {
-                let server_output_id = self.model.server_output_id(ctx);
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::AgentModeCreatedAIBlock {
-                        client_exchange_id,
-                        was_autodetected_ai_query,
-                        conversation_id,
-                        time_to_first_token_ms,
-                        time_to_last_token_ms,
-                        server_output_id,
-                        was_user_facing_error: true,
-                        cancelled: false,
-                        is_udi_enabled,
-                    },
-                    ctx
-                );
                 self.maybe_create_aws_bedrock_credentials_error_view(&error, ctx);
                 // There are no actions to be taken in this block, it is finished.
                 self.finish(FinishReason::Error, ctx);

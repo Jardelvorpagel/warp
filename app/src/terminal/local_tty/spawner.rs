@@ -11,8 +11,6 @@ use {
 #[cfg(target_os = "windows")]
 use super::PseudoConsoleChild;
 use super::{PtyOptions, PtySpawnResult};
-use crate::send_telemetry_from_app_ctx;
-use crate::server::telemetry::{PtySpawnMode, TelemetryEvent};
 use crate::terminal::local_tty::{self};
 /// A handle that can be used to interact with a pty process.
 pub trait PtyHandle: Send + Sync {
@@ -178,10 +176,7 @@ impl PtySpawner {
         >,
         ctx: &mut AppContext,
     ) -> Result<(PtySpawnResult, Box<dyn PtyHandle>)> {
-        #[cfg(not(unix))]
-        let is_fallback = false;
-        #[cfg(unix)]
-        let mut is_fallback = false;
+        let _ = ctx;
 
         #[cfg(unix)]
         if let Some(server) = &self.server {
@@ -206,24 +201,10 @@ impl PtySpawner {
                 report_error!(err.context(
                     "Failed to spawn pty via terminal server; falling back to spawning locally...",
                 ));
-                is_fallback = true;
             } else {
-                send_telemetry_from_app_ctx!(
-                    TelemetryEvent::PtySpawned {
-                        mode: PtySpawnMode::TerminalServer
-                    },
-                    ctx
-                );
                 return result;
             }
         }
-
-        let mode = if is_fallback {
-            PtySpawnMode::FallbackToDirect
-        } else {
-            PtySpawnMode::Direct
-        };
-        send_telemetry_from_app_ctx!(TelemetryEvent::PtySpawned { mode }, ctx);
 
         Self::spawn_pty_directly(
             options,

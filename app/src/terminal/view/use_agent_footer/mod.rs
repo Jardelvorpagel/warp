@@ -511,17 +511,6 @@ impl TerminalView {
 
         let should_insert_after_block = !InputModeSettings::as_ref(ctx).is_pinned_to_top();
 
-        // Send telemetry when showing CLI agent footer
-        if let Some(session) = CLIAgentSessionsModel::as_ref(ctx).session(self.view_id) {
-            let cli_agent_type: CLIAgentType = session.agent.into();
-            send_telemetry_from_ctx!(
-                TelemetryEvent::CLIAgentToolbarShown {
-                    cli_agent: cli_agent_type,
-                },
-                ctx
-            );
-        }
-
         self.insert_rich_content(
             None,
             self.use_agent_footer.clone(),

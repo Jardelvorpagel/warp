@@ -1,5 +1,4 @@
 use chrono::{DateTime, Duration, Utc};
-use serde_json::json;
 
 use crate::time::get_current_time;
 
@@ -13,18 +12,8 @@ impl DailyAppFocusDuration {
     // If calendar date has advanced since the last sync, record the
     // Daily App Focus event with the current duration.
     #[allow(deprecated)]
-    fn try_record(&mut self, user_id: Option<String>, anonymous_id: String) {
+    fn try_record(&mut self, _user_id: Option<String>, _anonymous_id: String) {
         if get_current_time().date_naive() > self.last_synced_time.date_naive() {
-            let daily_app_focus_duration_seconds =
-                json!(self.duration.num_milliseconds() as f64 / 1000.);
-            crate::telemetry::record_event(
-                user_id,
-                anonymous_id,
-                "Daily App Focus Duration (seconds)".into(),
-                Some(daily_app_focus_duration_seconds),
-                false, /* contains_ugc */
-                self.last_synced_time.date().and_hms(0, 0, 0),
-            );
             self.reset();
         }
     }

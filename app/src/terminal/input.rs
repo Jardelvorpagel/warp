@@ -10864,17 +10864,10 @@ impl Input {
                 }
             }
             EditorEvent::AutosuggestionAccepted {
-                insertion_length,
-                buffer_char_length,
+                insertion_length: _,
+                buffer_char_length: _,
                 autosuggestion_type,
             } => {
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::AutosuggestionInserted {
-                        insertion_length: *insertion_length,
-                        buffer_length: *buffer_char_length
-                    },
-                    ctx
-                );
                 ctx.emit(Event::AutosuggestionAccepted);
 
                 self.input_suggestions
@@ -11038,24 +11031,12 @@ impl Input {
 
                 match token_at {
                     CommandXRayAnchor::Cursor => {
-                        send_telemetry_from_ctx!(
-                            TelemetryEvent::CommandXRayTriggered {
-                                trigger: CommandXRayTrigger::Keystroke
-                            },
-                            ctx
-                        );
                         let pos = self.start_byte_index_of_first_selection(ctx);
                         self.start_xray_at_offset(pos, CommandXRayTrigger::Keystroke, ctx);
                     }
                     CommandXRayAnchor::Hover(mouse_position) => {
                         if let Some(offset) = self.start_byte_index_at_point(mouse_position, ctx) {
                             if !self.suggestions_mode_model.as_ref(ctx).is_visible() {
-                                send_telemetry_from_ctx!(
-                                    TelemetryEvent::CommandXRayTriggered {
-                                        trigger: CommandXRayTrigger::Hover
-                                    },
-                                    ctx
-                                );
                                 self.start_xray_at_offset(offset, CommandXRayTrigger::Hover, ctx);
                             }
                         }
@@ -12655,7 +12636,6 @@ impl Input {
                 ctx,
             );
         });
-        send_telemetry_from_ctx!(TelemetryEvent::TabSingleResultAutocompletion, ctx);
     }
 
     /// Whether the editor is in a state where we should tab complete instead of indenting text

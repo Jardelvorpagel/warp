@@ -444,7 +444,7 @@ use crate::terminal::model::session::{
     BootstrapSessionType, Session, SessionId, SessionType, Sessions, SessionsEvent,
 };
 use crate::terminal::model::terminal_model::{
-    BlockIndex, BlockSelectionCardinality, SelectedBlocks, TerminalInputState, WithinModel,
+    BlockIndex, SelectedBlocks, TerminalInputState, WithinModel,
 };
 use crate::terminal::model::{ObfuscateSecrets, RespectObfuscatedSecrets, SecretHandle};
 use crate::terminal::model_events::{AnsiHandlerEvent, ModelEvent, ModelEventDispatcher};
@@ -2946,24 +2946,6 @@ struct DeferredCodeReviewOpen {
     focus_new_pane: bool,
 }
 
-#[derive(Copy, Clone, Serialize)]
-pub enum BlockSelectionDelta {
-    // User first selects a block, or selects a block with click
-    New,
-    // User already has block selected, and selects previous block
-    Previous,
-    // User already has block selected, and selects next block
-    Next,
-}
-
-#[derive(Copy, Clone, Serialize)]
-pub struct BlockSelectionDetails {
-    cardinality: BlockSelectionCardinality,
-    delta: BlockSelectionDelta,
-    is_cmd_down: bool,
-    is_shift_down: bool,
-}
-
 /// Why `apply_block_metadata_update` is being invoked. The two sources have
 /// different cardinalities — precmd fires exactly once per block, whereas OSC 7
 /// can fire many times mid-block from chatty prompts. Once-per-block work
@@ -4807,8 +4789,6 @@ impl TerminalView {
         if let Some(restoration) = conversation_restoration {
             terminal_view.restore_conversations_on_view_creation(restoration, ctx);
         }
-
-        send_telemetry_from_ctx!(TelemetryEvent::SessionCreation, ctx);
 
         terminal_view
     }
@@ -12563,7 +12543,6 @@ impl TerminalView {
                 // For now, this event is only used for telemetry. It may also
                 // be useful to request attention if the user's session starts
                 //receiving background output, or to auto-scroll it.
-                send_telemetry_from_ctx!(TelemetryEvent::BackgroundBlockStarted, ctx);
             }
             ModelEvent::PreInteractiveSSHSession => {}
             ModelEvent::SSH(remote_shell) => {
@@ -15843,13 +15822,6 @@ impl TerminalView {
                             .map_or_else(String::new, ToOwned::to_owned),
                     );
                     ctx.emit(Event::SendNotification(notification_content));
-                    send_telemetry_from_ctx!(
-                        TelemetryEvent::NotificationSent {
-                            trigger: long_running_trigger,
-                            agent_variant: None,
-                        },
-                        ctx
-                    );
                 }
             }
             _ => {}
@@ -15934,13 +15906,6 @@ impl TerminalView {
                 }
                 let notification_content = trigger.create_notification_content(title, description);
                 ctx.emit(Event::SendNotification(notification_content));
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::NotificationSent {
-                        trigger,
-                        agent_variant,
-                    },
-                    ctx
-                );
             }
             _ => {}
         }
@@ -18079,15 +18044,6 @@ impl TerminalView {
                 if let Some(block_index) = maybe_block_index {
                     self.mouse_down_block_index = Some(*block_index);
 
-                    send_telemetry_from_ctx!(
-                        TelemetryEvent::BlockSelection(BlockSelectionDetails {
-                            cardinality: self.selected_blocks.cardinality(),
-                            delta: BlockSelectionDelta::New,
-                            is_cmd_down: false,
-                            is_shift_down: false,
-                        }),
-                        ctx
-                    );
                     self.tips_completed.update(ctx, |tips, ctx| {
                         mark_feature_used_and_write_to_user_defaults(
                             Tip::Hint(TipHint::BlockSelect),
@@ -18183,15 +18139,6 @@ impl TerminalView {
                         }
 
                         if !self.ai_input_model.as_ref(ctx).is_ai_input_enabled() {
-                            send_telemetry_from_ctx!(
-                                TelemetryEvent::BlockSelection(BlockSelectionDetails {
-                                    cardinality: self.selected_blocks.cardinality(),
-                                    delta: BlockSelectionDelta::New,
-                                    is_cmd_down: *is_cmd_down,
-                                    is_shift_down: *is_shift_down
-                                }),
-                                ctx
-                            );
                         } else if !self.selected_blocks.is_empty() {
                             send_telemetry_from_ctx!(
                                 TelemetryEvent::AgentModeAttachedBlockContext {
@@ -19705,16 +19652,6 @@ impl TerminalView {
             ctx,
         );
 
-        send_telemetry_from_ctx!(
-            TelemetryEvent::BlockSelection(BlockSelectionDetails {
-                cardinality: self.selected_blocks.cardinality(),
-                delta: BlockSelectionDelta::New,
-                is_cmd_down: false,
-                is_shift_down: false
-            }),
-            ctx
-        );
-
         self.tips_completed.update(ctx, |tips, ctx| {
             mark_feature_used_and_write_to_user_defaults(
                 Tip::Hint(TipHint::BlockSelect),
@@ -19771,16 +19708,6 @@ impl TerminalView {
 
             self.scroll_to_if_not_visible(new_block_index, ctx);
             ctx.notify();
-
-            send_telemetry_from_ctx!(
-                TelemetryEvent::BlockSelection(BlockSelectionDetails {
-                    delta: BlockSelectionDelta::Previous,
-                    is_cmd_down: false,
-                    is_shift_down,
-                    cardinality: self.selected_blocks.cardinality(),
-                }),
-                ctx
-            );
 
             self.tips_completed.update(ctx, |tips, ctx| {
                 mark_feature_used_and_write_to_user_defaults(
@@ -19844,15 +19771,6 @@ impl TerminalView {
                     self.reset_selection_to_single_block(new_block_index, ctx);
                 }
                 self.scroll_to_if_not_visible(new_block_index, ctx);
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::BlockSelection(BlockSelectionDetails {
-                        cardinality: self.selected_blocks.cardinality(),
-                        delta: BlockSelectionDelta::Next,
-                        is_cmd_down,
-                        is_shift_down,
-                    }),
-                    ctx
-                );
                 self.tips_completed.update(ctx, |tips, ctx| {
                     mark_feature_used_and_write_to_user_defaults(
                         Tip::Hint(TipHint::BlockSelect),
@@ -21175,13 +21093,6 @@ impl TerminalView {
                         "Command is waiting for a password".to_string(),
                     );
                     ctx.emit(Event::SendNotification(notification_content));
-                    send_telemetry_from_ctx!(
-                        TelemetryEvent::NotificationSent {
-                            trigger: password_trigger,
-                            agent_variant: None,
-                        },
-                        ctx
-                    );
                 }
                 NotificationsMode::Unset
                     if matches!(
