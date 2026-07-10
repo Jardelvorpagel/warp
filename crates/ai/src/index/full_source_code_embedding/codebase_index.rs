@@ -249,27 +249,15 @@ enum SyncOperationResult {
 impl SyncOperationResult {
     fn telemetry_event(
         &self,
-        sync_duration: Duration,
+        _sync_duration: Duration,
         sync_type: CodebaseContextSyncType,
-    ) -> AITelemetryEvent {
+    ) -> Option<AITelemetryEvent> {
         match self {
-            SyncOperationResult::Success {
-                flushed_node_count,
-                flushed_fragment_result,
-                cache_population_error,
-                ..
-            } => AITelemetryEvent::SyncCodebaseContextSuccess {
-                total_sync_duration: sync_duration,
-                sync_type,
-                flushed_node_count: *flushed_node_count,
-                flushed_fragment_count: flushed_fragment_result.fragment_count,
-                total_fragment_size_bytes: flushed_fragment_result.total_fragment_size_bytes,
-                cache_population_error: cache_population_error.as_ref().map(|e| e.to_string()),
-            },
-            SyncOperationResult::Error(err) => AITelemetryEvent::SyncCodebaseContextFailed {
+            SyncOperationResult::Success { .. } => None,
+            SyncOperationResult::Error(err) => Some(AITelemetryEvent::SyncCodebaseContextFailed {
                 error: err.to_string(),
                 sync_type,
-            },
+            }),
         }
     }
 
@@ -349,7 +337,7 @@ struct IncrementalUpdateResult {
 }
 
 impl IncrementalUpdateResult {
-    fn telemetry_event(&self, sync_start_time: Instant) -> AITelemetryEvent {
+    fn telemetry_event(&self, sync_start_time: Instant) -> Option<AITelemetryEvent> {
         match &self.build_result {
             IncrementalUpdateBuildResult::Success {
                 operation_result, ..
@@ -358,9 +346,9 @@ impl IncrementalUpdateResult {
                 CodebaseContextSyncType::Incremental,
             ),
             IncrementalUpdateBuildResult::Error { error, .. } => {
-                AITelemetryEvent::BuildTreeFailed {
+                Some(AITelemetryEvent::BuildTreeFailed {
                     error: error.to_string(),
-                }
+                })
             }
         }
     }
@@ -560,10 +548,11 @@ impl CodebaseIndex {
                     .await
                 },
                 move |me, incremental_update_sync_result, ctx| {
-                    send_telemetry_from_ctx!(
-                        incremental_update_sync_result.telemetry_event(sync_start_time),
-                        ctx
-                    );
+                    if let Some(event) =
+                        incremental_update_sync_result.telemetry_event(sync_start_time)
+                    {
+                        send_telemetry_from_ctx!(event, ctx);
+                    }
                     me.process_sync_update_result(incremental_update_sync_result, ctx);
                 },
             )
@@ -1195,13 +1184,11 @@ impl CodebaseIndex {
                     (tree, sync_result)
                 },
                 move |me, (tree, server_sync_result), ctx| {
-                    send_telemetry_from_ctx!(
-                        server_sync_result.telemetry_event(
-                            sync_start_time.elapsed(),
-                            CodebaseContextSyncType::Full
-                        ),
-                        ctx
-                    );
+                    if let Some(event) = server_sync_result
+                        .telemetry_event(sync_start_time.elapsed(), CodebaseContextSyncType::Full)
+                    {
+                        send_telemetry_from_ctx!(event, ctx);
+                    }
 
                     // We should only flush pending changes when we know the sync failed because of a read fragment error.
                     let should_flush_pending_changes = if let SyncOperationResult::Error(
@@ -1259,11 +1246,11 @@ impl CodebaseIndex {
             }) => {
                 // Emit telemetries for the initial sync result.
                 if let Some(sync_time) = time_tracker.compute_duration_for_interval(SYNC_TIME) {
-                    send_telemetry_from_ctx!(
-                        server_sync_result
-                            .telemetry_event(sync_time, CodebaseContextSyncType::Initial),
-                        ctx
-                    );
+                    if let Some(event) = server_sync_result
+                        .telemetry_event(sync_time, CodebaseContextSyncType::Initial)
+                    {
+                        send_telemetry_from_ctx!(event, ctx);
+                    }
                 }
 
                 if let Some((file_traversal_duration, merkle_tree_parse_duration)) = time_tracker
