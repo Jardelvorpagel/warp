@@ -270,12 +270,6 @@ fn run_agent(
             if args.harness != Harness::Oz && !FeatureFlag::AgentHarness.is_enabled() {
                 return Err(anyhow::anyhow!("unexpected argument '--harness' found"));
             }
-            if args.harness == Harness::OpenCode {
-                return Err(anyhow::anyhow!(
-                    "The opencode harness is only supported for local child agent launches."
-                ));
-            }
-
             let server_api = ServerApiProvider::handle(ctx).as_ref(ctx).get_ai_client();
 
             // Start the agent driver runner, which will handle the rest of the setup steps
@@ -1656,8 +1650,6 @@ fn resolve_orchestration_harness_label() -> &'static str {
     match Harness::parse_orchestration_harness(&raw) {
         Some(Harness::Oz) => "oz",
         Some(Harness::Claude) => "claude",
-        Some(Harness::OpenCode) => "opencode",
-        Some(Harness::Gemini) => "gemini",
         Some(Harness::Codex) => "codex",
         Some(Harness::Unknown) | None => "unknown",
     }
