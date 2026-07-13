@@ -79,10 +79,28 @@ fn diff_pipeline_computes_added_lines_and_ghost_blocks() {
         let (tx, rx) = oneshot::channel();
         app.update(|ctx| {
             let mut tx = Some(tx);
-            ctx.subscribe_to_model(&editor, move |_, event, _| {
+            ctx.subscribe_to_model(&editor, move |editor, event, app| {
                 if matches!(event, CodeEditorModelEvent::DiffUpdated) {
-                    if let Some(tx) = tx.take() {
-                        let _ = tx.send(());
+                    // `reset_content` seeds the diff base and triggers a
+                    // base==new diff whose spawned task races the abort issued
+                    // by the subsequent `apply_diffs`. If that stale task
+                    // completes first it emits a spurious `DiffUpdated` for an
+                    // *empty* diff, so synchronizing on the first event would
+                    // release the test before the real, post-edit diff lands.
+                    // Only signal once the diff actually reflects a change —
+                    // the post-edit diff is the only one that populates
+                    // `added_or_changed_lines`.
+                    let diff_has_changes = editor
+                        .as_ref(app)
+                        .diff()
+                        .as_ref(app)
+                        .added_or_changed_lines()
+                        .count()
+                        > 0;
+                    if diff_has_changes {
+                        if let Some(tx) = tx.take() {
+                            let _ = tx.send(());
+                        }
                     }
                 }
             });
@@ -103,26 +121,37 @@ fn diff_pipeline_computes_added_lines_and_ghost_blocks() {
 
         editor.update(&mut app, |editor, ctx| editor.expand_diffs(ctx));
 
-        // Ghost blocks land via the render state's async layout channel; poll
-        // until the spawned handler has stored them.
-        let mut ghosts = Vec::new();
-        for _ in 0..100 {
-            ghosts = app.read(|app| {
-                editor
-                    .as_ref(app)
-                    .render_state()
-                    .as_ref(app)
-                    .char_cell()
-                    .expect("TUI editor renders in char-cell mode")
-                    .display_lattice(&[])
-                    .ghosts()
-                    .to_vec()
-            });
-            if !ghosts.is_empty() {
-                break;
-            }
-            futures_lite::future::yield_now().await;
-        }
+        // Ghost blocks land via the render state's async layout channel:
+        // `add_temporary_blocks` submits a `LayoutTemporaryBlock` action that a
+        // *background* task (spawned by `spawn_stream_local`) polls and forwards
+        // to a foreground task which stores the blocks on the char-cell state.
+        // `yield_now` only drives the foreground executor, so a fixed-iteration
+        // poll can't deterministically wait for that background hop (the original
+        // cause of the flake). `layout_complete()` awaits the
+        // `outstanding_layouts` counter until every submitted action — including
+        // the `LayoutTemporaryBlock` from `expand_diffs` — has been processed,
+        // deterministically waiting for the ghosts to land regardless of how the
+        // background thread is scheduled.
+        let layout_complete = app.read(|app| {
+            editor
+                .as_ref(app)
+                .render_state()
+                .as_ref(app)
+                .layout_complete()
+        });
+        layout_complete.await;
+
+        let ghosts = app.read(|app| {
+            editor
+                .as_ref(app)
+                .render_state()
+                .as_ref(app)
+                .char_cell()
+                .expect("TUI editor renders in char-cell mode")
+                .display_lattice(&[])
+                .ghosts()
+                .to_vec()
+        });
 
         assert_eq!(ghosts.len(), 1);
         assert_eq!(ghosts[0].content, "old\n");
