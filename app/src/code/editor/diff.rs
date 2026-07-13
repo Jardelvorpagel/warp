@@ -609,6 +609,19 @@ impl DiffModel {
             .spawn(
                 async move { Self::compute_diff_internal(&base_text, &new).await },
                 move |model, (change_mapping, deletion_mapping), ctx| {
+                    // Aborting an outdated computation is best-effort: the
+                    // background future may already have completed by the time
+                    // a newer computation (or a `set_base` call) aborts it, in
+                    // which case its result still arrives here. Only apply the
+                    // result if this is still the latest requested computation,
+                    // so stale results never clobber a newer diff.
+                    let is_latest = model
+                        .abort_handle
+                        .as_ref()
+                        .is_some_and(|(_, latest_version)| *latest_version == version);
+                    if !is_latest {
+                        return;
+                    }
                     model.status.change_mapping = change_mapping;
                     model.status.deletion_mapping = deletion_mapping;
                     log::debug!("diff status updated: {:#?}", &model.status);

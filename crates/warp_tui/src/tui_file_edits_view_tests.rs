@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use ai::diff_validation::{DiffDelta, DiffType};
-use futures::channel::oneshot;
+use futures::channel::mpsc;
+use futures::StreamExt;
 use warp::appearance::Appearance;
 use warp::editor::{CodeEditorModel, CodeEditorModelEvent};
 use warp::tui_export::FileDiff;
@@ -76,14 +77,19 @@ fn diff_pipeline_computes_added_lines_and_ghost_blocks() {
         app.add_singleton_model(|_| Appearance::mock());
         let editor = app.add_model(|ctx| CodeEditorModel::new_tui(80, ctx));
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = mpsc::unbounded();
         app.update(|ctx| {
-            let mut tx = Some(tx);
             ctx.subscribe_to_model(&editor, move |_, event, _| {
-                if matches!(event, CodeEditorModelEvent::DiffUpdated) {
-                    if let Some(tx) = tx.take() {
-                        let _ = tx.send(());
-                    }
+                // `DiffUpdated` signals a recomputed diff status;
+                // `LayoutInvalidated` signals the render state processed a
+                // layout action (e.g. stored the ghost blocks). Forward both
+                // so the waits below are event-driven instead of bounded
+                // spinning, which raced with the async pipeline.
+                if matches!(
+                    event,
+                    CodeEditorModelEvent::DiffUpdated | CodeEditorModelEvent::LayoutInvalidated
+                ) {
+                    let _ = tx.unbounded_send(());
                 }
             });
             editor.update(ctx, |editor, ctx| {
@@ -99,14 +105,31 @@ fn diff_pipeline_computes_added_lines_and_ghost_blocks() {
                 );
             });
         });
-        rx.await.expect("diff computation should complete");
+
+        // The buffer edits above also emit `LayoutInvalidated` events, and
+        // `reset_content` schedules a diff computation of its own (the buffer
+        // reset emits `ContentChanged`) that the `apply_diffs` recompute only
+        // best-effort aborts. An incoming notification therefore doesn't
+        // guarantee that the applied hunk has been computed — wait until the
+        // diff model actually contains it.
+        loop {
+            rx.next().await.expect("diff computation should complete");
+            let hunk_computed =
+                app.read(|app| editor.as_ref(app).diff().as_ref(app).diff_hunk_count() > 0);
+            if hunk_computed {
+                break;
+            }
+        }
 
         editor.update(&mut app, |editor, ctx| editor.expand_diffs(ctx));
 
-        // Ghost blocks land via the render state's async layout channel; poll
-        // until the spawned handler has stored them.
-        let mut ghosts = Vec::new();
-        for _ in 0..100 {
+        // Ghost blocks land via the render state's async layout channel,
+        // which round-trips through the background executor, so their
+        // arrival time is unbounded. Every delivery emits `LayoutInvalidated`
+        // after the blocks are stored, so re-check after each event instead
+        // of spinning a fixed number of times.
+        let mut ghosts;
+        loop {
             ghosts = app.read(|app| {
                 editor
                     .as_ref(app)
@@ -121,7 +144,7 @@ fn diff_pipeline_computes_added_lines_and_ghost_blocks() {
             if !ghosts.is_empty() {
                 break;
             }
-            futures_lite::future::yield_now().await;
+            rx.next().await.expect("ghost blocks should be stored");
         }
 
         assert_eq!(ghosts.len(), 1);
