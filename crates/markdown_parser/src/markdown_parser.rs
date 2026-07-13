@@ -294,7 +294,13 @@ fn collect_soft_wrapped_text<'a, E: ContextError<&'a str> + ParseError<&'a str>>
             if index == last {
                 joined.push_str(line);
             } else {
-                joined.push_str(line.trim_end_matches(' '));
+                // Drop trailing spaces and a single trailing backslash before the soft-break
+                // join. A trailing backslash is a CommonMark hard break; in v1 hard breaks
+                // collapse to the joining space (documented deviation), so it must not survive as
+                // a literal backslash in the joined text.
+                let trimmed = line.trim_end_matches(' ');
+                let trimmed = trimmed.strip_suffix('\\').unwrap_or(trimmed);
+                joined.push_str(trimmed);
                 joined.push(' ');
             }
         }
@@ -348,7 +354,7 @@ fn starts_new_block_or_blank(input: &str, parse_gfm_tables: bool) -> bool {
     if parse_ordered_list_tag::<()>(input).is_ok() {
         return true;
     }
-    if parse_gfm_tables && starts_table_row(input) {
+    if parse_gfm_tables && starts_gfm_table(input) {
         return true;
     }
     false
@@ -359,9 +365,12 @@ fn starts_code_fence(input: &str) -> bool {
     input.trim_start_matches(' ').starts_with("```")
 }
 
-/// Whether the first line of `input` looks like a GFM table row (optional spaces then `|`).
-fn starts_table_row(input: &str) -> bool {
-    input.trim_start_matches(' ').starts_with('|')
+/// Whether a real GFM table begins at `input` — a header row immediately followed by a delimiter
+/// row. A lone pipe-containing line (e.g. a list-item continuation such as `| beta`) is NOT a
+/// table and must not end a soft-wrapped list item, so we require a full table lookahead rather
+/// than keying off a leading `|` alone.
+fn starts_gfm_table(input: &str) -> bool {
+    parse_table::<()>(input).is_ok()
 }
 
 /// Parse a blank line.

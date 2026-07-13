@@ -279,6 +279,39 @@ fn test_list_item_hard_break_collapses_to_space_v1() {
 }
 
 #[test]
+fn test_list_item_hard_break_backslash_collapses_to_space_v1() {
+    // Documented v1 deviation: a trailing backslash (a CommonMark hard break) is not preserved as
+    // a forced break; within a joined list item it collapses to a space, and the backslash must
+    // NOT survive as a literal character in the joined text. Not a regression (hard breaks were
+    // unsupported before this change).
+    assert_eq!(
+        test_parse_markdown("- alpha\\\n  beta"),
+        vec![FormattedTextLine::UnorderedList(
+            FormattedIndentTextInline {
+                indent_level: 0,
+                text: vec![FormattedTextFragment::plain_text("alpha beta")],
+            }
+        )]
+    );
+}
+
+#[test]
+fn test_list_item_continuation_not_broken_by_pipe_line() {
+    // A pipe-starting continuation line that is not a real GFM table (there is no delimiter row)
+    // must NOT end the list item, even with GFM tables enabled — emphasis still spans the wrap.
+    // Regression test for an over-eager table-boundary check that broke on any leading `|`.
+    assert_eq!(
+        test_parse_markdown_with_gfm_tables("- **alpha\n  | beta**"),
+        vec![FormattedTextLine::UnorderedList(
+            FormattedIndentTextInline {
+                indent_level: 0,
+                text: vec![FormattedTextFragment::bold("alpha | beta")],
+            }
+        )]
+    );
+}
+
+#[test]
 fn test_parse_single_line() {
     // Ensure we can parse without a trailing newline.
     assert_eq!(
