@@ -11,6 +11,23 @@ use crate::keymap::{BindingLens, IsBindingValid};
 use crate::{EntityId, WindowId};
 
 impl AppContext {
+    /// Returns whether every TUI view in `responder_chain` allows the shared
+    /// keymap to run before element dispatch.
+    pub(crate) fn should_dispatch_tui_keybindings(
+        &self,
+        window_id: WindowId,
+        responder_chain: &[EntityId],
+    ) -> bool {
+        responder_chain.iter().all(|view_id| {
+            self.windows
+                .get(&window_id)
+                .and_then(|window| window.views.get(view_id))
+                .is_none_or(|view| match view {
+                    StoredView::Tui(view) => view.should_dispatch_keybindings(self),
+                    StoredView::Gui(_) => true,
+                })
+        })
+    }
     /// Registers a validator that validates every binding that matches the
     /// given TUI view's default [`Context`](crate::keymap::Context). The TUI
     /// counterpart of [`Self::register_binding_validator`]: after the app is

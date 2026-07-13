@@ -43,6 +43,7 @@ use warpui_core::{
     AppContext, Entity, EntityId, ModelHandle, TuiView, TypedActionView, ViewContext, ViewHandle,
 };
 
+use crate::alt_screen::TuiAltScreenElement;
 use crate::autoupdate::{TuiAutoupdater, TuiAutoupdaterEvent};
 use crate::clipboard::copy_to_clipboard;
 use crate::conversation_selection::TuiConversationSelection;
@@ -71,6 +72,7 @@ const CTRL_C_EXIT_HINT: &str = "ctrl-c again to exit";
 /// Events emitted by the TUI terminal session surface.
 pub(crate) enum TuiTerminalSessionEvent {
     ExecuteCommand(Box<ExecuteCommandEvent>),
+    WriteBytes(Cow<'static, [u8]>),
     WriteAgentInput {
         bytes: Cow<'static, [u8]>,
         mode: AIAgentPtyWriteMode,
@@ -81,6 +83,7 @@ impl PtyIntentEvent for TuiTerminalSessionEvent {
     fn pty_intent(&self) -> Option<PtyIntent> {
         match self {
             Self::ExecuteCommand(event) => Some(PtyIntent::ExecuteCommand((**event).clone())),
+            Self::WriteBytes(bytes) => Some(PtyIntent::WriteBytes(bytes.clone())),
             Self::WriteAgentInput { bytes, mode } => Some(PtyIntent::WriteAgentInput {
                 bytes: bytes.clone(),
                 mode: *mode,
@@ -128,6 +131,8 @@ pub(crate) enum TuiTerminalSessionAction {
     /// conversation, else clear the input; a second press within
     /// [`CTRL_C_EXIT_WINDOW`] exits the TUI.
     Interrupt,
+    /// Raw input encoded by the alternate-screen element for the PTY.
+    ForwardAltScreenInput(Vec<u8>),
     /// Click on the footer's usage entry: flips the persisted credits⇄cost
     /// display-mode setting.
     ToggleUsageDisplay,
@@ -1140,6 +1145,9 @@ impl TuiView for TuiTerminalSessionView {
     }
 
     fn render(&self, ctx: &AppContext) -> Box<dyn TuiElement> {
+        if self.terminal_model.lock().is_alt_screen_active() {
+            return TuiAltScreenElement::new(self.terminal_model.clone()).finish();
+        }
         let inline_menu = self.inline_menu.render(ctx);
         // The border takes the shell-mode accent while in shell mode.
         let builder = TuiUiBuilder::from_app(ctx);
@@ -1238,6 +1246,10 @@ impl TuiView for TuiTerminalSessionView {
             .with_padding_top(2)
             .finish()
     }
+
+    fn should_dispatch_keybindings(&self, _ctx: &AppContext) -> bool {
+        !self.terminal_model.lock().is_alt_screen_active()
+    }
 }
 
 impl TypedActionView for TuiTerminalSessionView {
@@ -1246,6 +1258,13 @@ impl TypedActionView for TuiTerminalSessionView {
     fn handle_action(&mut self, action: &TuiTerminalSessionAction, ctx: &mut ViewContext<Self>) {
         match action {
             TuiTerminalSessionAction::Interrupt => self.handle_interrupt(ctx),
+            TuiTerminalSessionAction::ForwardAltScreenInput(bytes) => {
+                if self.terminal_model.lock().is_alt_screen_active() {
+                    ctx.emit(TuiTerminalSessionEvent::WriteBytes(Cow::Owned(
+                        bytes.clone(),
+                    )));
+                }
+            }
             TuiTerminalSessionAction::ToggleUsageDisplay => self.toggle_usage_display(ctx),
         }
     }

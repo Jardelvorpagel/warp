@@ -28,6 +28,8 @@ use std::thread;
 use std::time::Duration;
 
 use instant::Instant;
+use pathfinder_geometry::rect::RectF;
+use pathfinder_geometry::vector::Vector2F;
 use ratatui::crossterm::cursor::{Hide, Show};
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent,
@@ -106,6 +108,13 @@ impl<T: TuiView, R: TuiTerminal> TuiScreen<T, R> {
     /// timed redraw.
     fn draw(&mut self, ctx: &mut AppContext) -> io::Result<Option<Instant>> {
         let size = self.terminal.size()?;
+        ctx.update_window_bounds(
+            self.window_id,
+            RectF::new(
+                Vector2F::zero(),
+                Vector2F::new(f32::from(size.width), f32::from(size.height)),
+            ),
+        );
         let area = TuiRect::new(0, 0, size.width, size.height);
         let invalidation = ctx.take_all_invalidations_for_window(self.window_id);
         self.presenter
@@ -135,11 +144,19 @@ impl<T: TuiView, R: TuiTerminal> TuiScreen<T, R> {
         // responder chain first, exactly like the GUI window event path.
         if let Some((keystroke, is_composing)) = event.key_down() {
             let responder_chain = ctx.get_responder_chain(self.window_id);
-            match ctx.dispatch_keystroke(self.window_id, &responder_chain, keystroke, is_composing)
+            if ctx.key_bindings_enabled(self.window_id)
+                && ctx.should_dispatch_tui_keybindings(self.window_id, &responder_chain)
             {
-                Ok(true) => return true,
-                Ok(false) => {}
-                Err(error) => report_error!(error.context("error dispatching keystroke")),
+                match ctx.dispatch_keystroke(
+                    self.window_id,
+                    &responder_chain,
+                    keystroke,
+                    is_composing,
+                ) {
+                    Ok(true) => return true,
+                    Ok(false) => {}
+                    Err(error) => report_error!(error.context("error dispatching keystroke")),
+                }
             }
         }
 

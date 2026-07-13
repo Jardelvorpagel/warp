@@ -325,7 +325,11 @@ where
             | TuiEvent::ScrollWheel { .. }
             | TuiEvent::KeyDown { .. }
             | TuiEvent::MiddleMouseDown { .. }
+            | TuiEvent::MiddleMouseUp { .. }
+            | TuiEvent::MiddleMouseDragged { .. }
             | TuiEvent::RightMouseDown { .. }
+            | TuiEvent::RightMouseUp { .. }
+            | TuiEvent::RightMouseDragged { .. }
             | TuiEvent::MouseMoved { .. } => false,
         }
     }

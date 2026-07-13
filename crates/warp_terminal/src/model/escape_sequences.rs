@@ -169,11 +169,17 @@ pub mod EscCodes {
 
     // Mouse-related escape codes
     pub const MOUSE_LEFT: u8 = 0;
+    pub const MOUSE_MIDDLE: u8 = 1;
     pub const MOUSE_RIGHT: u8 = 2;
     pub const MOUSE_DRAG: u8 = 32;
+    pub const MOUSE_MIDDLE_DRAG: u8 = 33;
+    pub const MOUSE_RIGHT_DRAG: u8 = 34;
     pub const MOUSE_MOVE: u8 = 35;
     pub const MOUSE_WHEEL_UP: u8 = 64;
     pub const MOUSE_WHEEL_DOWN: u8 = 65;
+    pub const MOUSE_SHIFT: u8 = 4;
+    pub const MOUSE_ALT: u8 = 8;
+    pub const MOUSE_CONTROL: u8 = 16;
 
     pub const FOCUS_IN: &[u8] = &[C0::ESC, b'[', b'I'];
     pub const FOCUS_OUT: &[u8] = &[C0::ESC, b'[', b'O'];
@@ -257,10 +263,13 @@ impl<T: ModeProvider> ToEscapeSequence<T> for MouseState {
             MouseAction::Released => 'm',
             _ => 'M',
         };
-        let (button, repeats) = match self.button() {
+        let (mut button, repeats) = match self.button() {
             MouseButton::Left => (EscCodes::MOUSE_LEFT, 1),
+            MouseButton::Middle => (EscCodes::MOUSE_MIDDLE, 1),
             MouseButton::Right => (EscCodes::MOUSE_RIGHT, 1),
             MouseButton::LeftDrag => (EscCodes::MOUSE_DRAG, 1),
+            MouseButton::MiddleDrag => (EscCodes::MOUSE_MIDDLE_DRAG, 1),
+            MouseButton::RightDrag => (EscCodes::MOUSE_RIGHT_DRAG, 1),
             MouseButton::Move => (EscCodes::MOUSE_MOVE, 1),
             MouseButton::Wheel => {
                 if let MouseAction::Scrolled { delta } = self.action() {
@@ -275,6 +284,16 @@ impl<T: ModeProvider> ToEscapeSequence<T> for MouseState {
                 }
             }
         };
+        let modifiers = self.modifiers();
+        if modifiers.shift {
+            button += EscCodes::MOUSE_SHIFT;
+        }
+        if modifiers.alt {
+            button += EscCodes::MOUSE_ALT;
+        }
+        if modifiers.ctrl {
+            button += EscCodes::MOUSE_CONTROL;
+        }
 
         let point = self.maybe_point()?;
         let msg = format!(
@@ -494,7 +513,11 @@ fn keystroke_to_c0_control_code(
     if KEYSTROKE_TO_C0_CODE.contains_key(keystroke.key.as_str()) {
         return Some(vec![KEYSTROKE_TO_C0_CODE[keystroke.key.as_str()]]);
     }
-    None
+    let [byte] = keystroke.key.as_bytes() else {
+        return None;
+    };
+    byte.is_ascii_alphabetic()
+        .then(|| vec![byte.to_ascii_uppercase() - b'@'])
 }
 
 /// Returns the appropriate escape sequence for the given "cursor movement" keystroke.

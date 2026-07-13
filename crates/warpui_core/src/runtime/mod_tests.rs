@@ -225,6 +225,76 @@ fn keymap_binding_dispatches_typed_action_to_tui_view() {
     });
 }
 
+/// A raw-input view must receive bound keys at the element layer without the
+/// shared keymap swallowing them first.
+#[test]
+fn raw_input_view_bypasses_keymap_bindings() {
+    struct RawInputView {
+        element_hits: Rc<Cell<usize>>,
+        binding_hits: usize,
+    }
+
+    impl Entity for RawInputView {
+        type Event = ();
+    }
+
+    impl TuiView for RawInputView {
+        fn ui_name() -> &'static str {
+            "RawInputView"
+        }
+
+        fn render(&self, _: &AppContext) -> Box<dyn TuiElement> {
+            let hits = self.element_hits.clone();
+            Box::new(
+                TuiEventHandler::new(().finish()).on_key("c", move |_, _, _| {
+                    hits.set(hits.get() + 1);
+                }),
+            )
+        }
+
+        fn should_dispatch_keybindings(&self, _: &AppContext) -> bool {
+            false
+        }
+    }
+
+    impl TypedActionView for RawInputView {
+        type Action = Bump;
+
+        fn handle_action(&mut self, _: &Bump, _: &mut ViewContext<Self>) {
+            self.binding_hits += 1;
+        }
+    }
+
+    App::test((), |mut app| async move {
+        let element_hits = Rc::new(Cell::new(0));
+        let hits_for_view = element_hits.clone();
+        let (window_id, root) = app.update(|ctx| {
+            ctx.register_fixed_bindings([FixedBinding::new("ctrl-c", Bump, id!("RawInputView"))]);
+            ctx.add_tui_window(window_options(), |_| RawInputView {
+                element_hits: hits_for_view,
+                binding_hits: 0,
+            })
+        });
+
+        let mut terminal = TestTerminal::new(TuiSize::new(20, 3));
+        terminal.events.push_back(CrosstermEvent::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        )));
+        let mut runtime = TuiRuntime::with_terminal(&app, window_id, root.clone(), terminal);
+
+        let mut iterations = 0;
+        runtime
+            .run_until(&mut app, |_| {
+                iterations += 1;
+                iterations > 1
+            })
+            .unwrap();
+
+        assert_eq!(root.read(&app, |view, _| view.binding_hits), 0);
+        assert_eq!(element_hits.get(), 1);
+    });
+}
 /// A binding with a permissive (always-true) context predicate whose action
 /// type has no handler on any view in the TUI responder chain must not swallow
 /// the keystroke: the keymap pass reports it unhandled and the element pass

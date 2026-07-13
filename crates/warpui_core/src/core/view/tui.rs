@@ -40,6 +40,16 @@ pub trait TuiView: Entity {
     fn keymap_context(&self, _: &AppContext) -> keymap::Context {
         Self::default_keymap_context()
     }
+    /// Whether key-down events should be offered to the shared keymap before
+    /// reaching this view's rendered element tree.
+    ///
+    /// Views that represent a raw terminal input surface can return `false` so
+    /// every keystroke, including keys normally bound by an ancestor, reaches
+    /// the terminal element unchanged. If any view in the focused responder
+    /// chain returns `false`, the runtime skips the keymap for that event.
+    fn should_dispatch_keybindings(&self, _: &AppContext) -> bool {
+        true
+    }
 
     /// Returns the default context for a view.
     fn default_keymap_context() -> keymap::Context {
@@ -82,6 +92,7 @@ pub trait AnyTuiView {
         view_id: EntityId,
     );
     fn keymap_context(&self, app: &AppContext) -> keymap::Context;
+    fn should_dispatch_keybindings(&self, app: &AppContext) -> bool;
     fn child_view_ids(&self, app: &AppContext) -> Vec<EntityId>;
 }
 
@@ -129,6 +140,9 @@ where
 
     fn keymap_context(&self, app: &AppContext) -> keymap::Context {
         TuiView::keymap_context(self, app)
+    }
+    fn should_dispatch_keybindings(&self, app: &AppContext) -> bool {
+        TuiView::should_dispatch_keybindings(self, app)
     }
 
     fn child_view_ids(&self, app: &AppContext) -> Vec<EntityId> {

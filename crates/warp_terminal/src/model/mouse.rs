@@ -5,9 +5,12 @@ use super::indexing::Point;
 #[derive(Debug, Copy, Clone)]
 pub enum MouseButton {
     Left,
+    Middle,
     Right,
     Wheel,
     LeftDrag,
+    MiddleDrag,
+    RightDrag,
     Move, // Used for mouse hover events (when cursor is moving)
 }
 #[derive(Debug, Copy, Clone)]

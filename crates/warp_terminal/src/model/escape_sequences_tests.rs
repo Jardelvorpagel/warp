@@ -1,3 +1,4 @@
+use warpui_core::event::ModifiersState;
 use warpui_core::keymap::Keystroke;
 use warpui_core::platform::OperatingSystem;
 
@@ -43,6 +44,9 @@ fn test_keystroke_to_c0_control_code() {
     // Expected mapping taken from the VT220 spec
     // [here](https://vt100.net/docs/vt220-rm/chapter3.html#S3.2.5), table 3.2.5.
     let test_cases: &[(Keystroke, Vec<u8>)] = &[
+        (Keystroke::parse("ctrl-a").unwrap(), vec![C0::SOH]),
+        (Keystroke::parse("ctrl-c").unwrap(), vec![C0::ETX]),
+        (Keystroke::parse("ctrl-z").unwrap(), vec![C0::SUB]),
         (Keystroke::parse("ctrl- ").unwrap(), vec![C0::NUL]),
         (Keystroke::parse("ctrl-2").unwrap(), vec![C0::NUL]),
         (Keystroke::parse("ctrl-3").unwrap(), vec![C0::ESC]),
@@ -74,6 +78,31 @@ fn test_shift_backspace_emits_del_sequence() {
 fn test_mouse_actions_to_escape_sequence() {
     // Validating we produce the correct escape sequences.
     let test_cases: &[(MouseState, Vec<u8>)] = &[
+        (
+            MouseState::new(
+                MouseButton::Middle,
+                MouseAction::Pressed,
+                ModifiersState {
+                    shift: true,
+                    ctrl: true,
+                    ..Default::default()
+                },
+            )
+            .set_point(Point::new(2, 3)),
+            // [<21;4;3M (middle + shift + control)
+            vec![
+                C0::ESC,
+                b'[',
+                b'<',
+                b'2',
+                b'1',
+                b';',
+                b'4',
+                b';',
+                b'3',
+                b'M',
+            ],
+        ),
         (
             MouseState::new(MouseButton::Right, MouseAction::Pressed, Default::default())
                 .set_point(Point::new(10, 10)),

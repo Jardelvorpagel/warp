@@ -232,27 +232,35 @@ fn mouse_moved_maps_to_tui_mouse_moved_event() {
 }
 
 #[test]
-fn unsupported_mouse_up_and_drag_buttons_are_ignored() {
-    assert!(mouse(
-        MouseEventKind::Up(MouseButton::Right),
-        KeyModifiers::empty()
-    )
-    .is_none());
-    assert!(mouse(
-        MouseEventKind::Up(MouseButton::Middle),
-        KeyModifiers::empty()
-    )
-    .is_none());
-    assert!(mouse(
-        MouseEventKind::Drag(MouseButton::Right),
-        KeyModifiers::empty()
-    )
-    .is_none());
-    assert!(mouse(
-        MouseEventKind::Drag(MouseButton::Middle),
-        KeyModifiers::empty()
-    )
-    .is_none());
+fn middle_and_right_mouse_up_and_drag_map_to_tui_mouse_events() {
+    assert!(matches!(
+        mouse(
+            MouseEventKind::Up(MouseButton::Middle),
+            KeyModifiers::empty()
+        ),
+        Some(TuiEvent::MiddleMouseUp { .. })
+    ));
+    assert!(matches!(
+        mouse(
+            MouseEventKind::Drag(MouseButton::Middle),
+            KeyModifiers::empty()
+        ),
+        Some(TuiEvent::MiddleMouseDragged { .. })
+    ));
+    assert!(matches!(
+        mouse(
+            MouseEventKind::Up(MouseButton::Right),
+            KeyModifiers::empty()
+        ),
+        Some(TuiEvent::RightMouseUp { .. })
+    ));
+    assert!(matches!(
+        mouse(
+            MouseEventKind::Drag(MouseButton::Right),
+            KeyModifiers::empty()
+        ),
+        Some(TuiEvent::RightMouseDragged { .. })
+    ));
 }
 
 /// Builds a `button` mouse-down at `(x, y)` via the real conversion (so it

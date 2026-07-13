@@ -60,7 +60,23 @@ impl TryFrom<MouseEvent> for TuiEvent {
                 position,
                 modifiers,
             }),
+            MouseEventKind::Up(MouseButton::Middle) => Ok(TuiEvent::MiddleMouseUp {
+                position,
+                modifiers,
+            }),
+            MouseEventKind::Up(MouseButton::Right) => Ok(TuiEvent::RightMouseUp {
+                position,
+                modifiers,
+            }),
             MouseEventKind::Drag(MouseButton::Left) => Ok(TuiEvent::LeftMouseDragged {
+                position,
+                modifiers,
+            }),
+            MouseEventKind::Drag(MouseButton::Middle) => Ok(TuiEvent::MiddleMouseDragged {
+                position,
+                modifiers,
+            }),
+            MouseEventKind::Drag(MouseButton::Right) => Ok(TuiEvent::RightMouseDragged {
                 position,
                 modifiers,
             }),
@@ -69,9 +85,6 @@ impl TryFrom<MouseEvent> for TuiEvent {
                 modifiers,
                 is_synthetic: false,
             }),
-            // Add these variants when a concrete TUI consumer needs them.
-            MouseEventKind::Up(MouseButton::Middle | MouseButton::Right)
-            | MouseEventKind::Drag(MouseButton::Middle | MouseButton::Right) => Err(()),
         }
     }
 }

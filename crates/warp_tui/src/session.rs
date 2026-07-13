@@ -122,6 +122,10 @@ fn create_terminal_session_after_login(
         return;
     }
 
+    let initial_terminal_size = ctx
+        .window_bounds(&root.window_id(ctx))
+        .map(|bounds| bounds.size())
+        .unwrap_or_else(|| Vector2F::new(120., 24.));
     let root = root.clone();
     let manager = LocalTtyTerminalManager::<TuiTerminalSessionView>::create_tui_model(
         std::env::current_dir().ok(),
@@ -129,7 +133,7 @@ fn create_terminal_session_after_login(
         IsSharedSessionCreator::No,
         None,
         banner.clone(),
-        Vector2F::new(120., 24.),
+        initial_terminal_size,
         None,
         None,
         TRANSCRIPT_BLOCK_SPACING,
