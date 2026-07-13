@@ -161,7 +161,7 @@ struct FilteredMenuItem {
 struct EnvironmentSidecarData {
     name: String,
     id: String,
-    image: String,
+    image: Option<String>,
     repos_text: String,
 }
 
@@ -664,7 +664,12 @@ impl DisplayChipMenu {
         Some(EnvironmentSidecarData {
             name: env.model().string_model.display_name(),
             id: env.id.to_string(),
-            image: env.model().string_model.base_image.to_string(),
+            image: env
+                .model()
+                .string_model
+                .base_image
+                .as_ref()
+                .map(ToString::to_string),
             repos_text,
         })
     }
@@ -824,9 +829,9 @@ impl DisplayChipMenu {
             )
         };
 
-        let image_value = {
-            let docker_image = data.image.clone();
-            render_copyable_text_field(
+        let image_value = match data.image.clone() {
+            None => value_text("(none)".to_string()),
+            Some(docker_image) => render_copyable_text_field(
                 CopyableTextFieldConfig::new(docker_image.clone())
                     .with_font_size(value_font_size)
                     .with_text_color(main_text_color)
@@ -843,7 +848,7 @@ impl DisplayChipMenu {
                     });
                 },
                 app,
-            )
+            ),
         };
 
         let row = |row_icon: Icon, label: &str, value: Box<dyn Element>, is_last: bool| {

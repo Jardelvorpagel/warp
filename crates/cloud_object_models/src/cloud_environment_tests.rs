@@ -28,9 +28,75 @@ fn deserialize_legacy_environment_without_providers() {
     );
     assert_eq!(
         env.base_image,
-        BaseImage::DockerImage("ubuntu:latest".into())
+        Some(BaseImage::DockerImage("ubuntu:latest".into()))
     );
     assert_eq!(env.setup_commands, vec!["echo hello"]);
+}
+
+#[test]
+fn deserialize_environment_without_docker_image() {
+    let json = serde_json::json!({
+        "name": "no-image-env",
+        "github_repos": [{"owner": "warpdotdev", "repo": "warp"}],
+        "setup_commands": ["echo hello"]
+    });
+
+    let env: AmbientAgentEnvironment = serde_json::from_value(json).unwrap();
+    assert_eq!(env.name, "no-image-env");
+    assert_eq!(env.base_image, None);
+    assert_eq!(env.github_repos.len(), 1);
+    assert_eq!(env.setup_commands, vec!["echo hello"]);
+}
+
+#[test]
+fn serialize_environment_without_docker_image_omits_field() {
+    let mut env = AmbientAgentEnvironment::new(
+        "no-image-env".into(),
+        None,
+        vec![],
+        "ubuntu:latest".into(),
+        vec![],
+    );
+    env.base_image = None;
+
+    let json = serde_json::to_value(&env).unwrap();
+    assert!(!json.as_object().unwrap().contains_key("docker_image"));
+}
+
+#[test]
+fn serialize_environment_with_docker_image_preserves_wire_format() {
+    let env = AmbientAgentEnvironment::new(
+        "image-env".into(),
+        None,
+        vec![],
+        "ubuntu:latest".into(),
+        vec![],
+    );
+
+    let json = serde_json::to_value(&env).unwrap();
+    // The base image must serialize as a flat top-level `docker_image` key.
+    assert_eq!(
+        json.get("docker_image"),
+        Some(&serde_json::json!("ubuntu:latest"))
+    );
+    assert!(!json.as_object().unwrap().contains_key("base_image"));
+}
+
+#[test]
+fn roundtrip_serde_without_docker_image() {
+    let mut env = AmbientAgentEnvironment::new(
+        "no-image-rt".into(),
+        Some("desc".into()),
+        vec![GithubRepo::new("owner".into(), "repo".into())],
+        "unused".into(),
+        vec!["make build".into()],
+    );
+    env.base_image = None;
+
+    let serialized = serde_json::to_string(&env).unwrap();
+    let deserialized: AmbientAgentEnvironment = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(env, deserialized);
+    assert_eq!(deserialized.base_image, None);
 }
 
 #[test]

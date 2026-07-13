@@ -55,7 +55,7 @@ fn make_test_environment_with_timestamps(
         id: SyncId::ClientId(ClientId::new()),
         name: name.to_string(),
         description: None,
-        docker_image: docker_image.to_string(),
+        docker_image: Some(docker_image.to_string()),
         github_repos,
         setup_commands,
         last_edited_ts,

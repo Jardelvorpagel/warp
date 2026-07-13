@@ -119,7 +119,7 @@ struct EnvironmentDisplayData {
     id: SyncId,
     name: String,
     description: Option<String>,
-    docker_image: String,
+    docker_image: Option<String>,
     github_repos: Vec<(String, String)>, // (owner, repo)
     setup_commands: Vec<String>,
     last_edited_ts: Option<ServerTimestamp>,
@@ -144,7 +144,7 @@ impl EnvironmentDisplayData {
             id: env.id,
             name: model.name.clone(),
             description: model.description.clone(),
-            docker_image: model.base_image.to_string(),
+            docker_image: model.base_image.as_ref().map(ToString::to_string),
             github_repos: model
                 .github_repos
                 .iter()
@@ -168,7 +168,7 @@ impl EnvironmentDisplayData {
             self.id.to_string(),
             self.name.clone(),
             self.description.clone().unwrap_or_default(),
-            self.docker_image.clone(),
+            self.docker_image.clone().unwrap_or_default(),
         ];
 
         if haystacks
@@ -270,7 +270,11 @@ impl EnvironmentsPageView {
                         name: model.name.clone(),
                         description: model.description.clone().unwrap_or_default(),
                         selected_repos: model.github_repos.clone(),
-                        docker_image: model.base_image.to_string(),
+                        docker_image: model
+                            .base_image
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_default(),
                         setup_commands: model.setup_commands.clone(),
                     }
                 });
@@ -1811,7 +1815,10 @@ impl EnvironmentsPageWidget {
                 }
             }
 
-            let mut details_parts = vec![format!("Image: {}", env_docker_image)];
+            let mut details_parts = Vec::new();
+            if let Some(image) = &env_docker_image {
+                details_parts.push(format!("Image: {image}"));
+            }
 
             if !env_github_repos.is_empty() {
                 let repos_text = env_github_repos

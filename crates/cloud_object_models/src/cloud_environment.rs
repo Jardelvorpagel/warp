@@ -181,9 +181,14 @@ pub struct AmbientAgentEnvironment {
     /// `github_repos`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_repos: Option<Vec<SourceRepo>>,
-    /// Base image specification
+    /// Base image specification.
+    ///
+    /// `None` means the environment does not pin a base image (the key is
+    /// absent from the stored JSON); the server picks a default in that case.
+    /// Serialization emits no fields for `None`, preserving the existing wire
+    /// format for environments that do pin an image.
     #[serde(flatten)]
-    pub base_image: BaseImage,
+    pub base_image: Option<BaseImage>,
     /// List of setup commands to run after cloning
     #[serde(default)]
     pub setup_commands: Vec<String>,
@@ -212,7 +217,7 @@ impl AmbientAgentEnvironment {
             code_forge: None,
             github_repos,
             source_repos: None,
-            base_image: BaseImage::DockerImage(docker_image),
+            base_image: Some(BaseImage::DockerImage(docker_image)),
             setup_commands,
             providers: ProvidersConfig::default(),
             secrets: None,
