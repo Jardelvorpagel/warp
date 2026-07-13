@@ -72,6 +72,31 @@ fn ld_preload_splits_on_whitespace_and_colon() {
 }
 
 #[test]
+fn preserves_empty_components_when_no_warp_present() {
+    // Empty components mean "current directory" in LD_LIBRARY_PATH and must be
+    // preserved verbatim when nothing Warp-owned is stripped.
+    let value = "::/home/user/lib:";
+    let sanitized = strip_warp_entries("LD_LIBRARY_PATH", value, Some(Path::new(WARP_DIR)));
+    assert_eq!(sanitized, value);
+}
+
+#[test]
+fn preserves_empty_components_while_stripping_warp() {
+    let value = format!("{WARP_DIR}/lib::/home/user/lib");
+    let sanitized = strip_warp_entries("LD_LIBRARY_PATH", &value, Some(Path::new(WARP_DIR)));
+    assert_eq!(sanitized, ":/home/user/lib");
+}
+
+#[test]
+fn no_mutation_when_value_has_empties_but_no_warp() {
+    // A user value with empty (CWD) components and no Warp entry must be left
+    // exactly as-is — no mutation emitted.
+    let env = env_from(&[("LD_LIBRARY_PATH", "/foo::/bar:")]);
+    let map = mutations_map(loader_env_mutations_from(env, Some(Path::new(WARP_DIR))));
+    assert!(!map.contains_key("LD_LIBRARY_PATH"));
+}
+
+#[test]
 fn mutation_strips_warp_entry() {
     let env = env_from(&[("LD_LIBRARY_PATH", &format!("{WARP_DIR}/lib:/home/user/lib"))]);
     let map = mutations_map(loader_env_mutations_from(env, Some(Path::new(WARP_DIR))));

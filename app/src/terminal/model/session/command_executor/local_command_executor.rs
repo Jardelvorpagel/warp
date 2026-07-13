@@ -174,6 +174,24 @@ impl LocalCommandExecutor {
 
         let mut command_process = command_builder.build(command, shell_config_flag);
 
+        // Strip Warp's bundled-library entries from the loader environment so the
+        // spawned shell (and generator commands / PATH capture it runs) resolve
+        // system libraries instead of Warp's bundled copies, which otherwise crash
+        // .NET/pwsh with SIGABRT (see crate::terminal::loader_env, warp#12228).
+        // Applied before the caller-provided env below so an explicit loader-env
+        // override from the caller still wins.
+        #[cfg(unix)]
+        for (var, mutation) in crate::terminal::loader_env::loader_env_mutations() {
+            match mutation {
+                crate::terminal::loader_env::LoaderEnvMutation::Set(value) => {
+                    command_process.env(var, value);
+                }
+                crate::terminal::loader_env::LoaderEnvMutation::Remove => {
+                    command_process.env_remove(var);
+                }
+            }
+        }
+
         // This sets then environment variables, including the PATH var.
         // We need to run the command with the PATH var set because if the
         // user opened Warp through a parent process that didn't have the PATH var set
@@ -189,23 +207,6 @@ impl LocalCommandExecutor {
         // Set the current dir, if any.
         if let Some(current_directory_path) = current_directory_path {
             command_process.current_dir(current_directory_path);
-        }
-
-        // Strip Warp's bundled-library entries from the loader environment so
-        // the spawned shell (and generator commands / PATH capture it runs)
-        // resolve system libraries instead of Warp's bundled copies, which
-        // otherwise crash .NET/pwsh with SIGABRT (see crate::terminal::loader_env,
-        // warp#12228).
-        #[cfg(unix)]
-        for (var, mutation) in crate::terminal::loader_env::loader_env_mutations() {
-            match mutation {
-                crate::terminal::loader_env::LoaderEnvMutation::Set(value) => {
-                    command_process.env(var, value);
-                }
-                crate::terminal::loader_env::LoaderEnvMutation::Remove => {
-                    command_process.env_remove(var);
-                }
-            }
         }
 
         // The purpose of the executor is to produce output. If the child

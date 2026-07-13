@@ -120,12 +120,27 @@ fn loader_env_mutations_from(
 #[cfg(unix)]
 fn strip_warp_entries(var: &str, value: &str, warp_dir: Option<&Path>) -> String {
     // `LD_LIBRARY_PATH` is colon-separated; `LD_PRELOAD` accepts colon- or
-    // whitespace-separated entries. Split permissively and rejoin with ':',
-    // which is valid for both.
+    // whitespace-separated entries.
     let split_on_whitespace = var == "LD_PRELOAD";
-    value
+    let components: Vec<&str> = value
         .split(|c: char| c == ':' || (split_on_whitespace && c.is_whitespace()))
-        .filter(|entry| !entry.is_empty())
+        .collect();
+
+    // Only rewrite the value when at least one component is actually Warp-owned.
+    // Leaving it untouched otherwise preserves the user's value verbatim —
+    // including empty components, which in `LD_LIBRARY_PATH` denote the current
+    // directory (`:/foo`, `/foo:`, `::`) and must not be silently dropped.
+    if !components
+        .iter()
+        .any(|entry| entry_is_within_warp(entry, warp_dir))
+    {
+        return value.to_owned();
+    }
+
+    // Drop only the Warp-owned components, keeping every other component
+    // (including empty ones) in place. Rejoin with ':', valid for both vars.
+    components
+        .into_iter()
         .filter(|entry| !entry_is_within_warp(entry, warp_dir))
         .collect::<Vec<_>>()
         .join(":")
