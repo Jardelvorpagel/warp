@@ -103,26 +103,35 @@ fn diff_pipeline_computes_added_lines_and_ghost_blocks() {
 
         editor.update(&mut app, |editor, ctx| editor.expand_diffs(ctx));
 
-        // Ghost blocks land via the render state's async layout channel; poll
-        // until the spawned handler has stored them.
-        let mut ghosts = Vec::new();
-        for _ in 0..100 {
-            ghosts = app.read(|app| {
-                editor
-                    .as_ref(app)
-                    .render_state()
-                    .as_ref(app)
-                    .char_cell()
-                    .expect("TUI editor renders in char-cell mode")
-                    .display_lattice(&[])
-                    .ghosts()
-                    .to_vec()
-            });
-            if !ghosts.is_empty() {
-                break;
-            }
-            futures_lite::future::yield_now().await;
-        }
+        // Ghost blocks land via the render state's async layout channel:
+        // `expand_diffs` queues a `LayoutTemporaryBlock` action that a spawned
+        // foreground handler applies only after a background→foreground hop.
+        // A fixed-iteration `yield_now` poll races that hop under CPU
+        // contention — the test flaked in CI with `ghosts.len() == 0` when the
+        // 100 iterations elapsed before the handler had stored the blocks. So
+        // await the render state's `layout_complete()` future, which resolves
+        // only once every in-flight layout action (including the ghost-block
+        // one) has been applied, then read the ghosts once.
+        app.read(|app| {
+            editor
+                .as_ref(app)
+                .render_state()
+                .as_ref(app)
+                .layout_complete()
+        })
+        .await;
+
+        let ghosts = app.read(|app| {
+            editor
+                .as_ref(app)
+                .render_state()
+                .as_ref(app)
+                .char_cell()
+                .expect("TUI editor renders in char-cell mode")
+                .display_lattice(&[])
+                .ghosts()
+                .to_vec()
+        });
 
         assert_eq!(ghosts.len(), 1);
         assert_eq!(ghosts[0].content, "old\n");
