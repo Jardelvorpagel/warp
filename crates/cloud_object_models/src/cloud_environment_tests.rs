@@ -2,6 +2,47 @@ use super::{
     AmbientAgentEnvironment, AwsProviderConfig, BaseImage, CodeForge, EnvironmentSecretRef,
     GcpProviderConfig, GithubRepo, ProvidersConfig, SourceRepo,
 };
+#[test]
+fn deserialize_environment_without_docker_image() {
+    let json = serde_json::json!({
+        "name": "default-image-env",
+        "github_repos": [],
+        "setup_commands": []
+    });
+    let env: AmbientAgentEnvironment = serde_json::from_value(json).unwrap();
+
+    assert_eq!(env.base_image, None);
+}
+
+#[test]
+fn absent_docker_image_roundtrip_omits_json_field() {
+    let mut env =
+        AmbientAgentEnvironment::new("no-image-env".into(), None, vec![], String::new(), vec![]);
+    env.base_image = None;
+
+    let json = serde_json::to_value(&env).unwrap();
+    assert!(!json.as_object().unwrap().contains_key("docker_image"));
+
+    let roundtripped: AmbientAgentEnvironment = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, env);
+}
+
+#[test]
+fn docker_image_roundtrip_preserves_flattened_json_shape() {
+    let json = serde_json::json!({
+        "name": "custom-image-env",
+        "github_repos": [],
+        "docker_image": "ubuntu:latest",
+        "setup_commands": []
+    });
+
+    let env: AmbientAgentEnvironment = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(
+        env.base_image,
+        Some(BaseImage::DockerImage("ubuntu:latest".into()))
+    );
+    assert_eq!(serde_json::to_value(env).unwrap(), json);
+}
 
 #[test]
 fn deserialize_legacy_environment_without_providers() {
@@ -28,7 +69,7 @@ fn deserialize_legacy_environment_without_providers() {
     );
     assert_eq!(
         env.base_image,
-        BaseImage::DockerImage("ubuntu:latest".into())
+        Some(BaseImage::DockerImage("ubuntu:latest".into()))
     );
     assert_eq!(env.setup_commands, vec!["echo hello"]);
 }

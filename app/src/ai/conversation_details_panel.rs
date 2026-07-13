@@ -1635,7 +1635,6 @@ impl ConversationDetailsPanel {
         app: &AppContext,
     ) -> Box<dyn Element> {
         let environment_name = &env_model.name;
-        let docker_image = env_model.base_image.to_string();
 
         let theme = appearance.theme();
         let ui_font_size = appearance.ui_font_size();
@@ -1702,16 +1701,18 @@ impl ConversationDetailsPanel {
             .finish(),
         );
 
-        section.add_child(
-            Container::new(render_copyable_field(
-                "Image",
-                &docker_image,
-                CopyButtonKind::DockerImage,
-                ConversationDetailsPanelAction::CopyDockerImage,
-            ))
-            .with_margin_bottom(LABEL_VALUE_GAP)
-            .finish(),
-        );
+        if let Some(docker_image) = env_model.base_image.as_ref().map(ToString::to_string) {
+            section.add_child(
+                Container::new(render_copyable_field(
+                    "Image",
+                    &docker_image,
+                    CopyButtonKind::DockerImage,
+                    ConversationDetailsPanelAction::CopyDockerImage,
+                ))
+                .with_margin_bottom(LABEL_VALUE_GAP)
+                .finish(),
+            );
+        }
 
         Container::new(section.finish())
             .with_margin_bottom(FIELD_SPACING)
@@ -2263,10 +2264,17 @@ impl TypedActionView for ConversationDetailsPanel {
                     if let Ok(server_id) = ServerId::try_from(env_id.as_str()) {
                         let sync_id = SyncId::ServerId(server_id);
                         if let Some(env) = CloudAmbientAgentEnvironment::get_by_id(&sync_id, ctx) {
-                            let docker_image = env.model().string_model.base_image.to_string();
-                            ctx.clipboard()
-                                .write(ClipboardContent::plain_text(docker_image));
-                            self.record_copy(CopyButtonKind::DockerImage, ctx);
+                            if let Some(docker_image) = env
+                                .model()
+                                .string_model
+                                .base_image
+                                .as_ref()
+                                .map(ToString::to_string)
+                            {
+                                ctx.clipboard()
+                                    .write(ClipboardContent::plain_text(docker_image));
+                                self.record_copy(CopyButtonKind::DockerImage, ctx);
+                            }
                         }
                     }
                 }
