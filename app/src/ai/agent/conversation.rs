@@ -1157,6 +1157,19 @@ impl AIConversation {
         self.parent_conversation_id.is_some() || self.parent_agent_id.is_some()
     }
 
+    /// Returns true if `exchange_id` identifies the synthetic prompt that an
+    /// orchestrator supplied when starting this child conversation.
+    pub(crate) fn is_synthetic_orchestrator_prompt_exchange(
+        &self,
+        exchange_id: AIAgentExchangeId,
+    ) -> bool {
+        self.is_child_agent_conversation()
+            && self
+                .root_task_exchanges()
+                .next()
+                .is_some_and(|exchange| exchange.id == exchange_id)
+    }
+
     /// True iff this conversation knows about a parent agent — either via a
     /// local parent placeholder (`parent_conversation_id`, set in the GUI
     /// parent) or via the parent's server-side run identifier
