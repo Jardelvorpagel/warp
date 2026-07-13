@@ -191,6 +191,23 @@ impl LocalCommandExecutor {
             command_process.current_dir(current_directory_path);
         }
 
+        // Strip Warp's bundled-library entries from the loader environment so
+        // the spawned shell (and generator commands / PATH capture it runs)
+        // resolve system libraries instead of Warp's bundled copies, which
+        // otherwise crash .NET/pwsh with SIGABRT (see crate::terminal::loader_env,
+        // warp#12228).
+        #[cfg(unix)]
+        for (var, mutation) in crate::terminal::loader_env::loader_env_mutations() {
+            match mutation {
+                crate::terminal::loader_env::LoaderEnvMutation::Set(value) => {
+                    command_process.env(var, value);
+                }
+                crate::terminal::loader_env::LoaderEnvMutation::Remove => {
+                    command_process.env_remove(var);
+                }
+            }
+        }
+
         // The purpose of the executor is to produce output. If the child
         // has been dropped, there's no way to get the output anymore,
         // so there's no need for the process itself to stick around.
