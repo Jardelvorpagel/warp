@@ -66,17 +66,29 @@ while (( "$#" )); do
   esac
 done
 
+# The TUI binary is not part of an app bundle, so resolve bundled resources
+# relative to the executable on every platform.
+CARGO_ARGS+=(--features standalone)
+
+# Resolve Cargo's actual target directory rather than assuming ./target
+# (honors CARGO_TARGET_DIR / build.target-dir).
+TARGET_DIR="$(cargo metadata --no-deps --format-version 1 | jq -r .target_directory)"
+if [ -z "$TARGET_DIR" ] || [ "$TARGET_DIR" = "null" ]; then
+  TARGET_DIR="${REPO_ROOT}/target"
+fi
+TUI_BIN_PATH="${TARGET_DIR}/${PROFILE_DIR}/${BIN}"
+
+# Match the GUI launcher's resource staging so the standalone TUI can discover
+# bundled skills under the sibling resources/bundled/skills directory.
+echo "Preparing bundled resources..."
+NO_LICENSES=1 SKIP_SETTINGS_SCHEMA=1 \
+  "${REPO_ROOT}/script/prepare_bundled_resources" \
+  "${TARGET_DIR}/${PROFILE_DIR}/resources" \
+  "${CHANNEL}"
+
 if [[ "$(uname -s)" = "Darwin" ]]; then
   echo "Building cargo build -p warp_tui --bin ${BIN} (channel: ${CHANNEL})"
   cargo build -p warp_tui --bin "${BIN}" "${CARGO_ARGS[@]}"
-
-  # Resolve Cargo's actual target directory rather than assuming ./target
-  # (honors CARGO_TARGET_DIR / build.target-dir).
-  TARGET_DIR="$(cargo metadata --no-deps --format-version 1 | jq -r .target_directory)"
-  if [ -z "$TARGET_DIR" ] || [ "$TARGET_DIR" = "null" ]; then
-    TARGET_DIR="${REPO_ROOT}/target"
-  fi
-  TUI_BIN_PATH="${TARGET_DIR}/${PROFILE_DIR}/${BIN}"
 
   SIGNING_CERT="$(security find-identity -p codesigning -v | grep "Apple Development" | awk '{print $2}' | head -1)"
   if [ -n "$SIGNING_CERT" ]; then
