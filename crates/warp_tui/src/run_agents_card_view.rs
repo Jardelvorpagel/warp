@@ -1005,13 +1005,16 @@ impl TuiView for TuiRunAgentsCardView {
         let body = TuiContainer::new(body)
             .with_background(builder.orchestration_surface_background())
             .with_padding_x(3)
-            .with_padding_top(1)
-            .with_padding_bottom(1)
+            .with_padding_y(1)
             .finish();
         TuiFlex::column()
             .child(header)
             .child(body)
-            .child(self.render_footer(&builder))
+            .child(
+                TuiContainer::new(self.render_footer(&builder))
+                    .with_padding_top(1)
+                    .finish(),
+            )
             .finish()
     }
 }

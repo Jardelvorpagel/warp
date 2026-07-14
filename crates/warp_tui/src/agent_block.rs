@@ -188,7 +188,7 @@ impl TuiToolCallView {
 }
 
 /// The front-of-queue blocking interaction owned by an agent block: the
-/// pending action awaiting a decision plus the child view that renders it.
+/// child view rendering the pending action that awaits a decision.
 pub(super) struct TuiBlockingChild {
     pub(super) view: ViewHandle<TuiRunAgentsCardView>,
 }

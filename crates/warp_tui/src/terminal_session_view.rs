@@ -2299,24 +2299,31 @@ impl TuiView for TuiTerminalSessionView {
             content = content.flex_child(TuiChildView::new(&self.transcript).finish());
         }
 
+        // While a `RunAgents` card (or another blocking interaction) is the
+        // active front-of-queue blocker, the input box, inline menus, normal
+        // footer, and the warping/summary row are omitted; the blocker
+        // renders its own action hints in their place. Visibility is derived
+        // fresh each pass — no stored suppression flag — and the hidden
+        // input model is never written to, so its draft/cursor/selection/
+        // scroll survive untouched.
+        let blocker_active = self.active_blocking_child(ctx).is_some();
+
         // While the selected conversation is in progress (the GUI warping
         // indicator's core condition), the animated warping indicator sits
         // between the transcript and the input box. Hide it while a process
-        // owns input: user takeover intentionally leaves the conversation in
-        // progress, so the indicator would otherwise appear stuck. Its elapsed
-        // counter is anchored to the latest exchange's start so animation
-        // survives element-tree rebuilds; the conversation's final status
-        // update re-renders the view without it.
-        let selected_conversation = (!inline_process_owns_input)
-            .then(|| {
-                self.conversation_selection
-                    .as_ref(ctx)
-                    .selected_conversation_id(ctx)
-                    .and_then(|conversation_id| {
-                        BlocklistAIHistoryModel::as_ref(ctx).conversation(&conversation_id)
-                    })
+        // owns input or a blocker is active: user takeover intentionally leaves
+        // the conversation in progress, and blockers render their own status
+        // and actions. Its elapsed counter is anchored to the latest exchange's
+        // start so animation survives element-tree rebuilds; the conversation's
+        // final status update re-renders the view without it.
+        let selected_conversation = self
+            .conversation_selection
+            .as_ref(ctx)
+            .selected_conversation_id(ctx)
+            .and_then(|conversation_id| {
+                BlocklistAIHistoryModel::as_ref(ctx).conversation(&conversation_id)
             })
-            .flatten();
+            .filter(|_| !blocker_active && !inline_process_owns_input);
         if let Some(conversation) = selected_conversation {
             if conversation.status().is_in_progress() {
                 let warping_elapsed = conversation
@@ -2357,14 +2364,6 @@ impl TuiView for TuiTerminalSessionView {
                 }
             }
         }
-        // While a `RunAgents` card (or another blocking interaction) is the
-        // active front-of-queue blocker, the input box, inline menus, and
-        // normal footer are omitted; the blocker renders its own action
-        // hints in their place. Visibility is derived fresh
-        // each pass — no stored suppression flag — and the hidden input
-        // model is never written to, so its draft/cursor/selection/scroll
-        // survive untouched.
-        let blocker_active = self.active_blocking_child(ctx).is_some();
         if !blocker_active && !inline_process_owns_input {
             if let Some(menu) = inline_menu {
                 content = content.child(

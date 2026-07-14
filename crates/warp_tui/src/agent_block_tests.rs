@@ -1622,11 +1622,10 @@ fn only_the_front_of_queue_action_blocks_and_handoff_is_direct() {
             model.queue_pending_action_for_test(conversation_id, first.clone(), ctx);
             model.queue_pending_action_for_test(conversation_id, second.clone(), ctx);
         });
-        let first_card = run_agents_card_view(&app, &block, &first.id);
-        let second_card = run_agents_card_view(&app, &block, &second.id);
 
         // Pending requests behind the front blocker do not affect input
         // visibility.
+        let first_card = run_agents_card_view(&app, &block, &first.id);
         let blocker = app.read(|ctx| block.as_ref(ctx).active_blocking_child(ctx));
         assert_eq!(blocker.expect("front blocker").view.id(), first_card.id());
 
@@ -1639,6 +1638,7 @@ fn only_the_front_of_queue_action_blocks_and_handoff_is_direct() {
                 &TuiRunAgentsCardAction::Reject,
             );
         });
+        let second_card = run_agents_card_view(&app, &block, &second.id);
         let blocker = app.read(|ctx| block.as_ref(ctx).active_blocking_child(ctx));
         assert_eq!(
             blocker.expect("handed-off blocker").view.id(),
