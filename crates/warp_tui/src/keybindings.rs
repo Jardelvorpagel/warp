@@ -29,7 +29,9 @@ use crate::editor_interaction::{editor_binding_specs, TuiEditorBindingTarget, Tu
 use crate::editor_view::{TuiEditorView, TuiEditorViewAction};
 use crate::input::view::TuiInputAction;
 use crate::input::TuiInputView;
+use crate::option_selector::TuiOptionSelector;
 use crate::root_view::RootTuiView;
+use crate::run_agents_card_view::TuiRunAgentsCardView;
 use crate::terminal_session_view::TuiTerminalSessionView;
 use crate::transcript_view::TuiTranscriptView;
 
@@ -78,6 +80,7 @@ pub(crate) fn init(app: &mut AppContext) {
         id!("TuiEditorView"),
         TuiEditorViewAction::Command,
     );
+    crate::run_agents_card_view::init(app);
 
     register_binding_validators(app);
 }
@@ -121,6 +124,8 @@ fn register_binding_validators(app: &mut AppContext) {
     app.register_tui_binding_validator::<TuiInputView>(is_tui_owned_binding);
     app.register_tui_binding_validator::<TuiEditorView>(is_tui_owned_binding);
     app.register_tui_binding_validator::<TuiTranscriptView>(is_tui_owned_binding);
+    app.register_tui_binding_validator::<TuiRunAgentsCardView>(is_tui_owned_binding);
+    app.register_tui_binding_validator::<TuiOptionSelector>(is_tui_owned_binding);
 }
 
 fn is_tui_owned_binding(binding: BindingLens) -> IsBindingValid {
