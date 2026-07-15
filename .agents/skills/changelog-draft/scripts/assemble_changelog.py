@@ -33,6 +33,7 @@ Constraints (read-only):
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -42,6 +43,7 @@ from datetime import datetime, timezone
 
 VALID_CHANNELS = frozenset({"stable", "preview", "dev"})
 VALID_ATTRIBUTION = frozenset({"external-only", "all", "none"})
+MAX_OZ_UPDATES = 4
 
 # Canonical category order for the changelog
 CATEGORY_ORDER = ["NEW-FEATURE", "IMPROVEMENT", "BUG-FIX", "OZ", "IMAGE"]
@@ -70,6 +72,18 @@ def format_pr_link(pr_number: int | None, url: str | None) -> str:
     if url and pr_number:
         return f" ([#{pr_number}]({url}))"
     return ""
+
+
+def polish_changelog_text(text: str) -> str:
+    """Apply narrow, deterministic release-copy corrections."""
+    text = text.replace(
+        "into de Windows App Paths Registry",
+        "to the Windows App Paths Registry",
+    )
+    text = re.sub(r"^Add\b", "Added", text)
+    text = re.sub(r"^Fix\b", "Fixed", text)
+    text = re.sub(r"^Clarify\b", "Clarified", text)
+    return text
 
 
 def attribution_suffix(
@@ -182,7 +196,7 @@ def assemble(
                     sys.exit(1)
                 for marker in explicit_entries:
                     category = marker.get("category", "")
-                    text = marker.get("text", "")
+                    text = polish_changelog_text(marker.get("text", ""))
                     if not category or category == "NONE":
                         continue
                     entries.append(
@@ -261,7 +275,7 @@ def assemble(
                         "pr_number": pr_number,
                         "url": url or None,
                         "category": c.get("category"),
-                        "text": c.get("text", ""),
+                        "text": polish_changelog_text(c.get("text", "")),
                         "source": "inferred",
                         "author": author,
                         "is_external": is_external,
@@ -372,11 +386,15 @@ def _build_markdown(
             by_category[cat].append(entry)
         # Unknown categories are silently ignored (shouldn't occur in practice)
 
-    # Emit each category section (skip IMAGE in markdown — it's JSON-only)
+    # Emit each category section (skip IMAGE in markdown — it's JSON-only).
+    # Keep the draft aligned with the in-app payload, which supports at most
+    # four Oz updates per release.
     for cat in CATEGORY_ORDER:
         if cat == "IMAGE":
             continue  # IMAGE entries are for JSON/release conversion only
         cat_entries = by_category.get(cat, [])
+        if cat == "OZ":
+            cat_entries = cat_entries[:MAX_OZ_UPDATES]
         if not cat_entries:
             continue
         heading = CATEGORY_HEADINGS.get(cat, cat)
@@ -550,13 +568,22 @@ def main() -> None:
         f.write("\n")
 
     # Summary to stderr/stdout for CI logs
-    n_entries = len(draft_dict.get("entries", []))
+    entries = draft_dict.get("entries", [])
+    n_entries = len(entries)
     n_skipped = len(draft_dict.get("skipped", []))
     n_review = len(draft_dict.get("needs_review", []))
-    total = n_entries + n_skipped + n_review
+    n_records = n_entries + n_skipped + n_review
+    unique_prs = {
+        item.get("pr_number")
+        for item in entries
+        + draft_dict.get("skipped", [])
+        + draft_dict.get("needs_review", [])
+        if item.get("pr_number") is not None
+    }
     print(
         f"assemble_changelog: {n_entries} entries, {n_skipped} skipped, "
-        f"{n_review} needs_review ({total} total PRs)"
+        f"{n_review} needs_review ({len(unique_prs)} unique PRs, "
+        f"{n_records} audit records)"
     )
     print(f"  wrote: {md_path}")
     print(f"  wrote: {json_path}")

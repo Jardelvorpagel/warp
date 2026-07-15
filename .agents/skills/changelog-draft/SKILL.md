@@ -186,6 +186,16 @@ The `agent_required` list contains PRs where the script determined that user-vis
 
 Save this to `agent_classifications.json`.
 
+Before saving classifications, edit every included entry as release copy:
+
+- Lead with the user-visible outcome, not implementation details. Replace internal terms such as protocol names, stream topology, framework types, or feature-flag mechanics with the behavior users will notice.
+- Use concise past tense: `Added`, `Improved`, `Fixed`, `Removed`, `Clarified`, or a direct outcome such as `Warp now ...`. Do not begin entries with imperative `Add`, `Fix`, or `Clarify`.
+- Correct obvious spelling, grammar, and preposition errors. For example, use “Added the installation path to the Windows App Paths Registry,” not “into de Windows App Paths Registry.”
+- Preserve literal product names, commands, settings labels, and platform names.
+- Do not include placeholders such as `{{...}}`, raw `CHANGELOG-*` prefixes, internal repository references, or private PR links.
+- Prefer one user-facing outcome per entry. When several PRs are implementation stages for one feature, select the completed outcome rather than listing every stage.
+- Rank `OZ` entries by user impact. Only the first four are published, so place the four most important Oz updates first.
+
 **Pass 2 — Validate and merge:**
 
 Re-run the script with the agent classifications to produce the final classifications. Mechanical excludes always win over agent answers — conflicts cause a non-zero exit.
@@ -204,7 +214,7 @@ Save the output as `classifications.json` for use in Step 7.
 
 ### Step 7+8 — Assemble the draft and write output files
 
-Run `assemble_changelog.py` to combine all intermediate artifacts into the two output files. The script enforces the accounting invariant (`entries + skipped + needs_review == total PRs`) and exits non-zero if any PR appears in multiple buckets or is missing.
+Run `assemble_changelog.py` to combine all intermediate artifacts into the two output files. The script enforces the accounting invariant using unique PR numbers and exits non-zero if any PR appears in multiple buckets or is missing. A PR with multiple explicit markers creates multiple audit entry records but still counts as one unique PR.
 
 ```bash
 python3 .agents/skills/changelog-draft/scripts/assemble_changelog.py \
@@ -220,7 +230,7 @@ python3 .agents/skills/changelog-draft/scripts/assemble_changelog.py \
 
 The script writes two files to `output_dir`:
 
-**`changelog-draft.md`** — Human-reviewable markdown ready for Slack/Notion. Contains only the changelog sections (New Features, Improvements, Bug Fixes, Oz Updates) and the Community attribution section. Does **not** include Needs Review or Skipped PR sections.
+**`changelog-draft.md`** — Human-reviewable markdown ready for Slack/Notion. Contains only the changelog sections (New Features, Improvements, Bug Fixes, Oz Updates) and the Community attribution section. Does **not** include Needs Review or Skipped PR sections. The Oz Updates section is capped at four entries, preserving the curated source order.
 
 **`changelog-draft.json`** — Machine-readable audit artifact retaining `entries`, `skipped`, `needs_review`, and `issue_reporters`. Every PR in the range appears in exactly one of these buckets.
 
@@ -234,7 +244,7 @@ python3 .agents/skills/changelog-draft/scripts/convert_to_release_json.py \
   --output <output_dir>/changelog-release.json
 ```
 
-This produces the flat JSON structure consumed by the `create_release` workflow for Slack and the in-app "What's New" dialog. Do **not** generate this file manually — always use the script so the output is deterministic and consistent.
+This produces the flat JSON structure consumed by the `create_release` workflow for Slack and the in-app "What's New" dialog. The converter deterministically caps `oz_updates` at four entries, preserving source order. Do **not** generate this file manually — always use the script so the output is deterministic and consistent.
 
 ## Constraints
 
@@ -247,7 +257,9 @@ This produces the flat JSON structure consumed by the `create_release` workflow 
 ## Validation
 
 After generating output, verify:
-1. Every PR in the range is accounted for (entries + skipped + needs_review = total PRs).
+1. Every unique PR number in the range is accounted for. Record counts may exceed unique PR counts when a PR has multiple explicit markers.
 2. Explicit marker entries match what `fetch_prs.py` extracted (no dropped markers).
 3. No duplicate PR numbers across sections.
-4. The markdown renders cleanly (no broken links or formatting).
+4. Markdown and release JSON contain at most four Oz updates in the same order.
+5. User-facing copy uses past tense, explains outcomes rather than implementation details, and contains no placeholders, raw marker prefixes, private links, or internal repository references.
+6. The markdown renders cleanly (no broken links or formatting).

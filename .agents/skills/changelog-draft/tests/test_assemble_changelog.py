@@ -152,6 +152,19 @@ class TestExplicitEntries(unittest.TestCase):
         self.assertEqual(len(draft["skipped"]), 0)
         self.assertEqual(len(draft["needs_review"]), 0)
 
+    def test_explicit_entry_copy_is_mechanically_polished(self):
+        """Mechanical grammar and tense errors are corrected in generated artifacts."""
+        pr = _make_pr(5, explicit_entries=[
+            {
+                "category": "IMPROVEMENT",
+                "text": "Add the installation path into de Windows App Paths Registry",
+            },
+        ])
+        draft, md = _assemble([pr], classifications=[])
+        expected = "Added the installation path to the Windows App Paths Registry"
+        self.assertEqual(draft["entries"][0]["text"], expected)
+        self.assertIn(expected, md)
+
     def test_changelog_none_goes_to_skipped(self):
         """CHANGELOG-NONE explicit opt-out goes to skipped, not entries."""
         pr = _make_pr(3, explicit_entries=[{"category": "NONE", "text": ""}])
@@ -236,6 +249,23 @@ class TestCategoryOrdering(unittest.TestCase):
         self.assertGreater(idx_im, idx_nf)
         self.assertGreater(idx_bf, idx_im)
         self.assertGreater(idx_oz, idx_bf)
+
+    def test_markdown_caps_oz_updates_at_four(self):
+        """Human-readable markdown includes at most four Oz updates."""
+        prs = [
+            _make_pr(
+                number,
+                explicit_entries=[{"category": "OZ", "text": f"Oz update {number}"}],
+            )
+            for number in range(100, 105)
+        ]
+        draft, md = _assemble(prs, classifications=[])
+        self.assertEqual(
+            len([entry for entry in draft["entries"] if entry["category"] == "OZ"]),
+            5,
+        )
+        self.assertIn("Oz update 103", md)
+        self.assertNotIn("Oz update 104", md)
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +499,21 @@ class TestConverterCompatibility(unittest.TestCase):
             self.assertIn("newFeatures", r)
             self.assertEqual(len(r["newFeatures"]), 1)
             self.assertIn("A feature", r["newFeatures"][0])
+
+    def test_converter_caps_oz_updates_at_four(self):
+        """Release JSON contains at most four Oz updates, preserving source order."""
+        prs = [
+            _make_pr(
+                number,
+                explicit_entries=[{"category": "OZ", "text": f"Oz update {number}"}],
+            )
+            for number in range(100, 105)
+        ]
+        draft, _ = _assemble(prs, classifications=[])
+        release = convert_to_release_json.convert(draft)
+        self.assertEqual(len(release["oz_updates"]), 4)
+        self.assertIn("Oz update 100", release["oz_updates"][0])
+        self.assertIn("Oz update 103", release["oz_updates"][3])
 
 
 # ---------------------------------------------------------------------------
