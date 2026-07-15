@@ -47,6 +47,7 @@ const ORCHESTRATION_BLOCK_TITLE: &str = "Can I start additional agents for this 
 const ACCEPTANCE_CONTEXT_FLAG: &str = "TuiOrchestrationBlockAcceptance";
 /// Keymap-context flag set while a configuration page is active.
 const CONFIGURING_CONTEXT_FLAG: &str = "TuiOrchestrationBlockConfiguring";
+
 /// Registers fixed card keybindings scoped to the active card mode.
 pub(crate) fn init(app: &mut AppContext) {
     let acceptance = || id!(TuiOrchestrationBlock::ui_name()) & id!(ACCEPTANCE_CONTEXT_FLAG);
@@ -97,9 +98,11 @@ enum CardMode {
     Acceptance,
     Configuring { page: ConfigPage },
 }
-/// Page direction requested by an arrow-key confirmation.
+
+/// Direction to navigate after the selector confirms the current page.
+/// Arrow actions retain this until the selector emits its confirmation event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PageNavigation {
+enum PageConfirmationNavigation {
     Previous,
     Next,
 }
@@ -130,31 +133,35 @@ pub(crate) enum TuiOrchestrationBlockAction {
 
 /// The TUI orchestration confirmation block. See the module docs.
 pub(crate) struct TuiOrchestrationBlock {
+    // Request and action identity.
     action_id: AIAgentActionId,
     /// The latest streamed tool call, kept in sync by
     /// [`Self::update_request`]; terminal/streaming states render from it
     /// through the shared fallback tool-call presentation.
     action: AIAgentAction,
-    orchestration_edit_state: OrchestrationEditState,
     /// Card fields carried through editing into the dispatched request.
     request_fields: RunAgentsRequest,
-    mode: CardMode,
-    selector: ViewHandle<TuiOptionSelector>,
-    /// Arrow direction to apply after the selector confirms its current
-    /// value. Enter leaves this unset and follows the normal forward flow.
-    confirmation_navigation: Option<PageNavigation>,
-    controller: Rc<dyn OrchestrationBlockController>,
     /// Approved/disapproved plan config used to resolve inherited fields.
     active_config: Option<(OrchestrationConfig, OrchestrationConfigStatus)>,
     /// The conversation's base model, used as the Oz model fallback.
     fallback_base_model_id: Option<String>,
     /// Whether the block was restored from history (non-interactive).
     is_restored: bool,
+
+    // Interactive card state.
+    orchestration_edit_state: OrchestrationEditState,
+    mode: CardMode,
+    selector: ViewHandle<TuiOptionSelector>,
+    /// Arrow direction awaiting the selector's confirmation event.
+    pending_page_navigation: Option<PageConfirmationNavigation>,
+    /// Validation reason shown inline after a blocked Accept.
+    accept_error: Option<String>,
+
+    // Execution state.
+    controller: Rc<dyn OrchestrationBlockController>,
     spawning: Option<RunAgentsSpawningSnapshot>,
     /// Set once the request is accepted or rejected.
     decided: bool,
-    /// Validation reason shown inline after a blocked Accept.
-    accept_error: Option<String>,
     /// Identity palette pinned at construction so identities stay stable
     /// across re-renders, edits, and theme switches.
     identity_palette: Vec<AgentIdentity>,
@@ -289,46 +296,26 @@ impl TuiOrchestrationBlock {
         ctx.subscribe_to_view(&selector, |me, _, event, ctx| {
             me.handle_selector_event(event, ctx);
         });
+        let orchestration_edit_state = OrchestrationEditState::new(
+            Self::config_state_from_request(request, active_config.as_ref()),
+        );
         Self {
             action_id: action.id.clone(),
             action,
-            orchestration_edit_state: OrchestrationEditState::new(Self::config_state_from_request(
-                request,
-                active_config.as_ref(),
-            )),
             request_fields: request.clone(),
-            mode: CardMode::Acceptance,
-            selector,
-            confirmation_navigation: None,
-            controller,
             active_config,
             fallback_base_model_id,
             is_restored,
+            orchestration_edit_state,
+            mode: CardMode::Acceptance,
+            selector,
+            pending_page_navigation: None,
+            accept_error: None,
+            controller,
             spawning: None,
             decided: false,
-            accept_error: None,
             identity_palette,
         }
-    }
-
-    /// Constructs an interactive block around a test controller.
-    #[cfg(test)]
-    fn new_for_test(
-        action: AIAgentAction,
-        request: &RunAgentsRequest,
-        controller: Rc<dyn OrchestrationBlockController>,
-        ctx: &mut ViewContext<Self>,
-    ) -> Self {
-        Self::from_parts(
-            action,
-            request,
-            None,
-            controller,
-            Some("auto".to_string()),
-            false,
-            Vec::new(),
-            ctx,
-        )
     }
 
     /// Seeds the run-wide edit state from the streamed request, resolving
@@ -427,7 +414,7 @@ impl TuiOrchestrationBlock {
     /// Whether this card is the active blocking interaction: interactive in
     /// Acceptance/Configuring while the action awaits confirmation, and
     /// false once accepted, rejected, spawning, finished, or restored.
-    pub(crate) fn wants_focus(&self, ctx: &AppContext) -> bool {
+    pub(super) fn is_active_blocker(&self, ctx: &AppContext) -> bool {
         if self.decided || self.spawning.is_some() || self.is_restored {
             return false;
         }
@@ -485,10 +472,11 @@ impl TuiOrchestrationBlock {
         ctx.emit(TuiOrchestrationBlockEvent::BlockingStateChanged);
         ctx.notify();
     }
+
     /// Returns from configuration to the interactive acceptance card.
     fn return_to_acceptance(&mut self, ctx: &mut ViewContext<Self>) {
         self.mode = CardMode::Acceptance;
-        self.confirmation_navigation = None;
+        self.pending_page_navigation = None;
         ctx.focus_self();
         ctx.emit(TuiOrchestrationBlockEvent::BlockingStateChanged);
         ctx.notify();
@@ -550,7 +538,7 @@ impl TuiOrchestrationBlock {
     /// Completes a page confirmation using an arrow's requested direction,
     /// or the normal Enter behavior when no arrow direction is pending.
     fn finish_page_confirmation(&mut self, page: ConfigPage, ctx: &mut ViewContext<Self>) {
-        match self.confirmation_navigation.take() {
+        match self.pending_page_navigation.take() {
             Some(navigation) => self.navigate_after_confirmation(page, navigation, ctx),
             None => self.advance_after(page, ctx),
         }
@@ -577,7 +565,7 @@ impl TuiOrchestrationBlock {
     fn navigate_after_confirmation(
         &mut self,
         page: ConfigPage,
-        navigation: PageNavigation,
+        navigation: PageConfirmationNavigation,
         ctx: &mut ViewContext<Self>,
     ) {
         let sequence =
@@ -587,11 +575,11 @@ impl TuiOrchestrationBlock {
             return;
         };
         let target = match navigation {
-            PageNavigation::Previous => index
+            PageConfirmationNavigation::Previous => index
                 .checked_sub(1)
                 .and_then(|index| sequence.get(index))
                 .copied(),
-            PageNavigation::Next => sequence.get(index + 1).copied(),
+            PageConfirmationNavigation::Next => sequence.get(index + 1).copied(),
         }
         .unwrap_or(page);
         self.open_page(target, ctx);
@@ -641,12 +629,12 @@ impl TuiOrchestrationBlock {
                 }
             }
             TuiOptionSelectorEvent::RetryRequested => {
-                self.confirmation_navigation = None;
+                self.pending_page_navigation = None;
                 self.ensure_auth_secrets_fetched(ctx);
                 self.refresh_active_page(ctx);
             }
             TuiOptionSelectorEvent::Dismissed => {
-                self.confirmation_navigation = None;
+                self.pending_page_navigation = None;
                 self.handle_back(ctx);
             }
             TuiOptionSelectorEvent::LayoutInvalidated => {
@@ -668,10 +656,14 @@ impl TuiOrchestrationBlock {
     /// accept renders the reason inline and stays active, a valid one
     /// dispatches the edited request through `execute_run_agents`.
     fn handle_accept(&mut self, ctx: &mut ViewContext<Self>) {
-        if self.decided || self.spawning.is_some() || !self.wants_focus(ctx) {
+        if self.decided || self.spawning.is_some() || !self.is_active_blocker(ctx) {
             return;
         }
-        if let Some(reason) = self.controller.accept_disabled_reason(
+        let request = self.to_request();
+        let action_id = self.action_id.clone();
+        if let Err(reason) = self.controller.accept(
+            &action_id,
+            request,
             &self.orchestration_edit_state.orchestration_config_state,
             ctx,
         ) {
@@ -682,9 +674,6 @@ impl TuiOrchestrationBlock {
         self.decided = true;
         self.accept_error = None;
         self.mode = CardMode::Acceptance;
-        let request = self.to_request();
-        let action_id = self.action_id.clone();
-        self.controller.execute(&action_id, request, ctx);
         ctx.emit(TuiOrchestrationBlockEvent::BlockingStateChanged);
         ctx.notify();
     }
@@ -692,7 +681,7 @@ impl TuiOrchestrationBlock {
     /// Reject: resolves the request as rejected exactly once,
     /// from the acceptance card or any configuration page.
     fn handle_reject(&mut self, ctx: &mut ViewContext<Self>) {
-        if self.decided || self.spawning.is_some() || !self.wants_focus(ctx) {
+        if self.decided || self.spawning.is_some() || !self.is_active_blocker(ctx) {
             return;
         }
         self.decided = true;
@@ -704,7 +693,7 @@ impl TuiOrchestrationBlock {
 
     /// Opens configuration on the first page.
     fn handle_configure(&mut self, ctx: &mut ViewContext<Self>) {
-        if !self.wants_focus(ctx) {
+        if !self.is_active_blocker(ctx) {
             return;
         }
         let first = Self::page_sequence(&self.orchestration_edit_state.orchestration_config_state)
@@ -719,7 +708,7 @@ impl TuiOrchestrationBlock {
     /// selections; the current page's unconfirmed selection is discarded.
     /// Active custom-text editing unwinds first.
     fn handle_back(&mut self, ctx: &mut ViewContext<Self>) {
-        self.confirmation_navigation = None;
+        self.pending_page_navigation = None;
         let consumed = self
             .selector
             .update(ctx, |selector, ctx| selector.handle_back(ctx));
@@ -732,10 +721,18 @@ impl TuiOrchestrationBlock {
     }
 
     /// Confirms the selection, then applies the requested arrow navigation.
-    fn handle_arrow_navigation(&mut self, navigation: PageNavigation, ctx: &mut ViewContext<Self>) {
-        self.confirmation_navigation = Some(navigation);
-        self.selector
+    fn handle_arrow_navigation(
+        &mut self,
+        navigation: PageConfirmationNavigation,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.pending_page_navigation = Some(navigation);
+        let confirmation_started = self
+            .selector
             .update(ctx, |selector, ctx| selector.confirm_selected(ctx));
+        if !confirmation_started {
+            self.pending_page_navigation = None;
+        }
     }
 }
 
@@ -775,10 +772,10 @@ impl TypedActionView for TuiOrchestrationBlock {
             TuiOrchestrationBlockAction::Accept => self.handle_accept(ctx),
             TuiOrchestrationBlockAction::Configure => self.handle_configure(ctx),
             TuiOrchestrationBlockAction::CommitAndPreviousPage => {
-                self.handle_arrow_navigation(PageNavigation::Previous, ctx)
+                self.handle_arrow_navigation(PageConfirmationNavigation::Previous, ctx)
             }
             TuiOrchestrationBlockAction::CommitAndNextPage => {
-                self.handle_arrow_navigation(PageNavigation::Next, ctx)
+                self.handle_arrow_navigation(PageConfirmationNavigation::Next, ctx)
             }
             TuiOrchestrationBlockAction::NextPage => self.navigate_page(true, ctx),
             TuiOrchestrationBlockAction::Back => self.handle_back(ctx),

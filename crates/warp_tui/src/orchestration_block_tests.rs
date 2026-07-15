@@ -267,21 +267,15 @@ impl OrchestrationBlockController for TestController {
         }
     }
 
-    fn accept_disabled_reason(
-        &self,
-        _state: &OrchestrationConfigState,
-        _ctx: &warpui::AppContext,
-    ) -> Option<String> {
-        None
-    }
-
-    fn execute(
+    fn accept(
         &self,
         _action_id: &AIAgentActionId,
         request: RunAgentsRequest,
+        _state: &OrchestrationConfigState,
         _ctx: &mut warpui::AppContext,
-    ) {
+    ) -> Result<(), String> {
         self.executed_requests.borrow_mut().push(request);
+        Ok(())
     }
 }
 
@@ -320,7 +314,16 @@ fn test_block(
             |_| TestHostView,
         );
         ctx.add_typed_action_tui_view(window_id, move |ctx| {
-            TuiOrchestrationBlock::new_for_test(action, &request, controller_for_view, ctx)
+            TuiOrchestrationBlock::from_parts(
+                action,
+                &request,
+                None,
+                controller_for_view,
+                Some("auto".to_string()),
+                false,
+                Vec::new(),
+                ctx,
+            )
         })
     });
     (view, controller)
@@ -414,6 +417,53 @@ fn selector_actions_commit_edits_and_follow_the_dynamic_page_sequence() {
 }
 
 #[test]
+fn failed_arrow_confirmation_does_not_change_later_enter_navigation() {
+    App::test((), |mut app| async move {
+        let (block, _) = test_block(&mut app, &request("oz", RunAgentsExecutionMode::Local));
+        act(&mut app, &block, TuiOrchestrationBlockAction::Configure);
+        let selector = app.read(|ctx| block.as_ref(ctx).selector.clone());
+
+        let mut disabled_local = row("local", "Local");
+        disabled_local.disabled_reason = Some("Unavailable".to_string());
+        selector.update(&mut app, |selector, ctx| {
+            selector.refresh_snapshot(
+                OptionSnapshot {
+                    rows: vec![disabled_local],
+                    selected_id: Some("local".to_string()),
+                    status: OptionSourceStatus::Ready,
+                    footer: None,
+                },
+                ctx,
+            );
+        });
+        act(
+            &mut app,
+            &block,
+            TuiOrchestrationBlockAction::CommitAndPreviousPage,
+        );
+
+        selector.update(&mut app, |selector, ctx| {
+            selector.refresh_snapshot(
+                OptionSnapshot {
+                    rows: vec![row("local", "Local")],
+                    selected_id: Some("local".to_string()),
+                    status: OptionSourceStatus::Ready,
+                    footer: None,
+                },
+                ctx,
+            );
+            selector.handle_action(&TuiOptionSelectorAction::ConfirmSelected, ctx);
+        });
+
+        assert_eq!(
+            block.read(&app, |block, _| block.mode),
+            CardMode::Configuring {
+                page: ConfigPage::Model
+            }
+        );
+    });
+}
+#[test]
 fn confirming_a_search_result_returns_focus_to_the_acceptance_card() {
     App::test((), |mut app| async move {
         let (block, _) = test_block(&mut app, &request("oz", RunAgentsExecutionMode::Local));
@@ -443,13 +493,13 @@ fn accepting_dispatches_once_and_releases_focus() {
     App::test((), |mut app| async move {
         let request = request("oz", RunAgentsExecutionMode::Local);
         let (block, controller) = test_block(&mut app, &request);
-        assert!(app.read(|ctx| block.as_ref(ctx).wants_focus(ctx)));
+        assert!(app.read(|ctx| block.as_ref(ctx).is_active_blocker(ctx)));
 
         act(&mut app, &block, TuiOrchestrationBlockAction::Accept);
         act(&mut app, &block, TuiOrchestrationBlockAction::Accept);
         act(&mut app, &block, TuiOrchestrationBlockAction::Reject);
 
         assert_eq!(controller.executed_requests.borrow().as_slice(), &[request]);
-        assert!(app.read(|ctx| !block.as_ref(ctx).wants_focus(ctx)));
+        assert!(app.read(|ctx| !block.as_ref(ctx).is_active_blocker(ctx)));
     });
 }

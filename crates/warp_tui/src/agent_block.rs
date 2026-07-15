@@ -501,7 +501,7 @@ impl TuiAIBlock {
     /// The front-of-queue blocking interaction owned by this block, if any:
     /// the conversation's front pending action when it is `Blocked`, rendered
     /// by one of this block's child views, and that view reports
-    /// `wants_focus`. Deriving from the action queue (not transcript order)
+    /// `is_active_blocker`. Deriving from the action queue (not transcript order)
     /// keeps semantics identical to the GUI's `focus_subview_if_necessary`.
     pub(super) fn active_blocking_child(&self, ctx: &AppContext) -> Option<TuiBlockingChild> {
         let action_model = self.action_model.as_ref(ctx);
@@ -519,7 +519,7 @@ impl TuiAIBlock {
         match self.action_views.get(&action_id)? {
             TuiToolCallView::OrchestrationBlock(view) => view
                 .as_ref(ctx)
-                .wants_focus(ctx)
+                .is_active_blocker(ctx)
                 .then(|| TuiBlockingChild { view: view.clone() }),
             // These tool views render inline and never replace the input.
             TuiToolCallView::FileEdits(_)

@@ -75,10 +75,10 @@ The Warp TUI gains an interactive permission card for an active `RunAgents` requ
 
 ### General option selection
 29. Every configuration page uses the same option-selection behavior and presentation.
-30. Up and Down move the highlight through options without confirming a value. Four rows are visible at once; navigation scrolls when the highlight moves beyond that viewport and shows `↑` / `↓` overflow markers.
+30. Up and Down move the highlight through options without confirming a value. Six rows are visible at once; navigation scrolls when the highlight moves beyond that viewport and shows `↑` / `↓` overflow markers.
 31. Enter confirms the highlighted option.
 32. Number keys 1–9 confirm the corresponding visible option, when present, and advance immediately. The shortcuts are viewport-relative so they remain useful in long, scrolled lists.
-33. Options beyond the four-row viewport remain reachable with scrolling, Up and Down, and Enter.
+33. Options beyond the six-row viewport remain reachable with scrolling, Up and Down, and Enter.
 34. Clicking an enabled option confirms it and advances exactly like Enter.
 35. Mouse-wheel and trackpad input scroll lists that exceed the available height.
 36. Rows render with `(n)` number prefixes. The selected row is bold magenta without a separate marker or background. Disabled rows can be highlighted for context but cannot be confirmed; they show a concise reason when available.
