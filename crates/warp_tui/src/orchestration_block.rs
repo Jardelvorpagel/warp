@@ -73,18 +73,6 @@ pub(crate) fn init(app: &mut AppContext) {
             acceptance(),
         )
         .with_group(TUI_BINDING_GROUP),
-        FixedBinding::new(
-            "enter",
-            TuiOrchestrationBlockAction::ConfirmSelection,
-            configuring(),
-        )
-        .with_group(TUI_BINDING_GROUP),
-        FixedBinding::new(
-            "numpadenter",
-            TuiOrchestrationBlockAction::ConfirmSelection,
-            configuring(),
-        )
-        .with_group(TUI_BINDING_GROUP),
         FixedBinding::new("escape", TuiOrchestrationBlockAction::Back, configuring())
             .with_group(TUI_BINDING_GROUP),
         FixedBinding::new(
@@ -322,7 +310,6 @@ pub(crate) enum TuiOrchestrationBlockEvent {
 pub(crate) enum TuiOrchestrationBlockAction {
     Accept,
     Configure,
-    ConfirmSelection,
     CommitAndPreviousPage,
     CommitAndNextPage,
     NextPage,
@@ -934,13 +921,6 @@ impl TuiOrchestrationBlock {
         }
     }
 
-    /// Confirms the selector's selected option (Enter).
-    fn handle_confirm_selection(&mut self, ctx: &mut ViewContext<Self>) {
-        self.confirmation_navigation = None;
-        self.selector.update(ctx, |selector, ctx| {
-            selector.confirm_selected(ctx);
-        });
-    }
     /// Confirms the selector's selected option, then navigates in the arrow's
     /// direction once the selector emits its confirmation event.
     fn handle_arrow_navigation(&mut self, navigation: PageNavigation, ctx: &mut ViewContext<Self>) {
@@ -1247,7 +1227,6 @@ impl TypedActionView for TuiOrchestrationBlock {
         match action {
             TuiOrchestrationBlockAction::Accept => self.handle_accept(ctx),
             TuiOrchestrationBlockAction::Configure => self.handle_configure(ctx),
-            TuiOrchestrationBlockAction::ConfirmSelection => self.handle_confirm_selection(ctx),
             TuiOrchestrationBlockAction::CommitAndPreviousPage => {
                 self.handle_arrow_navigation(PageNavigation::Previous, ctx)
             }
