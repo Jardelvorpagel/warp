@@ -16162,6 +16162,8 @@ dependencies = [
  "tokio",
  "tracing",
  "trait-set",
+ "unicode-segmentation",
+ "unicode-width 0.1.14",
  "vec1",
  "warp_errors",
  "warp_util",
