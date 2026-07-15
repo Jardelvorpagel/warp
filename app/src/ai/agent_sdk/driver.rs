@@ -894,13 +894,21 @@ impl AgentDriver {
                     use std::sync::atomic::{AtomicBool, Ordering};
                     use warpui::r#async::Timer;
 
+                    // signal_hook::flag::register atomically sets `sigterm_flag` when
+                    // SIGTERM is delivered, replacing the default terminate disposition.
+                    // We capture the SigId so we can unregister after the run finishes,
+                    // which restores the previous disposition and prevents a subsequent
+                    // SIGTERM (e.g. during idle or cleanup) from being silently swallowed.
                     let sigterm_flag = std::sync::Arc::new(AtomicBool::new(false));
                     match signal_hook::flag::register(
                         signal_hook::consts::SIGTERM,
                         std::sync::Arc::clone(&sigterm_flag),
                     ) {
-                        Ok(_) => {
+                        Ok(sig_id) => {
                             let flag = std::sync::Arc::clone(&sigterm_flag);
+                            // Poll the flag every 100ms — an async sleep, so this costs
+                            // no CPU. The 100ms detection latency is negligible given the
+                            // 5-minute warning window before the hard SIGKILL fires.
                             let sigterm_future = async move {
                                 loop {
                                     if flag.load(Ordering::Acquire) {
@@ -909,13 +917,19 @@ impl AgentDriver {
                                     Timer::after(Duration::from_millis(100)).await;
                                 }
                             };
-                            futures::select! {
+                            let result = futures::select! {
                                 r = Self::run_internal(task, foreground.clone()).fuse() => r,
                                 _ = sigterm_future.fuse() => {
                                     log::info!("SIGTERM received: aborting run_internal to allow recording finalization");
                                     Ok(())
                                 }
-                            }
+                            };
+                            // Restore the default SIGTERM disposition (terminate) now that
+                            // run_internal has finished. Without this, a SIGTERM during the
+                            // subsequent cleanup/idle window would set the stale flag instead
+                            // of causing the process to exit.
+                            signal_hook::low_level::unregister(sig_id);
+                            result
                         }
                         Err(e) => {
                             log::warn!("Failed to register SIGTERM handler: {e}; VM timeout will not trigger recording finalization");
