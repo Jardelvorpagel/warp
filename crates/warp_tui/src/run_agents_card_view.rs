@@ -462,7 +462,7 @@ impl TuiRunAgentsCardView {
         }
     }
 
-    /// Opens `page`: swaps the selector to its snapshot and header, and
+    /// Opens `page`: swaps the selector to its page fields, and
     /// lazily fetches auth secrets for the API-key page (the same lazy fetch
     /// the GUI triggers on picker population).
     fn open_page(&mut self, page: ConfigPage, ctx: &mut ViewContext<Self>) {
@@ -474,12 +474,11 @@ impl TuiRunAgentsCardView {
         let sequence =
             Self::page_sequence(&self.orchestration_edit_state.orchestration_config_state);
         let position = sequence.iter().position(|p| *p == page).unwrap_or(0) + 1;
-        let snapshot = self.snapshot_for_page(page, ctx);
         let selector_page = OptionSelectorPage {
             field_label: "Edit agent configuration".to_string(),
             position: (position, sequence.len()),
             prompt: page.question(self.request_fields.agent_run_configs.len()),
-            snapshot,
+            snapshot: self.snapshot_for_page(page, ctx),
             searchable: page.is_searchable(),
         };
         self.selector.update(ctx, |selector, ctx| {
@@ -596,7 +595,7 @@ impl TuiRunAgentsCardView {
         }
     }
 
-    /// Moves to an adjacent page without applying the current highlight.
+    /// Moves to an adjacent page without applying the current selection.
     fn navigate_page(&mut self, forward: bool, ctx: &mut ViewContext<Self>) {
         let CardMode::Configuring { page } = self.mode else {
             return;
@@ -713,7 +712,7 @@ impl TuiRunAgentsCardView {
     }
 
     /// Escape from configuration: completed pages keep their confirmed
-    /// selections; the current page's unconfirmed highlight is discarded.
+    /// selections; the current page's unconfirmed selection is discarded.
     /// Active custom-text editing unwinds first.
     fn handle_back(&mut self, ctx: &mut ViewContext<Self>) {
         let consumed = self
@@ -729,7 +728,7 @@ impl TuiRunAgentsCardView {
         }
     }
 
-    /// Confirms the selector's highlighted option (Enter).
+    /// Confirms the selector's selected option (Enter).
     fn handle_confirm_selection(&mut self, ctx: &mut ViewContext<Self>) {
         self.selector.update(ctx, |selector, ctx| {
             selector.confirm_selected(ctx);
