@@ -881,6 +881,49 @@ impl AgentDriver {
                         report_error!(e);
                     }
                 }
+                // On Unix, race run_internal against SIGTERM. When the Docker Sandbox poller
+                // detects the sandbox deadline is approaching, it sends SIGTERM to the agent
+                // process via sandbox.Processes.Terminate. The SIGTERM arm returns Ok(()) so
+                // all post-run cleanup below (including recording finalization with
+                // should_upload=true) runs normally, just as it does on a natural exit.
+                //
+                // Namespace runs on Kubernetes, which sends SIGTERM before SIGKILL via
+                // terminationGracePeriodSeconds, so the same handler covers that path too.
+                #[cfg(unix)]
+                let result = {
+                    use std::sync::atomic::{AtomicBool, Ordering};
+                    use warpui::r#async::Timer;
+
+                    let sigterm_flag = std::sync::Arc::new(AtomicBool::new(false));
+                    match signal_hook::flag::register(
+                        signal_hook::consts::SIGTERM,
+                        std::sync::Arc::clone(&sigterm_flag),
+                    ) {
+                        Ok(_) => {
+                            let flag = std::sync::Arc::clone(&sigterm_flag);
+                            let sigterm_future = async move {
+                                loop {
+                                    if flag.load(Ordering::Acquire) {
+                                        break;
+                                    }
+                                    Timer::after(Duration::from_millis(100)).await;
+                                }
+                            };
+                            futures::select! {
+                                r = Self::run_internal(task, foreground.clone()).fuse() => r,
+                                _ = sigterm_future.fuse() => {
+                                    log::info!("SIGTERM received: aborting run_internal to allow recording finalization");
+                                    Ok(())
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to register SIGTERM handler: {e}; VM timeout will not trigger recording finalization");
+                            Self::run_internal(task, foreground.clone()).await
+                        }
+                    }
+                };
+                #[cfg(not(unix))]
                 let result = Self::run_internal(task, foreground.clone()).await;
 
                 // Stop accepting CLI session status updates now that the run
