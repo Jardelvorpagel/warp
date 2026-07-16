@@ -301,6 +301,9 @@ pub struct RecordingConfig {
     /// value of 0.0 or 1.0 means real-time (no speedup). Applied via an ffmpeg
     /// presentation-timestamp rescale filter on the output video.
     pub playback_speed_multiplier: f32,
+    /// The surface to capture. `Screen` records the whole X display (legacy behavior);
+    /// `Window` records the targeted window after making it foreground-visible when supported.
+    pub target: Target,
 }
 
 impl Default for RecordingConfig {
@@ -315,6 +318,7 @@ impl Default for RecordingConfig {
             // recording plays in 1 minute. The server can override via the StartRecording
             // tool call's playback_speed_multiplier field.
             playback_speed_multiplier: 4.0,
+            target: Target::Screen,
         }
     }
 }

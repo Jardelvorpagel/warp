@@ -122,6 +122,7 @@ fn start_recording_tool_call() -> api::message::tool_call::Tool {
         limits: None,
         summary: String::new(),
         playback_speed_multiplier: 0,
+        target: None,
     })
 }
 

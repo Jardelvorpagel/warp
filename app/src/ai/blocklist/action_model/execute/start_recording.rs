@@ -46,6 +46,7 @@ impl StartRecordingExecutor {
             max_duration,
             max_size_bytes,
             playback_speed_multiplier,
+            window,
             ..
         } = &action.action
         else {
@@ -55,6 +56,13 @@ impl StartRecordingExecutor {
         let max_duration = *max_duration;
         let max_size_bytes = *max_size_bytes;
         let playback_speed_multiplier = *playback_speed_multiplier;
+        // Only honor a window target when background computer use is enabled; otherwise fall back
+        // to whole-screen capture, keeping behavior byte-identical to the pre-existing path.
+        let target = if FeatureFlag::BackgroundComputerUse.is_enabled() {
+            window.unwrap_or(computer_use::Target::Screen)
+        } else {
+            computer_use::Target::Screen
+        };
 
         // Reserve the single runtime slot up front so a concurrent start can't
         // race past the guard while ffmpeg is spinning up.
@@ -89,6 +97,7 @@ impl StartRecordingExecutor {
                     max_duration: max_duration.unwrap_or(defaults.max_duration),
                     max_size_bytes: max_size_bytes.unwrap_or(defaults.max_size_bytes),
                     playback_speed_multiplier,
+                    target,
                 };
                 recorder.start(config).await
             },
