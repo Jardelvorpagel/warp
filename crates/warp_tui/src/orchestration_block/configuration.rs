@@ -138,13 +138,15 @@ impl OrchestrationBlockController for ModelOrchestrationBlockController {
     ) {
         match page {
             ConfigPage::Location => {
+                let is_remote = id == LOCATION_CLOUD_ID;
+                if !is_remote {
+                    // For now, we only allow local runs to use the oz harness
+                    edit_state.apply_harness_change("oz", fallback_base_model_id.clone(), ctx);
+                }
+
                 edit_state
                     .orchestration_config_state
-                    .apply_execution_mode_change(
-                        id == LOCATION_CLOUD_ID,
-                        fallback_base_model_id,
-                        ctx,
-                    );
+                    .apply_execution_mode_change(is_remote, fallback_base_model_id, ctx);
             }
             ConfigPage::Harness => {
                 edit_state.apply_harness_change(id, fallback_base_model_id, ctx);
