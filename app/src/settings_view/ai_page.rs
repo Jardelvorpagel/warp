@@ -7168,7 +7168,7 @@ impl VoiceWidget {
             column.add_child(render_dropdown_item(
                 appearance,
                 "Speech Language",
-                Some("Language used when transcribing voice input. Auto-detect if unsure."),
+                Some("Language used when transcribing voice input."),
                 None,
                 LocalOnlyIconState::for_setting(
                     VoiceInputLanguage::storage_key(),
