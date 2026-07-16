@@ -29,6 +29,7 @@ mod input_suggestions_mode;
 mod keybindings;
 mod mcp_menu;
 mod model_menu;
+mod prompt_history_menu;
 mod resume;
 mod skills_menu;
 mod slash_commands;

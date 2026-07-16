@@ -47,6 +47,7 @@ use crate::inline_menu::{active_inline_menu, TuiInlineMenu, TuiInlineMenuAccepte
 use crate::input_mode_policy::{self, AI_LOCKED_CONFIG, SHELL_LOCKED_CONFIG};
 use crate::input_suggestions_mode::{TuiInputSuggestionsMode, TuiInputSuggestionsModeModel};
 use crate::keybindings::TUI_BINDING_GROUP;
+use crate::prompt_history_menu::TuiPromptHistoryMenuModel;
 use crate::tui_builder::TuiUiBuilder;
 
 /// Keymap-context flag set while the input has contextual Escape behavior.
@@ -476,6 +477,9 @@ pub enum TuiInputViewEvent {
     AcceptedModel(LLMId),
     /// The user selected an action from the MCP menu.
     AcceptedMcp(TuiMcpAction),
+    /// The user accepted a prompt from the up-arrow prompt-history menu. Carries
+    /// the prompt text to fill into the input and submit.
+    AcceptedPromptHistory(String),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -581,6 +585,11 @@ pub struct TuiInputView {
     suggestions_mode: ModelHandle<TuiInputSuggestionsModeModel>,
     /// Generalized inline menus used to route prioritized menu actions.
     inline_menus: Vec<TuiInlineMenu>,
+    /// The up-arrow prompt-history menu, opened from this view when Up is
+    /// pressed with the caret on the first visual row. Held as a concrete handle
+    /// (in addition to being one of `inline_menus`) because opening is view-
+    /// initiated and not part of the type-erased menu-routing interface.
+    prompt_history_menu: ModelHandle<TuiPromptHistoryMenuModel>,
     /// Single-entry kill buffer for `Ctrl+K` / `Ctrl+U` / `Ctrl+Y`.
     kill_buffer: KillBuffer,
     /// Maximum number of visible rows before the input scrolls.
@@ -617,6 +626,7 @@ impl TuiInputView {
         input_mode: ModelHandle<BlocklistAIInputModel>,
         suggestions_mode: ModelHandle<TuiInputSuggestionsModeModel>,
         inline_menus: Vec<TuiInlineMenu>,
+        prompt_history_menu: ModelHandle<TuiPromptHistoryMenuModel>,
         ctx: &mut ViewContext<Self>,
     ) -> Self {
         ctx.subscribe_to_model(&model, |_, _, event, ctx| {
@@ -633,6 +643,7 @@ impl TuiInputView {
             input_mode,
             suggestions_mode,
             inline_menus,
+            prompt_history_menu,
             kill_buffer: KillBuffer::default(),
             max_visible_rows: 6,
             prefix_mouse_state: MouseStateHandle::default(),
@@ -885,7 +896,16 @@ impl TypedActionView for TuiInputView {
                 self.model.update(ctx, |m, ctx| m.move_right(ctx));
             }
             TuiInputAction::MoveUp => {
-                self.model.update(ctx, |m, ctx| m.move_up(ctx));
+                // With the caret on the first visual row (and not in shell
+                // mode), Up opens the prompt-history menu instead of moving the
+                // cursor. An already-open menu is handled earlier by
+                // `handle_inline_menu_action`, so no menu is active here.
+                if !self.is_shell_mode(ctx) && self.single_cursor_on_first_row(ctx) {
+                    self.prompt_history_menu
+                        .update(ctx, |menu, ctx| menu.open(ctx));
+                } else {
+                    self.model.update(ctx, |m, ctx| m.move_up(ctx));
+                }
             }
             TuiInputAction::MoveDown => {
                 self.model.update(ctx, |m, ctx| m.move_down(ctx));
@@ -1086,6 +1106,27 @@ impl TuiInputView {
         self.cursor_offset(ctx).as_usize() <= 1 && self.selection_range(ctx).is_none()
     }
 
+    /// Whether the single caret sits on the first visual row of the input with
+    /// no active selection — the position where Up opens the prompt-history
+    /// menu. Accounts for soft-wrapping via the char-cell display lattice,
+    /// mirroring the GUI editor view's `single_cursor_on_first_row`.
+    fn single_cursor_on_first_row(&self, ctx: &AppContext) -> bool {
+        if self.selection_range(ctx).is_some() {
+            return false;
+        }
+        let model = self.model.as_ref(ctx);
+        let render = model.render_state().as_ref(ctx);
+        let Some(char_cell) = render.char_cell() else {
+            return false;
+        };
+        let cursor_offset = CharOffset::from(self.cursor_offset(ctx).as_usize().saturating_sub(1));
+        let hidden = char_cell.hidden_line_ranges(ctx);
+        char_cell
+            .display_lattice(&hidden)
+            .offset_to_display_point(cursor_offset)
+            .is_some_and(|point| point.row == 0)
+    }
+
     // ── Scroll ─────────────────────────────────────────────────────────────
     //
     // The scroll offset and its clamping/follow policy live on the char-cell
@@ -1206,6 +1247,9 @@ impl TuiInputView {
                         }
                         TuiInlineMenuAccepted::Mcp(action) => {
                             ctx.emit(TuiInputViewEvent::AcceptedMcp(action));
+                        }
+                        TuiInlineMenuAccepted::PromptHistory(text) => {
+                            ctx.emit(TuiInputViewEvent::AcceptedPromptHistory(text));
                         }
                     }
                 }
