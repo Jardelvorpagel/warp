@@ -881,64 +881,58 @@ impl AgentDriver {
                         report_error!(e);
                     }
                 }
-                // On Unix, race run_internal against SIGTERM. When the Docker Sandbox poller
-                // detects the sandbox deadline is approaching, it sends SIGTERM to the agent
-                // process via sandbox.Processes.Terminate. The SIGTERM arm returns Ok(()) so
-                // all post-run cleanup below (including recording finalization with
-                // should_upload=true) runs normally, just as it does on a natural exit.
+                // When WARP_SANDBOX_DEADLINE is set, race run_internal against a deadline
+                // timer so recording finalization and snapshot upload can complete before
+                // the infrastructure's hard kill fires.
                 //
-                // Namespace runs on Kubernetes, which sends SIGTERM before SIGKILL via
-                // terminationGracePeriodSeconds, so the same handler covers that path too.
-                #[cfg(unix)]
+                // The server injects WARP_SANDBOX_DEADLINE (Unix timestamp, seconds since
+                // epoch) into the container environment at sandbox creation time for both
+                // Docker Sandbox and Namespace workers. The timer fires SHUTDOWN_WARNING_WINDOW
+                // seconds before the deadline, giving the normal AgentDriver teardown path
+                // — recording upload, snapshot upload — time to finish.
+                //
+                // When the variable is absent or unparseable, run_internal runs to completion
+                // without any timer, preserving the existing behaviour for local and
+                // self-hosted runs.
                 let result = {
-                    use std::sync::atomic::{AtomicBool, Ordering};
+                    use std::time::SystemTime;
                     use warpui::r#async::Timer;
 
-                    // signal_hook::flag::register atomically sets `sigterm_flag` when
-                    // SIGTERM is delivered, replacing the default terminate disposition.
-                    // We capture the SigId so we can unregister after the run finishes,
-                    // which restores the previous disposition and prevents a subsequent
-                    // SIGTERM (e.g. during idle or cleanup) from being silently swallowed.
-                    let sigterm_flag = std::sync::Arc::new(AtomicBool::new(false));
-                    match signal_hook::flag::register(
-                        signal_hook::consts::SIGTERM,
-                        std::sync::Arc::clone(&sigterm_flag),
-                    ) {
-                        Ok(sig_id) => {
-                            let flag = std::sync::Arc::clone(&sigterm_flag);
-                            // Poll the flag every 100ms — an async sleep, so this costs
-                            // no CPU. The 100ms detection latency is negligible given the
-                            // 5-minute warning window before the hard SIGKILL fires.
-                            let sigterm_future = async move {
-                                loop {
-                                    if flag.load(Ordering::Acquire) {
-                                        break;
-                                    }
-                                    Timer::after(Duration::from_millis(100)).await;
-                                }
-                            };
-                            let result = futures::select! {
-                                r = Self::run_internal(task, foreground.clone()).fuse() => r,
-                                _ = sigterm_future.fuse() => {
-                                    log::info!("SIGTERM received: aborting run_internal to allow recording finalization");
-                                    Ok(())
-                                }
-                            };
-                            // Restore the default SIGTERM disposition (terminate) now that
-                            // run_internal has finished. Without this, a SIGTERM during the
-                            // subsequent cleanup/idle window would set the stale flag instead
-                            // of causing the process to exit.
-                            signal_hook::low_level::unregister(sig_id);
-                            result
+                    /// How far before the sandbox deadline to start the teardown sequence.
+                    const SHUTDOWN_WARNING_WINDOW: Duration = Duration::from_secs(5 * 60);
+
+                    let maybe_wait = std::env::var("WARP_SANDBOX_DEADLINE")
+                        .ok()
+                        .and_then(|s| s.parse::<i64>().ok())
+                        .and_then(|deadline_unix| {
+                            if deadline_unix <= 0 {
+                                return None;
+                            }
+                            let deadline = SystemTime::UNIX_EPOCH
+                                .checked_add(Duration::from_secs(deadline_unix as u64))?;
+                            let warning_at = deadline.checked_sub(SHUTDOWN_WARNING_WINDOW)?;
+                            match warning_at.duration_since(SystemTime::now()) {
+                                Ok(wait) => Some(wait),
+                                // Already inside the warning window — trigger immediately.
+                                Err(_) => Some(Duration::ZERO),
+                            }
+                        });
+
+                    if let Some(wait) = maybe_wait {
+                        futures::select! {
+                            r = Self::run_internal(task, foreground.clone()).fuse() => r,
+                            _ = Timer::after(wait).fuse() => {
+                                log::info!(
+                                    "Sandbox deadline approaching (WARP_SANDBOX_DEADLINE); \
+                                     aborting run_internal to allow recording finalization"
+                                );
+                                Ok(())
+                            }
                         }
-                        Err(e) => {
-                            log::warn!("Failed to register SIGTERM handler: {e}; VM timeout will not trigger recording finalization");
-                            Self::run_internal(task, foreground.clone()).await
-                        }
+                    } else {
+                        Self::run_internal(task, foreground.clone()).await
                     }
                 };
-                #[cfg(not(unix))]
-                let result = Self::run_internal(task, foreground.clone()).await;
 
                 // Stop accepting CLI session status updates now that the run
                 // is done. Already accepted task updates remain queued until
