@@ -506,6 +506,9 @@ impl From<api::message::tool_call::RequestComputerUse> for AIAgentActionType {
 impl From<api::message::tool_call::StartRecording> for AIAgentActionType {
     fn from(value: api::message::tool_call::StartRecording) -> Self {
         let limits = value.limits;
+        // Only carry values > 1 (0 means unset; 1 means real-time).
+        let playback_speed_multiplier =
+            (value.playback_speed_multiplier > 1).then_some(value.playback_speed_multiplier);
         AIAgentActionType::StartRecording {
             frame_rate: value.frame_rate.max(0) as u32,
             max_duration: limits
@@ -518,6 +521,7 @@ impl From<api::message::tool_call::StartRecording> for AIAgentActionType {
                 .filter(|&bytes| bytes > 0)
                 .map(|bytes| bytes as u64),
             summary: (!value.summary.trim().is_empty()).then_some(value.summary),
+            playback_speed_multiplier,
         }
     }
 }

@@ -45,6 +45,7 @@ impl StartRecordingExecutor {
             frame_rate,
             max_duration,
             max_size_bytes,
+            playback_speed_multiplier,
             ..
         } = &action.action
         else {
@@ -53,6 +54,7 @@ impl StartRecordingExecutor {
         let frame_rate = *frame_rate;
         let max_duration = *max_duration;
         let max_size_bytes = *max_size_bytes;
+        let playback_speed_multiplier = *playback_speed_multiplier;
 
         // Reserve the single runtime slot up front so a concurrent start can't
         // race past the guard while ffmpeg is spinning up.
@@ -72,6 +74,12 @@ impl StartRecordingExecutor {
                 // frame rate 0 means unspecified, and absent limits would otherwise
                 // leave the capture unbounded.
                 let defaults = computer_use::RecordingConfig::default();
+                // Use server-provided integer speed multiplier (> 1 means faster
+                // playback); fall back to the client default (4x) when absent.
+                let playback_speed_multiplier = playback_speed_multiplier
+                    .filter(|&s| s > 1)
+                    .map(|s| s as f32)
+                    .unwrap_or(defaults.playback_speed_multiplier);
                 let config = computer_use::RecordingConfig {
                     frame_rate: if frame_rate > 0 {
                         frame_rate
@@ -80,6 +88,7 @@ impl StartRecordingExecutor {
                     },
                     max_duration: max_duration.unwrap_or(defaults.max_duration),
                     max_size_bytes: max_size_bytes.unwrap_or(defaults.max_size_bytes),
+                    playback_speed_multiplier,
                 };
                 recorder.start(config).await
             },

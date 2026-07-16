@@ -4,7 +4,7 @@
 //! nothing is buffered in memory. `stop` sends SIGINT so ffmpeg finalizes the
 //! container (writes the moov atom) instead of leaving a truncated file.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -66,16 +66,31 @@ impl crate::Recorder for Recorder {
             .args(["-f", "x11grab"])
             .args(["-framerate", &config.frame_rate.to_string()])
             .args(["-video_size", &format!("{width}x{height}")])
+            // Composite the X11 cursor. Must come BEFORE -i so ffmpeg
+            // treats it as an x11grab input option, not an output option.
+            .args(["-draw_mouse", "1"])
+            // Limit capture wall-clock time as an INPUT option so the
+            // duration bound is independent of the output setpts speed
+            // filter. As an output option, max_duration would be stretched
+            // by the playback multiplier (e.g. 4x → effectively 40 min at 4x).
+            .arg("-t")
+            .arg(format!("{:.3}", config.max_duration.as_secs_f64()))
             .args(["-i", &display])
             .args(["-c:v", "libx264"])
             .args(["-preset", "ultrafast"])
-            .args(["-pix_fmt", "yuv420p"])
-            .args(["-movflags", "+faststart"]);
-        // Enforce capture limits in ffmpeg so abandoned recordings remain bounded.
+            .args(["-pix_fmt", "yuv420p"]);
+        // Apply playback speed: rescale presentation timestamps so the video
+        // plays faster than real time. A multiplier of 4 makes a 4-minute
+        // recording play in 1 minute. Values <= 1 are skipped (real-time).
+        if config.playback_speed_multiplier > 1.0 {
+            let setpts = format!("{:.6}*PTS", 1.0 / config.playback_speed_multiplier);
+            command.args(["-vf", &format!("setpts={setpts}")]);
+        }
+        // Max file size is an output limit; stays as an output option.
         command
-            .arg("-t")
-            .arg(format!("{:.3}", config.max_duration.as_secs_f64()));
-        command.arg("-fs").arg(config.max_size_bytes.to_string());
+            .args(["-movflags", "+faststart"])
+            .arg("-fs")
+            .arg(config.max_size_bytes.to_string());
         command
             .arg(&path)
             .stdin(Stdio::null())
@@ -176,6 +191,64 @@ impl crate::Recorder for Recorder {
             size_bytes,
             completion_status,
         })
+    }
+}
+
+/// Burns the keyboard overlay pills into `input` via a post-stop ffmpeg
+/// re-encode, returning the path to the annotated file (a sibling of `input`).
+/// The original is left untouched; the caller owns cleanup of both. ffmpeg
+/// demuxes the mp4 from disk frame-by-frame, so the whole recording is never
+/// buffered in memory.
+pub async fn burn_in_action_log(
+    input: &Path,
+    entries: &[crate::ActionLogEntry],
+    dimensions: (u32, u32),
+) -> Result<PathBuf, RecordingError> {
+    let ass_path = input.with_extension("ass");
+    std::fs::write(
+        &ass_path,
+        crate::overlay::build_overlay_ass(entries, dimensions),
+    )
+    .map_err(|e| RecordingError::Finalize {
+        reason: format!("failed to write overlay subtitle file: {e}"),
+    })?;
+    let output_path = input.with_extension("overlay.mp4");
+
+    let subtitles_filter = format!("subtitles=filename='{}'", ass_path.display());
+    let status = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-i")
+        .arg(input)
+        .arg("-vf")
+        .arg(&subtitles_filter)
+        .args(["-c:v", "libx264"])
+        .args(["-preset", "ultrafast"])
+        .args(["-pix_fmt", "yuv420p"])
+        .args(["-movflags", "+faststart"])
+        .arg(&output_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await;
+
+    // The subtitle file is an implementation detail; drop it regardless of outcome.
+    let _ = std::fs::remove_file(&ass_path);
+
+    match status {
+        Ok(status) if status.success() => Ok(output_path),
+        Ok(status) => {
+            let _ = std::fs::remove_file(&output_path);
+            Err(RecordingError::Finalize {
+                reason: format!("ffmpeg overlay burn-in exited with status {status}"),
+            })
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&output_path);
+            Err(RecordingError::Finalize {
+                reason: format!("failed to run ffmpeg for overlay burn-in: {e}"),
+            })
+        }
     }
 }
 

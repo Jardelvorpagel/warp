@@ -8,11 +8,12 @@ mod imp;
 #[cfg(macos)]
 mod mock;
 mod noop;
+mod overlay;
 #[cfg(any(macos, linux, windows))]
 mod screenshot_utils;
 
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -22,6 +23,7 @@ use async_trait::async_trait;
 // module definition.
 #[cfg(noop)]
 use noop as imp;
+pub use overlay::{ActionLogEntry, overlay_labels_for};
 pub use pathfinder_geometry::vector::Vector2I;
 use serde::{Deserialize, Serialize};
 use serde_with::{DurationSecondsWithFrac, serde_as};
@@ -247,6 +249,27 @@ pub fn create_recorder() -> Box<dyn Recorder> {
     }
 }
 
+/// Burns action labels into a recorded video, returning the path to the
+/// annotated file. The original file is left untouched; the caller owns cleanup
+/// of both. Real compositing (ffmpeg + libass) only runs on the Linux capture
+/// path; every other target returns `input` unchanged so callers can treat
+/// annotation as best-effort and upload the original on any failure.
+pub async fn burn_in_action_log(
+    input: &Path,
+    entries: &[ActionLogEntry],
+    dimensions: (u32, u32),
+) -> Result<PathBuf, RecordingError> {
+    #[cfg(all(linux, not(noop)))]
+    {
+        imp::burn_in_action_log(input, entries, dimensions).await
+    }
+    #[cfg(not(all(linux, not(noop))))]
+    {
+        let _ = (entries, dimensions);
+        Ok(input.to_path_buf())
+    }
+}
+
 /// A long-lived capability that records a video of the computer-use display.
 ///
 /// Unlike [`Actor`], a recorder spans many tool calls: `start` launches capture
@@ -273,6 +296,11 @@ pub struct RecordingConfig {
     pub max_duration: Duration,
     /// Maximum output size in bytes before the runtime auto-stops recording.
     pub max_size_bytes: u64,
+    /// How many times faster the output video should play back relative to real
+    /// time. For example, 4.0 makes a 4-minute recording play in 1 minute. A
+    /// value of 0.0 or 1.0 means real-time (no speedup). Applied via an ffmpeg
+    /// presentation-timestamp rescale filter on the output video.
+    pub playback_speed_multiplier: f32,
 }
 
 impl Default for RecordingConfig {
@@ -283,6 +311,10 @@ impl Default for RecordingConfig {
             // NOTE: Bounds every capture so an unattended recording can't grow without bound (~10 min / 1 GiB).
             max_duration: Duration::from_secs(10 * 60),
             max_size_bytes: 1024 * 1024 * 1024,
+            // NOTE: 4x playback speed keeps demo videos short and watchable. A 4-minute
+            // recording plays in 1 minute. The server can override via the StartRecording
+            // tool call's playback_speed_multiplier field.
+            playback_speed_multiplier: 4.0,
         }
     }
 }
