@@ -1,24 +1,56 @@
 use std::collections::HashSet;
 
 use warp::tui_export::{dark_theme, light_theme};
-use warp_core::ui::theme::WarpTheme;
+use warp_core::ui::theme::{Fill as ThemeFill, WarpTheme};
+use warpui_core::elements::tui::Color;
+use warpui_core::elements::Fill as CoreFill;
 
-use super::{agent_identity_palette, assign_agent_identity_indices, stable_hash};
+use super::{
+    agent_identity_palette, assign_agent_identity_indices, stable_hash, AGENT_IDENTITY_GLYPHS,
+};
 
 fn palette_len(theme: &WarpTheme) -> usize {
-    agent_identity_palette(theme.terminal_colors(), theme.background().into_solid()).len()
+    agent_identity_palette(theme.terminal_colors()).len()
 }
 
 #[test]
-fn palette_offers_at_least_32_combinations_in_dark_and_light_themes() {
-    assert!(palette_len(&dark_theme()) >= 32);
-    assert!(palette_len(&light_theme()) >= 32);
+fn palette_crosses_the_seven_design_glyphs_and_colors() {
+    assert_eq!(AGENT_IDENTITY_GLYPHS, ["⊹", "⟡", "✶", "◊", "⊛", "*", "✠"]);
+    assert_eq!(palette_len(&dark_theme()), 49);
+    assert_eq!(palette_len(&light_theme()), 49);
+}
+
+#[test]
+fn palette_uses_the_themed_design_color_roles_in_order() {
+    let theme = dark_theme();
+    let colors = theme.terminal_colors();
+    let expected: Vec<Option<Color>> = [
+        colors.normal.cyan,
+        colors.normal.blue,
+        colors.normal.magenta,
+        colors.bright.magenta,
+        colors.normal.red,
+        colors.normal.green,
+        colors.normal.yellow,
+    ]
+    .into_iter()
+    .map(|color| Some(CoreFill::from(ThemeFill::from(color)).into()))
+    .collect();
+    let palette = agent_identity_palette(colors);
+
+    assert_eq!(
+        palette[..expected.len()]
+            .iter()
+            .map(|identity| identity.style.fg)
+            .collect::<Vec<_>>(),
+        expected,
+    );
 }
 
 #[test]
 fn palette_entries_are_distinct_glyph_color_pairs() {
     let theme = dark_theme();
-    let palette = agent_identity_palette(theme.terminal_colors(), theme.background().into_solid());
+    let palette = agent_identity_palette(theme.terminal_colors());
     let unique: HashSet<String> = palette
         .iter()
         .map(|identity| format!("{}-{:?}", identity.glyph, identity.style.fg))
@@ -54,20 +86,15 @@ fn assignment_keeps_identities_distinct_within_one_request() {
 
 #[test]
 fn assignment_keeps_glyphs_and_colors_unique_until_exhausted() {
-    // 8 glyph rows × 5 color columns.
-    let palette_len = 40;
-    let color_count = 5;
-    let names: Vec<String> = (0..8).map(|i| format!("agent-{i}")).collect();
+    // 7 glyph rows × 7 color columns.
+    let palette_len = 49;
+    let color_count = 7;
+    let names: Vec<String> = (0..7).map(|i| format!("agent-{i}")).collect();
     let indices = assign_agent_identity_indices(&names, palette_len);
-    // All eight agents get distinct glyph rows.
+    // All seven agents get distinct glyph rows and color columns.
     let glyphs: HashSet<usize> = indices.iter().map(|index| index / color_count).collect();
     assert_eq!(glyphs.len(), names.len());
-    // The first five agents also get distinct color columns; the sixth
-    // onward must reuse one of the five colors.
-    let colors: HashSet<usize> = indices[..color_count]
-        .iter()
-        .map(|index| index % color_count)
-        .collect();
+    let colors: HashSet<usize> = indices.iter().map(|index| index % color_count).collect();
     assert_eq!(colors.len(), color_count);
 }
 

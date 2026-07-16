@@ -1,5 +1,5 @@
 //! Deterministic color-and-glyph identity styling for orchestrated agents in
-//! the TUI card: a theme-derived palette of ANSI colors crossed with
+//! the TUI card: the design's theme-derived ANSI colors crossed with
 //! a curated glyph set, plus the stable hash and per-request assignment
 //! policy that keep identities stable across re-renders and edits.
 
@@ -9,15 +9,7 @@ use warpui_core::elements::tui::TuiStyle;
 use warpui_core::elements::Fill as CoreFill;
 
 /// Glyphs paired with themed colors to form deterministic agent identities.
-const AGENT_IDENTITY_GLYPHS: [&str; 8] = ["⟡", "⊹", "✶", "◊", "⊛", "*", "✠", "●"];
-
-/// Minimum luma distance from the resolved background for a palette color
-/// to count as readable.
-const AGENT_IDENTITY_MIN_CONTRAST: f32 = 32.0;
-
-/// The identity palette must offer at least this many combinations; use the
-/// unfiltered ANSI set when contrast filtering would drop below it.
-const AGENT_IDENTITY_MIN_COMBOS: usize = 32;
+const AGENT_IDENTITY_GLYPHS: [&str; 7] = ["⊹", "⟡", "✶", "◊", "⊛", "*", "✠"];
 
 /// One deterministic color-and-glyph agent identity.
 #[derive(Clone, Debug, PartialEq)]
@@ -26,45 +18,19 @@ pub(crate) struct AgentIdentity {
     pub(crate) style: TuiStyle,
 }
 
-/// Builds the identity palette from the themed ANSI colors (normal + bright,
-/// excluding low-contrast slots against `background`) crossed with the glyph
-/// set, yielding at least [`AGENT_IDENTITY_MIN_COMBOS`] combinations. All
-/// colors derive from the theme; no raw design hex.
-pub(crate) fn agent_identity_palette(
-    colors: &TerminalColors,
-    background: ColorU,
-) -> Vec<AgentIdentity> {
-    let all_colors: [ColorU; 16] = [
-        colors.normal.black.into(),
+/// Builds the identity palette from the seven color roles in the design:
+/// themed cyan, blue, magenta, lilac, pink, green, and yellow. Lilac uses
+/// bright magenta while the remaining roles use their normal ANSI slots.
+pub(crate) fn agent_identity_palette(colors: &TerminalColors) -> Vec<AgentIdentity> {
+    let colors: [ColorU; 7] = [
+        colors.normal.cyan.into(),
+        colors.normal.blue.into(),
+        colors.normal.magenta.into(),
+        colors.bright.magenta.into(),
         colors.normal.red.into(),
         colors.normal.green.into(),
         colors.normal.yellow.into(),
-        colors.normal.blue.into(),
-        colors.normal.magenta.into(),
-        colors.normal.cyan.into(),
-        colors.normal.white.into(),
-        colors.bright.black.into(),
-        colors.bright.red.into(),
-        colors.bright.green.into(),
-        colors.bright.yellow.into(),
-        colors.bright.blue.into(),
-        colors.bright.magenta.into(),
-        colors.bright.cyan.into(),
-        colors.bright.white.into(),
     ];
-    let background_luma = luma(background);
-    let readable: Vec<ColorU> = all_colors
-        .iter()
-        .copied()
-        .filter(|color| (luma(*color) - background_luma).abs() >= AGENT_IDENTITY_MIN_CONTRAST)
-        .collect();
-    // Guarantee the minimum combination count even for unusual themes
-    // where filtering strips too many slots.
-    let colors = if readable.len() * AGENT_IDENTITY_GLYPHS.len() >= AGENT_IDENTITY_MIN_COMBOS {
-        readable
-    } else {
-        all_colors.to_vec()
-    };
     // Vary the color fastest so adjacent palette indices differ in color
     // before repeating a glyph.
     AGENT_IDENTITY_GLYPHS
@@ -76,11 +42,6 @@ pub(crate) fn agent_identity_palette(
             })
         })
         .collect()
-}
-
-/// Rec. 709 luma of a solid color, for background-contrast filtering.
-fn luma(color: ColorU) -> f32 {
-    0.2126 * f32::from(color.r) + 0.7152 * f32::from(color.g) + 0.0722 * f32::from(color.b)
 }
 
 /// Stable FNV-1a hash of an agent name; must not vary across runs or

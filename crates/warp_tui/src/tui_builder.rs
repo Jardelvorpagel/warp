@@ -255,14 +255,10 @@ impl TuiUiBuilder {
         self.primary_text_style().add_modifier(Modifier::BOLD)
     }
 
-    /// The deterministic agent identity palette for this theme, resolved
-    /// against the probed terminal background. See
+    /// The deterministic agent identity palette for this theme. See
     /// [`crate::orchestrated_agent_identity_styling`].
     pub(crate) fn agent_identity_palette(&self) -> Vec<AgentIdentity> {
-        agent_identity_palette(
-            self.warp_theme.terminal_colors(),
-            self.base_background().into_solid(),
-        )
+        agent_identity_palette(self.warp_theme.terminal_colors())
     }
 
     /// Collapsible-header style while the pointer hovers it.
