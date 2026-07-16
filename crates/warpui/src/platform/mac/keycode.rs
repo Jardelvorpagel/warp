@@ -18,6 +18,34 @@ extern "C" {
     fn keyCodeToChar(keyCode: NSUInteger, shifted: BOOL) -> id;
 }
 
+/// Returns true for C0/C1 Unicode control code units.
+///
+/// Mirrors `IsUnicodeControl` in `objc/keycode.m`.
+fn is_unicode_control(code_unit: u16) -> bool {
+    code_unit <= 0x1F || (0x7F..=0x9F).contains(&code_unit)
+}
+
+/// Pure helper mirroring `KeyNameFromTranslatedString` in `objc/keycode.m`.
+///
+/// Given the raw UTF-16 buffer from `UCKeyTranslate` and the control-key name
+/// that `KeyFromControlKeyCode` would return for this keycode (if any), produce
+/// the key name Warp should use.
+///
+/// - Empty translations fall back to the control-key mapping.
+/// - Single control characters fall back to the control-key mapping.
+/// - Single non-control characters, multi-unit sequences, and surrogate pairs
+///   are preserved as UTF-16.
+pub(crate) fn key_name_from_utf16_translation(
+    utf16: &[u16],
+    control_key_name: Option<&str>,
+) -> Option<String> {
+    match utf16 {
+        [] => control_key_name.map(str::to_owned),
+        [code_unit] if is_unicode_control(*code_unit) => control_key_name.map(str::to_owned),
+        units => String::from_utf16(units).ok(),
+    }
+}
+
 pub struct Keycode(pub u16);
 
 impl Keycode {
@@ -240,3 +268,7 @@ pub(crate) fn scancode_to_physicalkey(scancode: u32) -> PhysicalKey {
         _ => return PhysicalKey::Unidentified(NativeKeyCode::MacOS(scancode as u16)),
     })
 }
+
+#[cfg(test)]
+#[path = "keycode_tests.rs"]
+mod tests;
