@@ -240,3 +240,7 @@ pub(crate) fn scancode_to_physicalkey(scancode: u32) -> PhysicalKey {
         _ => return PhysicalKey::Unidentified(NativeKeyCode::MacOS(scancode as u16)),
     })
 }
+
+#[cfg(test)]
+#[path = "keycode_tests.rs"]
+mod tests;
