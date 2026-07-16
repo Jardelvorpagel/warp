@@ -190,6 +190,13 @@ impl TuiSessions {
         self.sessions.iter().find(|session| session.id == id)
     }
 
+    /// Looks up a retained session by its terminal surface id.
+    pub(crate) fn session_id_for_surface(&self, surface_id: EntityId) -> Option<TuiSessionId> {
+        self.sessions
+            .iter()
+            .find_map(|session| (session.id.surface_id() == surface_id).then_some(session.id))
+    }
+
     /// Resolves a loaded conversation to the retained session that owns it.
     pub(crate) fn session_id_for_conversation(
         &self,
@@ -197,9 +204,7 @@ impl TuiSessions {
         conversation_id: AIConversationId,
     ) -> Option<TuiSessionId> {
         let surface_id = history.terminal_surface_id_for_conversation(&conversation_id)?;
-        self.sessions
-            .iter()
-            .find_map(|session| (session.id.surface_id() == surface_id).then_some(session.id))
+        self.session_id_for_surface(surface_id)
     }
 
     /// Whether no session has been registered.

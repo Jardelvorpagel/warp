@@ -13,7 +13,7 @@ use clap::Parser;
 use pathfinder_geometry::vector::Vector2F;
 use warp::tui_export::{
     Appearance, BannerState, IsSharedSessionCreator, LocalTtyTerminalManager,
-    ServerConversationToken, TerminalSurfaceResult,
+    ServerConversationToken, TerminalManagerTrait, TerminalSurfaceResult,
 };
 use warp::{TuiLoginEvent, TuiLoginModel, TuiLoginPhase};
 use warp_core::telemetry::TelemetryEvent as _;
@@ -23,6 +23,8 @@ use warpui_core::platform::{TerminationMode, WindowStyle};
 use warpui_core::runtime::spawn_tui_driver;
 use warpui_core::{AddWindowOptions, AppContext, ModelHandle, ViewHandle};
 
+use crate::cloud_run::TuiCloudRunState;
+use crate::cloud_terminal_manager::TuiCloudTerminalManager;
 use crate::orchestration_model::TuiOrchestrationModel;
 use crate::resume::TuiExitSummaryHandle;
 use crate::root_view::RootTuiView;
@@ -224,6 +226,32 @@ pub(crate) fn create_local_terminal_session(
     let surface = manager.surface.clone();
     let session_id = sessions.update(ctx, |sessions, ctx| {
         sessions.add_session(manager.surface, manager.manager, focus, ctx)
+    });
+    (session_id, surface)
+}
+/// Creates and registers a deferred PTY-less cloud terminal session.
+pub(crate) fn create_cloud_terminal_session(
+    sessions: &ModelHandle<TuiSessions>,
+    cloud_run_state: ModelHandle<TuiCloudRunState>,
+    focus: bool,
+    ctx: &mut AppContext,
+) -> (TuiSessionId, ViewHandle<TuiTerminalSessionView>) {
+    let (window_id, exit_summary, keyboard_enhancement_supported) =
+        sessions.read(ctx, |sessions, _| sessions.surface_context());
+    let (manager, surface_init) =
+        TuiCloudTerminalManager::new(Vector2F::new(120., 24.), TRANSCRIPT_BLOCK_SPACING, ctx);
+    let surface = ctx.add_typed_action_tui_view(window_id, |ctx| {
+        TuiTerminalSessionView::new_cloud(
+            surface_init,
+            cloud_run_state,
+            exit_summary,
+            keyboard_enhancement_supported,
+            ctx,
+        )
+    });
+    let manager = ctx.add_model(|_| Box::new(manager) as Box<dyn TerminalManagerTrait>);
+    let session_id = sessions.update(ctx, |sessions, ctx| {
+        sessions.add_session(surface.clone(), manager, focus, ctx)
     });
     (session_id, surface)
 }
