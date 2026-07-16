@@ -61,6 +61,10 @@ pub use crate::ai::blocklist::history_model::{
 pub use crate::ai::blocklist::orchestration_event_streamer::{
     register_agent_event_consumer, unregister_agent_event_consumer,
 };
+pub use crate::ai::blocklist::orchestration_topology::{
+    orchestrator_agent_id_for_conversation, resolve_orchestration_participant,
+    OrchestrationParticipantKind, ResolvedOrchestrationParticipant,
+};
 pub use crate::ai::blocklist::view_util::format_credits;
 pub use crate::ai::blocklist::{
     apply_child_agent_model_override, block_context_from_terminal_model,
