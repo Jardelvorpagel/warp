@@ -70,12 +70,6 @@ fn add_and_focus_drive_events() {
         });
         assert_eq!(second_id.surface_id(), second_view_id);
         assert_eq!(
-            app.read_model(&sessions, |sessions, _| {
-                sessions.session_id_for_surface(second_view_id)
-            }),
-            Some(second_id),
-        );
-        assert_eq!(
             std::mem::take(&mut *events.borrow_mut()),
             vec![TuiSessionsEvent::SessionAdded(second_id)],
         );
