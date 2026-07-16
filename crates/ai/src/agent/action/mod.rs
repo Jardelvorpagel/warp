@@ -149,6 +149,11 @@ pub enum AIAgentActionType {
         max_size_bytes: Option<u64>,
         summary: Option<String>,
         playback_speed_multiplier: Option<u32>,
+        /// The surface to record. `None` records the whole screen; a `Window`
+        /// target records just that window via native ffmpeg `x11grab
+        /// -window_id` on the foreground-visible window. Applied by the client
+        /// only when background computer use is enabled.
+        window: Option<computer_use::Target>,
     },
 
     /// AI requested to stop an in-progress recording and publish the video.

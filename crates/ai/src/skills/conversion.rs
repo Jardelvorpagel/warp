@@ -191,6 +191,7 @@ impl From<SkillProvider> for api::skill_descriptor::Provider {
             SkillProvider::Droid => api::skill_descriptor::provider::Type::Droid(()),
             SkillProvider::Github => api::skill_descriptor::provider::Type::Github(()),
             SkillProvider::OpenCode => api::skill_descriptor::provider::Type::OpenCode(()),
+            SkillProvider::Kiro => api::skill_descriptor::provider::Type::Kiro(()),
         };
 
         api::skill_descriptor::Provider {
@@ -285,12 +286,7 @@ fn convert_provider(
         api::skill_descriptor::provider::Type::Droid(_) => Ok(SkillProvider::Droid),
         api::skill_descriptor::provider::Type::Github(_) => Ok(SkillProvider::Github),
         api::skill_descriptor::provider::Type::OpenCode(_) => Ok(SkillProvider::OpenCode),
-        // Kiro is a new provider not yet represented client-side; treat as invalid.
-        // TODO(@peicodes): Add SkillProvider::Kiro and map it here once Kiro
-        // support is implemented in the client.
-        api::skill_descriptor::provider::Type::Kiro(_) => {
-            Err(SkillConversionError::ProviderInvalid)
-        }
+        api::skill_descriptor::provider::Type::Kiro(_) => Ok(SkillProvider::Kiro),
     }
 }
 
