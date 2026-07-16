@@ -1,3 +1,4 @@
+mod ime;
 mod key_events;
 
 #[cfg(test)]
@@ -22,6 +23,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{self, KeyCode};
 use winit::window::WindowId as WinitWindowId;
 
+use self::ime::{ImeCandidateGeometry, ImeCandidatePositionTracker};
 use self::key_events::convert_keyboard_input_event;
 use super::app::ClipboardEvent;
 use super::window::DEFAULT_TITLEBAR_HEIGHT;
@@ -494,6 +496,9 @@ pub(super) struct EventLoop {
     state: State,
     proxy: EventLoopProxy<CustomEvent>,
     ime_enabled: bool,
+    /// Tracks the last IME candidate position we requested, so we can work
+    /// around winit's position cache. See [`ImeCandidatePositionTracker`].
+    ime_position_tracker: ImeCandidatePositionTracker,
     /// Whether to downrank non-NVIDIA vulkan adapters. This is set to true when we detect a DRI3
     /// error that occurs when trying to present against a non-NVIDIA Vulkan adapter when the
     /// PRIME Profile is set to "Performance" mode.  It's not fully clear why this error occurs. Our
@@ -523,6 +528,7 @@ impl EventLoop {
             state: Default::default(),
             proxy,
             ime_enabled: false,
+            ime_position_tracker: ImeCandidatePositionTracker::new(),
             downrank_non_nvidia_vulkan_adapters: false,
             #[cfg(target_family = "wasm")]
             soft_keyboard_manager: None,
@@ -741,9 +747,7 @@ impl EventLoop {
                 });
             }
             Event::UserEvent(CustomEvent::ActiveCursorPositionUpdated) => {
-                if self.ime_enabled {
-                    self.update_ime_position();
-                }
+                self.refresh_ime_position();
             }
             Event::UserEvent(CustomEvent::AboutToSleep) => {
                 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -879,6 +883,11 @@ impl EventLoop {
                         mut inner_size_writer,
                     },
             } => {
+                // A scale-factor change can leave the IME candidate window
+                // mispositioned even though the caret's logical position is
+                // unchanged, so refresh it before the platform-specific handling.
+                self.refresh_ime_position();
+
                 // The following correction is only needed on Windows.
                 if !cfg!(windows) {
                     return;
@@ -1049,6 +1058,12 @@ impl EventLoop {
             return;
         };
 
+        // Window geometry changes can leave the IME candidate window stale
+        // even when the caret's logical position is unchanged. We track whether
+        // this event is one of those and refresh after the match, once the
+        // `window_state` borrow has been released.
+        let mut ime_position_may_be_stale = false;
+
         match event {
             ConvertedEvent::Event(event) => {
                 self.handle_converted_warpui_event(window_id, event);
@@ -1058,6 +1073,9 @@ impl EventLoop {
                 window.handle_resize();
                 self.callbacks.for_window(window).window_resized(window);
                 self.callbacks.window_resized();
+                // A resize can leave the IME candidate window mispositioned
+                // even though the caret's logical position is unchanged.
+                ime_position_may_be_stale = true;
             }
             ConvertedEvent::ModifierKeyChanged { key_code, state } => {
                 let mut window_callbacks = self.callbacks.for_window(window.as_ref());
@@ -1103,6 +1121,9 @@ impl EventLoop {
                     .for_window(window)
                     .window_moved(RectF::new(vec2f(position.x, position.y), size));
                 self.callbacks.window_moved();
+                // A move can leave the IME candidate window mispositioned even
+                // though the caret's logical position is unchanged.
+                ime_position_may_be_stale = true;
             }
             ConvertedEvent::MoveWindowBy {
                 current_touch,
@@ -1118,6 +1139,10 @@ impl EventLoop {
                     winit_window.set_outer_position(PhysicalPosition::new(target_x, target_y));
                 }
             }
+        }
+
+        if ime_position_may_be_stale {
+            self.refresh_ime_position();
         }
     }
 
@@ -1778,6 +1803,19 @@ impl EventLoop {
         abort_handle
     }
 
+    /// Repositions the IME candidate window if IME is currently enabled.
+    ///
+    /// This is the single entry point for refreshing the candidate window
+    /// position; call it whenever the caret moves or the window changes
+    /// geometry in a way that can leave the candidate window stale (move,
+    /// resize, scale-factor change). `update_ime_position` does the actual
+    /// positioning and `ImeCandidatePositionTracker` owns the cache workaround.
+    fn refresh_ime_position(&mut self) {
+        if self.ime_enabled {
+            self.update_ime_position();
+        }
+    }
+
     fn update_ime_position(&mut self) {
         let Some(active_window_id) = self.ui_app.read(|ctx| ctx.windows().active_window()) else {
             return;
@@ -1793,20 +1831,13 @@ impl EventLoop {
         let active_cursor_position = window_callbacks.get_active_cursor_position();
         if let Some(active_cursor_position) = active_cursor_position {
             let winit_window = downcast_window(window.as_ref());
-            let position = LogicalPosition::new(
-                active_cursor_position.position.origin_x(),
-                active_cursor_position.position.origin_y()
-                    + (1.2 * active_cursor_position.font_size),
-            );
-            // Currently the size argument is not supported on X11. We calculate it here anyway.
-            let size = LogicalSize::new(
-                active_cursor_position.font_size,
-                active_cursor_position.font_size,
-            );
-            // TODO(abhishek): We make sure that the position is different than last time to prevent winit from
-            // caching the old position and not properly updating on `WindowMoved` or `WindowResized` events.
-            winit_window.set_ime_position(LogicalPosition::new(position.x, position.y + 1.), size);
-            winit_window.set_ime_position(position, size);
+            let geometry = ImeCandidateGeometry::from_cursor_info(&active_cursor_position);
+            // Ask the tracker for the sequence of `set_ime_position` calls that
+            // will (re)position the candidate window, working around winit's
+            // position cache when the requested position is unchanged.
+            for update in self.ime_position_tracker.refresh(geometry) {
+                winit_window.set_ime_position(update.position, update.size);
+            }
         }
     }
 
