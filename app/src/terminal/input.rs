@@ -70,6 +70,7 @@ use warp_completer::signatures::CommandRegistry;
 use warp_completer::util::parse_current_commands_and_tokens;
 use warp_core::context_flag::ContextFlag;
 use warp_core::r#async::debounce;
+use warp_core::safe_warn;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warp_core::user_preferences::GetUserPreferences as _;
@@ -4462,9 +4463,13 @@ impl Input {
                     });
                 }
                 Err(e) => {
-                    report_error!(
-                        anyhow::Error::new(e).context("Failed to read file"),
-                        extra: { "path" => %file.file_path.display() }
+                    // A file the user picked can't be read (removed, permissions,
+                    // etc.): a gracefully-handled, non-actionable condition, so warn
+                    // locally rather than opening a Sentry issue. The path is
+                    // sensitive, so keep it out of release-channel logs/breadcrumbs.
+                    safe_warn!(
+                        safe: ("Failed to read file for cloud launch attachment"),
+                        full: ("Failed to read file for cloud launch attachment: path={} err={e:#}", file.file_path.display())
                     );
                 }
             }
@@ -5929,9 +5934,13 @@ impl Input {
                 let user_message = error.user_message();
                 let path = error.path().to_path_buf();
 
-                report_error!(
-                    anyhow::Error::new(error).context("Failed to write conversation to file"),
-                    extra: { "path" => %path.display() }
+                // Writing the exported conversation failed (disk full, bad path,
+                // permissions): an environmental condition already surfaced to the
+                // user via a toast, not an actionable Sentry issue. The path is
+                // sensitive, so keep it out of release-channel logs/breadcrumbs.
+                safe_warn!(
+                    safe: ("Failed to write conversation to file"),
+                    full: ("Failed to write conversation to file: path={} err={error:#}", path.display())
                 );
                 let window_id = ctx.window_id();
                 ToastStack::handle(ctx).update(ctx, move |toast_stack, ctx| {
@@ -13722,9 +13731,9 @@ impl Input {
                 match server_api.predict_am_queries(&request).await {
                     Ok(resp) => Some(resp.suggestion),
                     Err(err) => {
-                        report_error!(
-                            anyhow::Error::new(err).context("Failed to fetch predicted queries")
-                        );
+                        // Best-effort autosuggestion over the network; a failure
+                        // here just means no suggestion and isn't actionable.
+                        log::warn!("Failed to fetch predicted queries: {err:#}");
                         None
                     }
                 }
@@ -14542,9 +14551,12 @@ impl Input {
                     files_to_upload.push((file.file_name.clone(), file.mime_type.clone(), bytes));
                 }
                 Err(e) => {
-                    report_error!(
-                        anyhow::Error::new(e).context("Failed to read file"),
-                        extra: { "path" => %file.file_path.display() }
+                    // A file the user attached can't be read (removed, permissions,
+                    // etc.): a gracefully-handled, non-actionable condition. The path
+                    // is sensitive, so keep it out of release-channel logs/breadcrumbs.
+                    safe_warn!(
+                        safe: ("Failed to read file for attachment upload"),
+                        full: ("Failed to read file for attachment upload: path={} err={e:#}", file.file_path.display())
                     );
                 }
             }
@@ -14566,10 +14578,9 @@ impl Input {
                 {
                     Ok(resp) => resp,
                     Err(e) => {
-                        report_error!(
-                            e.context("Failed to prepare attachment uploads for task"),
-                            extra: { "task_id" => %task_id }
-                        );
+                        // Server call to prepare uploads failed: a network/server
+                        // condition, not an actionable Sentry issue.
+                        log::warn!("Failed to prepare attachment uploads for task {task_id}: {e:#}");
                         return None;
                     }
                 };
@@ -14594,16 +14605,16 @@ impl Input {
                             });
                         }
                         Ok(resp) => {
-                            report_error!(
-                                "Failed to upload attachment: unexpected HTTP status",
-                                extra: { "file_name" => %file_name, "status" => %resp.status() }
+                            // Non-success HTTP status from the upload endpoint: a
+                            // network/server condition, not an actionable Sentry issue.
+                            log::warn!(
+                                "Failed to upload attachment {file_name}: unexpected HTTP status {}",
+                                resp.status()
                             );
                         }
                         Err(e) => {
-                            report_error!(
-                                anyhow::Error::new(e).context("Failed to upload attachment"),
-                                extra: { "file_name" => %file_name }
-                            );
+                            // Network error uploading the attachment: not actionable.
+                            log::warn!("Failed to upload attachment {file_name}: {e:#}");
                         }
                     }
                 }
