@@ -1,5 +1,11 @@
 //! Public app APIs used by the `warp_tui` frontend.
 
+pub use ::ai::agent::action::{AskUserQuestionItem, AskUserQuestionOption, AskUserQuestionType};
+pub use ::ai::agent::action_result::AskUserQuestionAnswerItem;
+pub use ::ai::agent::{
+    AskUserQuestionAction, AskUserQuestionEffect, AskUserQuestionPhase, AskUserQuestionSession,
+    QuestionDraft,
+};
 pub use repo_metadata::repositories::RepoDetectionSource;
 pub use warp_cli::agent::Harness;
 use warp_completer::completer::{CompletionContext as _, TopLevelCommandCaseSensitivity};
@@ -56,10 +62,11 @@ pub use crate::ai::blocklist::history_model::{
 };
 pub use crate::ai::blocklist::view_util::format_credits;
 pub use crate::ai::blocklist::{
-    block_context_from_terminal_model, AIActionStatus, BlocklistAIActionEvent,
-    BlocklistAIActionModel, BlocklistAIContextModel, BlocklistAIController, BlocklistAIInputModel,
-    InputConfig, InputModePolicy, InputModePolicyHandle, InputType, InputTypeAutoDetectionSource,
-    PolicyConfigUpdate, RequestFileEditsExecutor, ShellCommandExecutor, ShellCommandExecutorEvent,
+    block_context_from_terminal_model, AIActionStatus, AskUserQuestionExecutor,
+    BlocklistAIActionEvent, BlocklistAIActionModel, BlocklistAIContextModel, BlocklistAIController,
+    BlocklistAIInputModel, InputConfig, InputModePolicy, InputModePolicyHandle, InputType,
+    InputTypeAutoDetectionSource, PolicyConfigUpdate, RequestFileEditsExecutor,
+    ShellCommandExecutor, ShellCommandExecutorEvent,
 };
 #[cfg(feature = "local_fs")]
 pub use crate::ai::conversation_export::{

@@ -10,6 +10,7 @@
 //! since the selector is only rendered while its host is the active blocking
 //! interaction. Escape remains host policy, with an element-level fallback
 //! through [`TuiOptionSelector::handle_back`].
+use std::collections::HashSet;
 
 use warp::tui_export::{OptionBadge, OptionFooter, OptionRow, OptionSnapshot, OptionSourceStatus};
 use warp_search_core::inline_menu::InlineMenuSelection;
@@ -73,6 +74,8 @@ pub(crate) enum TuiOptionSelectorEvent {
     Confirmed { id: String },
     /// The custom-text footer editor was submitted with a valid value.
     CustomTextSubmitted { value: String },
+    /// The question-card Other editor was opened.
+    CustomTextOpened,
     /// The Retry affordance of a `Failed` catalog was activated.
     RetryRequested,
     /// The selector asked to be dismissed (element-level Escape fallback for
@@ -247,6 +250,14 @@ pub(crate) struct TuiOptionSelector {
     interaction: SelectorInteractionState,
     search_field: Option<ViewHandle<TuiEditorView>>,
     custom_text: CustomTextState,
+    /// Whether the selector renders its own orchestration header.
+    show_header: bool,
+    /// Selected question option ids, independent of the keyboard highlight.
+    selected_ids: HashSet<String>,
+    /// Whether selected question options render checkmarks.
+    show_selection_markers: bool,
+    /// Whether this selector is embedded in an AskUserQuestion card.
+    question_style: bool,
     /// Whether the selector itself (the list zone) is focused.
     focused: bool,
     /// Per-item mouse state, indexed like [`Self::items`]. Owned here (not
@@ -273,6 +284,10 @@ impl TuiOptionSelector {
             interaction: SelectorInteractionState::default(),
             search_field: None,
             custom_text: CustomTextState::new(custom_text_editor),
+            show_header: true,
+            selected_ids: HashSet::new(),
+            show_selection_markers: false,
+            question_style: false,
             focused: false,
             item_mouse_states: Vec::new(),
         }
@@ -325,6 +340,59 @@ impl TuiOptionSelector {
         self.custom_text.sync_committed_value(&self.page.snapshot);
         self.reset_interaction_for_page(ctx);
         self.invalidate_layout(ctx);
+    }
+
+    /// Adapts this selector for an ask-question card. The questionnaire owns
+    /// the committed selections; the selector retains its keyboard highlight.
+    pub(crate) fn set_question_state(
+        &mut self,
+        selected_ids: HashSet<String>,
+        show_selection_markers: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.show_header = false;
+        self.question_style = true;
+        self.selected_ids = selected_ids;
+        self.show_selection_markers = show_selection_markers;
+        ctx.notify();
+    }
+
+    /// The highlighted question-option index, including the trailing Other
+    /// entry when present.
+    pub(crate) fn highlighted_question_index(&self) -> Option<usize> {
+        (!self.custom_text.is_editing())
+            .then(|| self.interaction.selection.selected_index())
+            .flatten()
+    }
+
+    /// The current inline Other buffer, trimmed for questionnaire transitions.
+    pub(crate) fn active_custom_text(&self, ctx: &AppContext) -> Option<String> {
+        self.custom_text.is_editing().then(|| {
+            self.custom_text
+                .editor
+                .as_ref(ctx)
+                .text(ctx)
+                .trim()
+                .to_owned()
+        })
+    }
+
+    /// Confirms the current highlight using the shared selector behavior.
+    pub(crate) fn confirm_highlighted(&mut self, ctx: &mut ViewContext<Self>) -> bool {
+        self.confirm_selected(ctx)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_active_custom_text_for_test(
+        &mut self,
+        text: &str,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if self.custom_text.is_editing() {
+            self.custom_text
+                .editor
+                .update(ctx, |editor, ctx| editor.set_text(text, ctx));
+        }
     }
 
     /// Refreshes the snapshot in place after a live catalog change,
@@ -412,6 +480,9 @@ impl TuiOptionSelector {
     /// Activates the custom editor with the last committed value.
     fn begin_custom_text_editing(&mut self, ctx: &mut ViewContext<Self>) {
         self.custom_text.begin_editing(ctx);
+        if self.question_style {
+            ctx.emit(TuiOptionSelectorEvent::CustomTextOpened);
+        }
         ctx.focus(&self.custom_text.editor);
         ctx.notify();
     }
@@ -730,19 +801,29 @@ impl TuiOptionSelector {
         &self,
         row: &OptionRow,
         digit: Option<usize>,
-        is_selected: bool,
+        is_highlighted: bool,
         builder: &TuiUiBuilder,
     ) -> Box<dyn TuiElement> {
         let disabled = row.disabled_reason.is_some();
-        let label_style = if is_selected {
+        let is_selected = if self.question_style {
+            self.selected_ids.contains(&row.id)
+        } else {
+            is_highlighted
+        };
+        let selected_style = if self.question_style {
+            builder.question_option_selected_style()
+        } else {
             builder.option_selector_selected_style()
+        };
+        let label_style = if is_highlighted || is_selected {
+            selected_style
         } else if disabled {
             builder.dim_text_style()
         } else {
             builder.primary_text_style()
         };
-        let detail_style = if is_selected {
-            builder.option_selector_selected_style()
+        let detail_style = if is_highlighted {
+            selected_style
         } else if disabled {
             builder.dim_text_style()
         } else {
@@ -752,10 +833,18 @@ impl TuiOptionSelector {
             Some(digit) => format!("({digit}) "),
             None => "    ".to_string(),
         };
-        let mut spans = vec![
-            (digit_prefix, detail_style),
-            (row.label.clone(), label_style),
-        ];
+        let mut spans = vec![(digit_prefix, detail_style)];
+        if self.show_selection_markers {
+            spans.push((
+                if is_selected { "✓ " } else { "  " }.to_string(),
+                if is_selected {
+                    builder.success_glyph_style()
+                } else {
+                    builder.muted_text_style()
+                },
+            ));
+        }
+        spans.push((row.label.clone(), label_style));
         let badge = match row.badge {
             Some(OptionBadge::Default) => Some("default"),
             Some(OptionBadge::Recent) => Some("recent"),
@@ -776,12 +865,16 @@ impl TuiOptionSelector {
         &self,
         text: String,
         digit: Option<usize>,
-        is_selected: bool,
+        is_highlighted: bool,
         style: TuiStyle,
         builder: &TuiUiBuilder,
     ) -> Box<dyn TuiElement> {
-        let style = if is_selected {
-            builder.option_selector_selected_style()
+        let style = if is_highlighted {
+            if self.question_style {
+                builder.question_option_selected_style()
+            } else {
+                builder.option_selector_selected_style()
+            }
         } else {
             style
         };
@@ -965,7 +1058,10 @@ impl TuiView for TuiOptionSelector {
 
     fn render(&self, app: &AppContext) -> Box<dyn TuiElement> {
         let builder = TuiUiBuilder::from_app(app);
-        let mut content = TuiFlex::column().child(self.render_header(&builder));
+        let mut content = TuiFlex::column();
+        if self.show_header {
+            content.add_child(self.render_header(&builder));
+        }
         if let Some(search_field) = self
             .page
             .searchable
