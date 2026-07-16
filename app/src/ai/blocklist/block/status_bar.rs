@@ -52,7 +52,7 @@ use crate::ai::llms::LLMPreferences;
 use crate::ai::AgentTip;
 use crate::server::server_api::ServerApiProvider;
 use crate::server::telemetry::TelemetryEvent;
-use crate::settings::{InputModeSettings, InputSettings};
+use crate::settings::{InputModeSettings, InputSettings, PrivacySettings};
 use crate::settings_view::keybindings::KeybindingChangedNotifier;
 use crate::terminal::input::buffer_model::{InputBufferModel, InputBufferUpdateEvent};
 use crate::terminal::input::message_bar::common::render_wrapping_standard_message_bar;
@@ -1154,7 +1154,11 @@ fn resolve_fallback_warping_message<V: View>(
     })
 }
 
-fn should_send_agent_tip_shown_analytics_event() -> bool {
+fn should_send_agent_tip_shown_analytics_event(app: &AppContext) -> bool {
+    let privacy_settings_snapshot = PrivacySettings::handle(app).as_ref(app).get_snapshot(app);
+    if privacy_settings_snapshot.should_disable_telemetry() {
+        return false;
+    }
     if !FeatureFlag::AgentModeAnalytics.is_enabled() || ChannelState::is_release_bundle() {
         return false;
     }
@@ -1170,7 +1174,7 @@ fn should_send_agent_tip_shown_analytics_event() -> bool {
 }
 
 fn send_agent_tip_shown_analytics_event(tip: String, app: &AppContext) {
-    if !should_send_agent_tip_shown_analytics_event() {
+    if !should_send_agent_tip_shown_analytics_event(app) {
         return;
     }
 
