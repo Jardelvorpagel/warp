@@ -17940,7 +17940,7 @@ impl TerminalView {
             self.maybe_copy_selection_to_clipboard(ctx);
             ctx.notify();
         } else {
-            log::warn!("end_selection dispatched with no pending selection");
+            log::error!("end_selection dispatched with no pending selection");
         }
     }
 
@@ -17976,7 +17976,7 @@ impl TerminalView {
 
             ctx.notify();
         } else {
-            log::warn!("end_selection dispatched with no pending selection");
+            log::error!("end_selection dispatched with no pending selection");
         }
     }
 
