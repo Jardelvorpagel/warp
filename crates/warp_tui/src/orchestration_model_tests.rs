@@ -8,12 +8,13 @@ use warpui::platform::WindowStyle;
 use warpui::{AddWindowOptions, ModelHandle, ReadModel, SingletonEntity as _, UpdateModel};
 use warpui_core::elements::tui::{TuiBufferExt, TuiRect};
 use warpui_core::presenter::tui::TuiPresenter;
-use warpui_core::{App, TuiView as _, WindowId};
+use warpui_core::{App, TuiView as _, TypedActionView as _, WindowId};
 
 use super::TuiOrchestrationModel;
 use crate::cloud_run::TuiCloudRunStartup;
 use crate::root_view::RootTuiView;
 use crate::session_registry::{TuiSessionId, TuiSessions};
+use crate::terminal_session_view::TuiTerminalSessionAction;
 use crate::test_fixtures::{
     add_active_test_conversation, add_test_semantic_selection, add_test_terminal_session,
 };
@@ -326,7 +327,6 @@ fn snapshot_is_shared_across_tree_and_filters_conversations_without_sessions() {
                 vec![first_child_id, second_child_id]
             );
         });
-
         app.update(|ctx| {
             let selected = TuiOrchestrationModel::handle(ctx).update(ctx, |model, ctx| {
                 model.focus_conversation_session(second_child_id, ctx)
@@ -433,6 +433,43 @@ fn remote_child_materialization_is_navigable_and_projects_lifecycle() {
                 .to_lines()
                 .iter()
                 .any(|line| line.contains("Starting cloud run…")));
+            assert!(frame
+                .buffer
+                .to_lines()
+                .iter()
+                .any(|line| line.contains("Shift + ↑ sub-agents")));
+        });
+        app.update(|ctx| {
+            let session_id = TuiSessions::as_ref(ctx)
+                .session_id_for_surface(surface_id)
+                .unwrap();
+            let view = TuiSessions::as_ref(ctx)
+                .session(session_id)
+                .unwrap()
+                .view()
+                .clone();
+            view.update(ctx, |view, ctx| {
+                view.handle_action(&TuiTerminalSessionAction::FocusOrchestrationTabs, ctx);
+            });
+        });
+        app.read(|ctx| {
+            let session_id = TuiSessions::as_ref(ctx)
+                .session_id_for_surface(surface_id)
+                .unwrap();
+            let view = TuiSessions::as_ref(ctx)
+                .session(session_id)
+                .unwrap()
+                .view()
+                .clone();
+            let mut presenter = TuiPresenter::new();
+            let frame = presenter.present_element(
+                view.as_ref(ctx).render(ctx),
+                TuiRect::new(0, 0, 80, 12),
+                ctx,
+            );
+            let lines = frame.buffer.to_lines();
+            assert!(lines.iter().any(|line| line.contains("Tab or ← →")));
+            assert!(lines.iter().all(|line| !line.contains("Shift + ↓")));
         });
 
         app.update(|ctx| {
