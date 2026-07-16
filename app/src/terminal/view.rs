@@ -5895,10 +5895,6 @@ impl TerminalView {
                                         agent_view_visibility: agent_view_visibility.into(),
                                     },
                                 ) {
-                                    // A send failure here means the persistence
-                                    // receiver is gone (app teardown), not an
-                                    // actionable bug — log locally instead of
-                                    // reporting to Sentry.
                                     log::warn!(
                                         "Error sending UpdateBlockAgentViewVisibility event: {e:#}"
                                     );
@@ -5934,10 +5930,6 @@ impl TerminalView {
                                         agent_view_visibility: agent_view_visibility.into(),
                                     },
                                 ) {
-                                    // A send failure here means the persistence
-                                    // receiver is gone (app teardown), not an
-                                    // actionable bug — log locally instead of
-                                    // reporting to Sentry.
                                     log::warn!(
                                         "Error sending UpdateBlockAgentViewVisibility event: {e:#}"
                                     );
@@ -7421,9 +7413,6 @@ impl TerminalView {
 
         // Determine DiffMode from the base branch.
         if self.current_repo_path.is_none() {
-            // Not being in a git repository is an expected environmental
-            // precondition, not an actionable bug — log locally instead of
-            // reporting to Sentry.
             log::warn!("Cannot insert PR comments: not in a git repository");
             return;
         }
@@ -10313,9 +10302,6 @@ impl TerminalView {
                         agent_view_visibility: agent_view_visibility.into(),
                     })
                 {
-                    // A send failure here means the persistence receiver is gone
-                    // (app teardown), not an actionable bug — log locally instead
-                    // of reporting to Sentry.
                     log::warn!("Error sending UpdateBlockAgentViewVisibility event: {e:#}");
                 }
             }
@@ -12521,10 +12507,6 @@ impl TerminalView {
                             },
                             move |_, res, _| {
                                 if let Err(err) = res {
-                                    // A send failure here means the persistence
-                                    // receiver is gone (app teardown), not an
-                                    // actionable bug — log locally instead of
-                                    // reporting to Sentry.
                                     log::warn!(
                                         "Error sending UpdateFinishedCommand event: {err:#}"
                                     );
@@ -17958,8 +17940,6 @@ impl TerminalView {
             self.maybe_copy_selection_to_clipboard(ctx);
             ctx.notify();
         } else {
-            // A benign event-ordering condition (end without a matching begin),
-            // not an actionable bug — log locally instead of reporting to Sentry.
             log::warn!("end_selection dispatched with no pending selection");
         }
     }
@@ -17996,8 +17976,6 @@ impl TerminalView {
 
             ctx.notify();
         } else {
-            // A benign event-ordering condition (end without a matching begin),
-            // not an actionable bug — log locally instead of reporting to Sentry.
             log::warn!("end_selection dispatched with no pending selection");
         }
     }
@@ -25917,9 +25895,6 @@ impl TerminalView {
         #[cfg(feature = "local_fs")]
         {
             let Some(working_directory_str) = self.pwd() else {
-                // A missing working directory is an expected environmental
-                // condition (e.g. remote or not-yet-bootstrapped sessions), not
-                // an actionable bug — log locally instead of reporting to Sentry.
                 log::warn!("No working directory found for terminal session");
                 return;
             };
