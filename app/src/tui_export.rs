@@ -56,12 +56,6 @@ pub use crate::ai::blocklist::history_model::{
     BlocklistAIHistoryEvent, BlocklistAIHistoryModel, CloudConversationData,
     ConversationStatusUpdate,
 };
-pub use crate::ai::blocklist::telemetry::{
-    orchestration_modified_field, BlocklistOrchestrationTelemetryEvent,
-    OrchestrationApprovalStatus, OrchestrationEnteredEvent, OrchestrationEntrySource,
-    OrchestrationExecutionModeKind, OrchestrationHarnessKind, RunAgentsCardDecision,
-    RunAgentsCardDecisionEvent,
-};
 pub use crate::ai::blocklist::view_util::format_credits;
 pub use crate::ai::blocklist::{
     block_context_from_terminal_model, AIActionStatus, BlocklistAIActionEvent,
