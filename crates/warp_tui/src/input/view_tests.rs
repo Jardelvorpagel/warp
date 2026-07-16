@@ -13,8 +13,8 @@ use warp::editor::CodeEditorModel;
 use warp::settings::AISettingsChangedEvent;
 use warp::tui_export::{
     AcceptSlashCommandOrSavedPrompt, BlocklistAIHistoryModel, BlocklistAIInputModel,
-    ConversationSelectionEvent, InputConfig, InputModePolicy, InputType, LLMId,
-    PolicyConfigUpdate, SlashCommandId, SlashCommandMixer,
+    ConversationSelectionEvent, InputConfig, InputModePolicy, InputType, LLMId, PolicyConfigUpdate,
+    SlashCommandId, SlashCommandMixer,
 };
 use warp_editor::model::CoreEditorModel;
 use warpui::EntityIdMap;
@@ -145,7 +145,7 @@ fn build_view_with_prompt_history(
         )
     });
     let input_model = ctx.add_model(|ctx| CodeEditorModel::new_tui(W, ctx));
-    let input_mode = BlocklistAIInputModel::mock(Rc::new(TuiInputModePolicy), ctx);
+    let input_mode = BlocklistAIInputModel::mock(Rc::new(TestInputModePolicy), ctx);
     let suggestions_mode = add_suggestions_mode(ctx, TuiInputSuggestionsMode::Closed);
     let prompt_history_menu = ctx.add_model(|ctx| {
         TuiPromptHistoryMenuModel::new(
@@ -2015,6 +2015,48 @@ fn preview_on_select_keeps_query_stable() {
         app.read(|ctx| {
             assert!(menu.as_ref(ctx).is_open(ctx));
             assert_eq!(text(&view, ctx), "deploy beta");
+        });
+    });
+}
+
+/// Preview and restore are undo-agnostic: after arrowing through previews and
+/// restoring, a subsequent Undo does not step back into an intermediate preview
+/// state (PRODUCT.md invariant 15).
+#[test]
+fn preview_and_restore_do_not_leave_undoable_states() {
+    App::test((), |mut app| async move {
+        let (view, menu) = app.update(|ctx| {
+            let (view, menu) =
+                build_view_with_prompt_history(ctx, &["deploy alpha", "deploy beta"]);
+            type_str(&view, ctx, "deploy");
+            dispatch(&view, ctx, &[TuiInputAction::MoveUp]);
+            assert!(menu.as_ref(ctx).is_open(ctx));
+            (view, menu)
+        });
+        // Arrow through a couple of previews (each writes a prompt into the input).
+        app.update(|ctx| {
+            dispatch(
+                &view,
+                ctx,
+                &[TuiInputAction::MoveUp, TuiInputAction::MoveDown],
+            );
+        });
+        // Escape restores the typed query.
+        app.update(|ctx| {
+            dispatch(&view, ctx, &[TuiInputAction::HandleEscape]);
+        });
+        app.update(|ctx| {
+            assert!(!menu.as_ref(ctx).is_open(ctx));
+            assert_eq!(text(&view, ctx), "deploy");
+            // Undo must not reveal any of the preview writes.
+            dispatch(&view, ctx, &[TuiInputAction::Undo]);
+        });
+        app.read(|ctx| {
+            assert_eq!(
+                text(&view, ctx),
+                "deploy",
+                "undo must not step back into a preview state"
+            );
         });
     });
 }
