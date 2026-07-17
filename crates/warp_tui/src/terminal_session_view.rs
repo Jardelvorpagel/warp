@@ -2357,6 +2357,7 @@ impl TuiView for TuiTerminalSessionView {
         TuiContainer::new(terminal_content.finish())
             .with_padding_x(2)
             .with_padding_top(2)
+            .with_padding_bottom(1)
             .finish()
     }
 }
