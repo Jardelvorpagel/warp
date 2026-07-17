@@ -7,6 +7,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
+use cloud_object_models::{
+    AIExecutionProfile, ActionPermission, AskUserQuestionPermission, ComputerUsePermission,
+    RunAgentsPermission, WriteToPtyPermission,
+};
 pub use cloud_object_models::{
     AgentModeCommandExecutionPredicate, DEFAULT_COMMAND_EXECUTION_ALLOWLIST,
     DEFAULT_COMMAND_EXECUTION_DENYLIST,
@@ -32,6 +36,332 @@ use crate::auth::AuthStateProvider;
 use crate::settings::PrivacySettings;
 use crate::terminal::CLIAgent;
 use crate::workspaces::user_workspaces::UserWorkspaces;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct TuiExecutionProfileConfig(AIExecutionProfile);
+
+impl Default for TuiExecutionProfileConfig {
+    fn default() -> Self {
+        Self(AIExecutionProfile {
+            name: "Default (TUI)".to_string(),
+            is_default_profile: true,
+            ..Default::default()
+        })
+    }
+}
+
+impl TuiExecutionProfileConfig {
+    pub(crate) fn from_profile(mut profile: AIExecutionProfile) -> Self {
+        profile.is_default_profile = true;
+        Self(profile)
+    }
+
+    pub(crate) fn profile(&self) -> &AIExecutionProfile {
+        &self.0
+    }
+
+    pub(crate) fn into_profile(self) -> AIExecutionProfile {
+        self.0
+    }
+}
+
+impl settings_value::SettingsValue for TuiExecutionProfileConfig {
+    fn to_file_value(&self) -> serde_json::Value {
+        serde_json::to_value(TuiExecutionProfileFile::from(self.profile()))
+            .expect("TUI execution profile should serialize")
+    }
+
+    fn from_file_value(value: &serde_json::Value) -> Option<Self> {
+        let file_profile = serde_json::from_value::<TuiExecutionProfileFile>(value.clone()).ok()?;
+        Self::try_from(file_profile).ok()
+    }
+}
+
+impl schemars::JsonSchema for TuiExecutionProfileConfig {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("TuiExecutionProfile")
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        generator.subschema_for::<TuiExecutionProfileFile>()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case")]
+enum TuiActionPermission {
+    AgentDecides,
+    AlwaysAllow,
+    #[default]
+    AlwaysAsk,
+}
+
+impl From<ActionPermission> for TuiActionPermission {
+    fn from(value: ActionPermission) -> Self {
+        match value {
+            ActionPermission::AgentDecides => Self::AgentDecides,
+            ActionPermission::AlwaysAllow => Self::AlwaysAllow,
+            ActionPermission::AlwaysAsk | ActionPermission::Unknown => Self::AlwaysAsk,
+        }
+    }
+}
+
+impl From<TuiActionPermission> for ActionPermission {
+    fn from(value: TuiActionPermission) -> Self {
+        match value {
+            TuiActionPermission::AgentDecides => Self::AgentDecides,
+            TuiActionPermission::AlwaysAllow => Self::AlwaysAllow,
+            TuiActionPermission::AlwaysAsk => Self::AlwaysAsk,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case")]
+enum TuiWriteToPtyPermission {
+    AlwaysAllow,
+    #[default]
+    AlwaysAsk,
+    AskOnFirstWrite,
+}
+
+impl From<WriteToPtyPermission> for TuiWriteToPtyPermission {
+    fn from(value: WriteToPtyPermission) -> Self {
+        match value {
+            WriteToPtyPermission::AlwaysAllow => Self::AlwaysAllow,
+            WriteToPtyPermission::AlwaysAsk | WriteToPtyPermission::Unknown => Self::AlwaysAsk,
+            WriteToPtyPermission::AskOnFirstWrite => Self::AskOnFirstWrite,
+        }
+    }
+}
+
+impl From<TuiWriteToPtyPermission> for WriteToPtyPermission {
+    fn from(value: TuiWriteToPtyPermission) -> Self {
+        match value {
+            TuiWriteToPtyPermission::AlwaysAllow => Self::AlwaysAllow,
+            TuiWriteToPtyPermission::AlwaysAsk => Self::AlwaysAsk,
+            TuiWriteToPtyPermission::AskOnFirstWrite => Self::AskOnFirstWrite,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case")]
+enum TuiAskUserQuestionPermission {
+    Never,
+    AskExceptInAutoApprove,
+    #[default]
+    AlwaysAsk,
+}
+
+impl From<AskUserQuestionPermission> for TuiAskUserQuestionPermission {
+    fn from(value: AskUserQuestionPermission) -> Self {
+        match value {
+            AskUserQuestionPermission::Never => Self::Never,
+            AskUserQuestionPermission::AskExceptInAutoApprove => Self::AskExceptInAutoApprove,
+            AskUserQuestionPermission::AlwaysAsk | AskUserQuestionPermission::Unknown => {
+                Self::AlwaysAsk
+            }
+        }
+    }
+}
+
+impl From<TuiAskUserQuestionPermission> for AskUserQuestionPermission {
+    fn from(value: TuiAskUserQuestionPermission) -> Self {
+        match value {
+            TuiAskUserQuestionPermission::Never => Self::Never,
+            TuiAskUserQuestionPermission::AskExceptInAutoApprove => Self::AskExceptInAutoApprove,
+            TuiAskUserQuestionPermission::AlwaysAsk => Self::AlwaysAsk,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case")]
+enum TuiRunAgentsPermission {
+    NeverAllow,
+    AlwaysAllow,
+    #[default]
+    AlwaysAsk,
+}
+
+impl From<RunAgentsPermission> for TuiRunAgentsPermission {
+    fn from(value: RunAgentsPermission) -> Self {
+        match value {
+            RunAgentsPermission::NeverAllow | RunAgentsPermission::Unknown => Self::NeverAllow,
+            RunAgentsPermission::AlwaysAllow => Self::AlwaysAllow,
+            RunAgentsPermission::AlwaysAsk => Self::AlwaysAsk,
+        }
+    }
+}
+
+impl From<TuiRunAgentsPermission> for RunAgentsPermission {
+    fn from(value: TuiRunAgentsPermission) -> Self {
+        match value {
+            TuiRunAgentsPermission::NeverAllow => Self::NeverAllow,
+            TuiRunAgentsPermission::AlwaysAllow => Self::AlwaysAllow,
+            TuiRunAgentsPermission::AlwaysAsk => Self::AlwaysAsk,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename_all = "snake_case")]
+enum TuiComputerUsePermission {
+    #[default]
+    Never,
+    AlwaysAsk,
+    AlwaysAllow,
+}
+
+impl From<ComputerUsePermission> for TuiComputerUsePermission {
+    fn from(value: ComputerUsePermission) -> Self {
+        match value {
+            ComputerUsePermission::Never | ComputerUsePermission::Unknown => Self::Never,
+            ComputerUsePermission::AlwaysAsk => Self::AlwaysAsk,
+            ComputerUsePermission::AlwaysAllow => Self::AlwaysAllow,
+        }
+    }
+}
+
+impl From<TuiComputerUsePermission> for ComputerUsePermission {
+    fn from(value: TuiComputerUsePermission) -> Self {
+        match value {
+            TuiComputerUsePermission::Never => Self::Never,
+            TuiComputerUsePermission::AlwaysAsk => Self::AlwaysAsk,
+            TuiComputerUsePermission::AlwaysAllow => Self::AlwaysAllow,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+struct TuiExecutionProfileFile {
+    name: String,
+    apply_code_diffs: TuiActionPermission,
+    read_files: TuiActionPermission,
+    execute_commands: TuiActionPermission,
+    write_to_pty: TuiWriteToPtyPermission,
+    mcp_permissions: TuiActionPermission,
+    ask_user_question: TuiAskUserQuestionPermission,
+    run_agents: TuiRunAgentsPermission,
+    command_denylist: Vec<String>,
+    command_allowlist: Vec<String>,
+    directory_allowlist: Vec<PathBuf>,
+    mcp_allowlist: Vec<String>,
+    mcp_denylist: Vec<String>,
+    computer_use: TuiComputerUsePermission,
+    base_model: Option<String>,
+    coding_model: Option<String>,
+    cli_agent_model: Option<String>,
+    computer_use_model: Option<String>,
+    context_window_limit: Option<u32>,
+    autosync_plans_to_warp_drive: bool,
+    web_search_enabled: bool,
+}
+
+impl Default for TuiExecutionProfileFile {
+    fn default() -> Self {
+        Self::from(TuiExecutionProfileConfig::default().profile())
+    }
+}
+
+impl From<&AIExecutionProfile> for TuiExecutionProfileFile {
+    fn from(profile: &AIExecutionProfile) -> Self {
+        Self {
+            name: profile.name.clone(),
+            apply_code_diffs: profile.apply_code_diffs.into(),
+            read_files: profile.read_files.into(),
+            execute_commands: profile.execute_commands.into(),
+            write_to_pty: profile.write_to_pty.into(),
+            mcp_permissions: profile.mcp_permissions.into(),
+            ask_user_question: profile.ask_user_question.into(),
+            run_agents: profile.run_agents.into(),
+            command_denylist: profile
+                .command_denylist
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            command_allowlist: profile
+                .command_allowlist
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            directory_allowlist: profile.directory_allowlist.clone(),
+            mcp_allowlist: profile
+                .mcp_allowlist
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            mcp_denylist: profile
+                .mcp_denylist
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            computer_use: profile.computer_use.into(),
+            base_model: profile.base_model.clone().map(Into::into),
+            coding_model: profile.coding_model.clone().map(Into::into),
+            cli_agent_model: profile.cli_agent_model.clone().map(Into::into),
+            computer_use_model: profile.computer_use_model.clone().map(Into::into),
+            context_window_limit: profile.context_window_limit,
+            autosync_plans_to_warp_drive: profile.autosync_plans_to_warp_drive,
+            web_search_enabled: profile.web_search_enabled,
+        }
+    }
+}
+
+impl TryFrom<TuiExecutionProfileFile> for TuiExecutionProfileConfig {
+    type Error = ();
+
+    fn try_from(file: TuiExecutionProfileFile) -> Result<Self, Self::Error> {
+        fn parse_commands(
+            commands: Vec<String>,
+        ) -> Result<Vec<AgentModeCommandExecutionPredicate>, ()> {
+            commands
+                .into_iter()
+                .map(|command| {
+                    AgentModeCommandExecutionPredicate::new_regex(&command).map_err(|_| ())
+                })
+                .collect()
+        }
+
+        fn parse_uuids(ids: Vec<String>) -> Result<Vec<uuid::Uuid>, ()> {
+            ids.into_iter()
+                .map(|id| uuid::Uuid::parse_str(&id).map_err(|_| ()))
+                .collect()
+        }
+
+        Ok(Self::from_profile(AIExecutionProfile {
+            name: file.name,
+            is_default_profile: true,
+            apply_code_diffs: file.apply_code_diffs.into(),
+            read_files: file.read_files.into(),
+            execute_commands: file.execute_commands.into(),
+            write_to_pty: file.write_to_pty.into(),
+            mcp_permissions: file.mcp_permissions.into(),
+            ask_user_question: file.ask_user_question.into(),
+            run_agents: file.run_agents.into(),
+            command_denylist: parse_commands(file.command_denylist)?,
+            command_allowlist: parse_commands(file.command_allowlist)?,
+            directory_allowlist: file.directory_allowlist,
+            mcp_allowlist: parse_uuids(file.mcp_allowlist)?,
+            mcp_denylist: parse_uuids(file.mcp_denylist)?,
+            computer_use: file.computer_use.into(),
+            base_model: file.base_model.map(Into::into),
+            coding_model: file.coding_model.map(Into::into),
+            cli_agent_model: file.cli_agent_model.map(Into::into),
+            computer_use_model: file.computer_use_model.map(Into::into),
+            context_window_limit: file.context_window_limit,
+            autosync_plans_to_warp_drive: file.autosync_plans_to_warp_drive,
+            web_search_enabled: file.web_search_enabled,
+        }))
+    }
+}
 
 pub enum FocusedTerminalInfoEvent {
     TerminalInfoUpdated,
@@ -1111,6 +1441,20 @@ define_settings_group!(AISettings, settings: [
         private: false,
         toml_path: "agents.model",
         description: "The default model the TUI agent uses.",
+    }
+    // The TUI's local execution profile. Unlike GUI execution profiles, this
+    // profile is stored only in the TUI settings file and never synced as a
+    // cloud object.
+    tui_execution_profile: TuiExecutionProfile {
+        type: TuiExecutionProfileConfig,
+        default: TuiExecutionProfileConfig::default(),
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::TUI,
+        private: false,
+        toml_path: "agents.execution_profile",
+        max_table_depth: 1,
+        description: "The local AI execution profile used by the TUI.",
     }
     // Which unit the TUI footer's usage entry displays (credits or provider
     // cost), flipped by clicking the entry.

@@ -1,11 +1,13 @@
 use chrono::{DateTime, Utc};
+use settings::Setting as _;
 use warp_core::features::FeatureFlag;
 use warp_graphql::object_permissions::AccessLevel;
 use warpui::{App, SingletonEntity};
 
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::execution_profiles::{
-    AIExecutionProfile, ActionPermission, CloudAIExecutionProfileModel, WriteToPtyPermission,
+    AIExecutionProfile, ActionPermission, CloudAIExecutionProfileModel, RunAgentsPermission,
+    WriteToPtyPermission,
 };
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::auth::user::TEST_USER_UID;
@@ -19,7 +21,7 @@ use crate::network::NetworkStatus;
 use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ServerId, SyncId};
 use crate::server::sync_queue::SyncQueue;
-use crate::settings::PrivacySettings;
+use crate::settings::{AISettings, PrivacySettings, TuiExecutionProfileConfig};
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workspaces::team_tester::TeamTesterStatus;
 use crate::workspaces::user_workspaces::UserWorkspaces;
@@ -87,6 +89,111 @@ fn install_singletons(app: &mut App, auth_state: AuthStateProvider) {
     app.add_singleton_model(|_| TemplatableMCPServerManager::default());
     app.add_singleton_model(PrivacySettings::mock);
     app.add_singleton_model(UserWorkspaces::default_mock);
+}
+
+fn tui_launch_mode() -> LaunchMode {
+    LaunchMode::Tui {
+        mount: Box::new(|_| {}),
+        api_key: None,
+    }
+}
+
+#[test]
+fn tui_initializes_from_local_execution_profile_setting() {
+    App::test((), |mut app| async move {
+        install_singletons(&mut app, AuthStateProvider::new_for_test());
+        let profile = AIExecutionProfile {
+            name: "TUI profile".to_string(),
+            is_default_profile: true,
+            run_agents: RunAgentsPermission::AlwaysAllow,
+            execute_commands: ActionPermission::AlwaysAllow,
+            ..Default::default()
+        };
+        AISettings::handle(&app).update(&mut app, |settings, ctx| {
+            settings
+                .tui_execution_profile
+                .set_value(
+                    TuiExecutionProfileConfig::from_profile(profile.clone()),
+                    ctx,
+                )
+                .unwrap();
+        });
+
+        let profile_model =
+            app.add_singleton_model(|ctx| AIExecutionProfilesModel::new(&tui_launch_mode(), ctx));
+
+        profile_model.read(&app, |model, ctx| {
+            let active = model.default_profile(ctx);
+            assert_eq!(active.data(), &profile);
+            assert_eq!(active.sync_id(), None);
+            assert!(!model.has_multiple_profiles());
+        });
+        profile_model.update(&mut app, |model, ctx| {
+            assert_eq!(model.create_profile(ctx), None);
+        });
+    });
+}
+
+#[test]
+fn tui_profile_hot_reloads_from_ai_settings() {
+    App::test((), |mut app| async move {
+        install_singletons(&mut app, AuthStateProvider::new_for_test());
+        let profile_model =
+            app.add_singleton_model(|ctx| AIExecutionProfilesModel::new(&tui_launch_mode(), ctx));
+        let original_id = profile_model.read(&app, |model, _ctx| model.default_profile_id());
+
+        let updated_profile = AIExecutionProfile {
+            name: "Reloaded TUI profile".to_string(),
+            is_default_profile: true,
+            run_agents: RunAgentsPermission::NeverAllow,
+            read_files: ActionPermission::AlwaysAllow,
+            ..Default::default()
+        };
+        AISettings::handle(&app).update(&mut app, |settings, ctx| {
+            settings
+                .tui_execution_profile
+                .set_value(
+                    TuiExecutionProfileConfig::from_profile(updated_profile.clone()),
+                    ctx,
+                )
+                .unwrap();
+        });
+
+        profile_model.read(&app, |model, ctx| {
+            assert_eq!(model.default_profile_id(), original_id);
+            assert_eq!(model.default_profile(ctx).data(), &updated_profile);
+        });
+    });
+}
+
+#[test]
+fn tui_profile_edits_persist_to_local_settings() {
+    App::test((), |mut app| async move {
+        install_singletons(&mut app, AuthStateProvider::new_for_test());
+        let profile_model =
+            app.add_singleton_model(|ctx| AIExecutionProfilesModel::new(&tui_launch_mode(), ctx));
+        let profile_id = profile_model.read(&app, |model, _ctx| model.default_profile_id());
+
+        profile_model.update(&mut app, |model, ctx| {
+            model.set_run_agents(profile_id, RunAgentsPermission::AlwaysAllow, ctx);
+        });
+
+        profile_model.read(&app, |model, ctx| {
+            assert_eq!(
+                model.default_profile(ctx).data().run_agents,
+                RunAgentsPermission::AlwaysAllow
+            );
+            assert_eq!(model.default_profile(ctx).sync_id(), None);
+        });
+        app.read(|ctx| {
+            let settings = AISettings::as_ref(ctx);
+            assert_eq!(
+                settings.tui_execution_profile.value().profile().run_agents,
+                RunAgentsPermission::AlwaysAllow
+            );
+            assert!(settings.tui_execution_profile.is_value_explicitly_set());
+        });
+    });
 }
 
 /// Regression test for the onboarding autonomy bug where

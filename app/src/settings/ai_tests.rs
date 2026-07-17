@@ -8,6 +8,85 @@ use crate::auth::AuthStateProvider;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 
+#[test]
+fn tui_execution_profile_file_format_round_trips() {
+    use settings_value::SettingsValue as _;
+
+    let mcp_id = uuid::Uuid::new_v4();
+    let profile = AIExecutionProfile {
+        name: "Local TUI".to_string(),
+        is_default_profile: true,
+        apply_code_diffs: ActionPermission::AlwaysAllow,
+        read_files: ActionPermission::AlwaysAsk,
+        execute_commands: ActionPermission::AgentDecides,
+        write_to_pty: WriteToPtyPermission::AskOnFirstWrite,
+        mcp_permissions: ActionPermission::AlwaysAllow,
+        ask_user_question: AskUserQuestionPermission::AskExceptInAutoApprove,
+        run_agents: RunAgentsPermission::AlwaysAllow,
+        command_denylist: vec![AgentModeCommandExecutionPredicate::new_regex("rm .*").unwrap()],
+        command_allowlist: vec![
+            AgentModeCommandExecutionPredicate::new_regex("git status").unwrap()
+        ],
+        directory_allowlist: vec![PathBuf::from("/workspace")],
+        mcp_allowlist: vec![mcp_id],
+        mcp_denylist: vec![],
+        computer_use: ComputerUsePermission::AlwaysAsk,
+        base_model: Some("base-model".into()),
+        coding_model: Some("coding-model".into()),
+        cli_agent_model: Some("cli-model".into()),
+        computer_use_model: Some("computer-use-model".into()),
+        context_window_limit: Some(128_000),
+        autosync_plans_to_warp_drive: false,
+        web_search_enabled: false,
+    };
+    let config = TuiExecutionProfileConfig::from_profile(profile.clone());
+
+    let file_value = config.to_file_value();
+    assert_eq!(file_value["apply_code_diffs"], "always_allow");
+    assert_eq!(file_value["write_to_pty"], "ask_on_first_write");
+    assert_eq!(
+        file_value["ask_user_question"],
+        "ask_except_in_auto_approve"
+    );
+    assert_eq!(file_value["run_agents"], "always_allow");
+    assert_eq!(file_value["computer_use"], "always_ask");
+
+    let decoded = TuiExecutionProfileConfig::from_file_value(&file_value).unwrap();
+    assert_eq!(decoded.profile(), &profile);
+}
+
+#[test]
+fn tui_execution_profile_file_format_supports_partial_tables() {
+    use settings_value::SettingsValue as _;
+
+    let config = TuiExecutionProfileConfig::from_file_value(&serde_json::json!({
+        "run_agents": "always_allow",
+    }))
+    .unwrap();
+
+    assert_eq!(
+        config.profile().run_agents,
+        RunAgentsPermission::AlwaysAllow
+    );
+    assert_eq!(
+        config.profile().apply_code_diffs,
+        ActionPermission::AgentDecides
+    );
+    assert_eq!(config.profile().name, "Default (TUI)");
+    assert!(config.profile().is_default_profile);
+}
+
+#[test]
+fn tui_execution_profile_file_format_rejects_invalid_predicates() {
+    use settings_value::SettingsValue as _;
+
+    let config = TuiExecutionProfileConfig::from_file_value(&serde_json::json!({
+        "command_allowlist": ["("],
+    }));
+
+    assert!(config.is_none());
+}
+
 fn create_test_request_limit_info(
     limit: usize,
     used: usize,

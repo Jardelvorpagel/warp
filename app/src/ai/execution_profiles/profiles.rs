@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
+use settings::Setting as _;
 use uuid::Uuid;
 use warp_core::channel::ChannelState;
 use warp_core::user_preferences::GetUserPreferences;
@@ -23,7 +24,10 @@ use crate::cloud_object::{CloudObject as _, GenericStringObjectFormat, JsonObjec
 use crate::drive::CloudObjectTypeAndId;
 use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ClientId, SyncId};
-use crate::settings::AgentModeCommandExecutionPredicate;
+use crate::settings::{
+    AISettings, AISettingsChangedEvent, AgentModeCommandExecutionPredicate,
+    TuiExecutionProfileConfig,
+};
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{send_telemetry_from_ctx, CloudModel, LaunchMode, TelemetryEvent};
 
@@ -81,6 +85,12 @@ pub enum DefaultProfileState {
     Synced {
         id: ClientProfileId,
     },
+    /// The TUI has one profile backed by its local settings file. It never
+    /// participates in cloud object synchronization.
+    Tui {
+        id: ClientProfileId,
+        profile: AIExecutionProfile,
+    },
     /// Currently, the behavior of the CLI default is that it
     /// cannot be updated and will never be synced.
     #[allow(dead_code)]
@@ -95,6 +105,7 @@ impl std::fmt::Display for DefaultProfileState {
         match self {
             DefaultProfileState::Unsynced { .. } => write!(f, "Unsynced"),
             DefaultProfileState::Synced { .. } => write!(f, "Synced"),
+            DefaultProfileState::Tui { .. } => write!(f, "TUI"),
             DefaultProfileState::Cli { .. } => write!(f, "CLI"),
         }
     }
@@ -105,15 +116,17 @@ impl DefaultProfileState {
         match self {
             DefaultProfileState::Unsynced { id, .. } => *id,
             DefaultProfileState::Synced { id } => *id,
+            DefaultProfileState::Tui { id, .. } => *id,
             DefaultProfileState::Cli { id, .. } => *id,
         }
     }
 }
 
 pub struct AIExecutionProfilesModel {
-    /// The default profile can be in one of three states:
+    /// The default profile can be in one of four states:
     /// - Unsynced: No cloud object backing the profile. It's purely local read-only data.
     /// - Synced: A cloud object backs the profile, created either when edited locally or received from cloud.
+    /// - TUI: A profile backed by the TUI's local settings file.
     /// - CLI: When running in CLI mode, a more permissive default profile that doesn't sync to cloud.
     ///
     /// Note that the default_profile_state becomes synced either (1) when an edit happens on
@@ -138,72 +151,99 @@ impl AIExecutionProfilesModel {
                 let profile_id_to_sync_id: HashMap<ClientProfileId, SyncId> = HashMap::new();
                 let active_profiles_per_session: HashMap<EntityId, ClientProfileId> = HashMap::new();
             } else {
-                let cloud_model = CloudModel::handle(ctx).as_ref(ctx);
-                let all_profiles_from_cloud: Vec<&super::CloudAIExecutionProfile> = cloud_model
-                    .get_all_objects_of_type::<GenericStringObjectId, CloudAIExecutionProfileModel>()
-                    .filter(|p| Self::is_owned_by_current_user(p, ctx))
-                    .collect();
-
-                let default_profile_from_cloud: Option<&super::CloudAIExecutionProfile> = all_profiles_from_cloud
-                    .iter()
-                    .find(|obj| obj.model().string_model.is_default_profile)
-                    .copied();
-
-                let mut profile_id_to_sync_id: HashMap<ClientProfileId, SyncId> = HashMap::new();
                 let active_profiles_per_session: HashMap<EntityId, ClientProfileId> = HashMap::new();
+                let (default_profile_state, profile_id_to_sync_id) = match launch_mode {
+                    LaunchMode::Tui { .. } => (
+                        DefaultProfileState::Tui {
+                            id: ClientProfileId::new(),
+                            profile: Self::tui_profile_from_settings(ctx),
+                        },
+                        HashMap::new(),
+                    ),
+                    _ => {
+                        let cloud_model = CloudModel::handle(ctx).as_ref(ctx);
+                        let all_profiles_from_cloud: Vec<&super::CloudAIExecutionProfile> =
+                            cloud_model
+                                .get_all_objects_of_type::<
+                                    GenericStringObjectId,
+                                    CloudAIExecutionProfileModel,
+                                >()
+                                .filter(|p| Self::is_owned_by_current_user(p, ctx))
+                                .collect();
+                        let default_profile_from_cloud =
+                            all_profiles_from_cloud.iter().find(|obj| {
+                                obj.model().string_model.is_default_profile
+                            });
+                        let mut profile_id_to_sync_id = HashMap::new();
 
-                // Insert all non-default profiles from the cloud
-                for cloud_profile in all_profiles_from_cloud.iter().filter(|p| !p.model().string_model.is_default_profile) {
-                    let profile_id = ClientProfileId::new();
-                    profile_id_to_sync_id.insert(profile_id, cloud_profile.id);
-                }
+                        for cloud_profile in all_profiles_from_cloud
+                            .iter()
+                            .filter(|p| !p.model().string_model.is_default_profile)
+                        {
+                            profile_id_to_sync_id
+                                .insert(ClientProfileId::new(), cloud_profile.id);
+                        }
 
-                let default_profile_state = match launch_mode {
-                    // The TUI front-end is an app-style client, so it shares the
-                    // GUI app's cloud-synced default execution profile.
-                    LaunchMode::App { .. }
-                    | LaunchMode::Test { .. }
-                    | LaunchMode::Tui { .. } => {
-                        match default_profile_from_cloud {
-                            Some(p) => {
-                                let execution_profile_id = ClientProfileId::new();
-                                profile_id_to_sync_id.insert(execution_profile_id, p.id);
-                                DefaultProfileState::Synced {
-                                    id: execution_profile_id,
+                        let default_profile_state = match launch_mode {
+                            LaunchMode::App { .. } | LaunchMode::Test { .. } => {
+                                match default_profile_from_cloud {
+                                    Some(profile) => {
+                                        let execution_profile_id = ClientProfileId::new();
+                                        profile_id_to_sync_id
+                                            .insert(execution_profile_id, profile.id);
+                                        DefaultProfileState::Synced {
+                                            id: execution_profile_id,
+                                        }
+                                    }
+                                    None => DefaultProfileState::Unsynced {
+                                        id: ClientProfileId::new(),
+                                        profile: super::create_default_from_legacy_settings(ctx),
+                                    },
                                 }
                             }
-                            None => DefaultProfileState::Unsynced {
+                            LaunchMode::CommandLine {
+                                is_sandboxed,
+                                computer_use_override,
+                                ..
+                            } => DefaultProfileState::Cli {
+                                profile: AIExecutionProfile::create_default_cli_profile(
+                                    *is_sandboxed,
+                                    *computer_use_override,
+                                ),
                                 id: ClientProfileId::new(),
-                                profile: super::create_default_from_legacy_settings(ctx),
                             },
-                        }
+                            LaunchMode::RemoteServerProxy
+                            | LaunchMode::RemoteServerDaemon { .. } => {
+                                DefaultProfileState::Unsynced {
+                                    id: ClientProfileId::new(),
+                                    profile: super::create_default_from_legacy_settings(ctx),
+                                }
+                            }
+                            LaunchMode::Tui { .. } => unreachable!(),
+                        };
+                        (default_profile_state, profile_id_to_sync_id)
                     }
-                    // When running as a CLI, we ignore the GUI default and use a more permissive default.
-                    LaunchMode::CommandLine { is_sandboxed, computer_use_override, .. } => {
-                        DefaultProfileState::Cli {
-                            profile: AIExecutionProfile::create_default_cli_profile(*is_sandboxed, *computer_use_override),
-                            id: ClientProfileId::new()
-                        }
-                    }
-                    // RemoteServerProxy and RemoteServerDaemon don't use AI
-                    // execution profiles. They never reach this code path
-                    // since they don't go through initialize_app, but handle
-                    // exhaustively.
-                    LaunchMode::RemoteServerProxy | LaunchMode::RemoteServerDaemon { .. } => DefaultProfileState::Unsynced {
-                        id: ClientProfileId::new(),
-                        profile: super::create_default_from_legacy_settings(ctx),
-                    },
                 };
             }
         }
 
+        let uses_local_tui_profile =
+            matches!(default_profile_state, DefaultProfileState::Tui { .. });
         // We have to listen for changes to AIExecutionProfiles for a few reasons:
         // (1) In case the default profile is unsynced AND a default profile arrives from the cloud
         // (2) Let views subscribed to us know whenever a backing profile changes.
         // (3) Keep profile_id_to_sync_id map up to date when profiles are created/deleted remotely
-        if !cfg!(feature = "agent_mode_evals") {
+        if !cfg!(feature = "agent_mode_evals") && !uses_local_tui_profile {
             ctx.subscribe_to_model(&CloudModel::handle(ctx), |me, _, event, ctx| {
                 me.handle_cloud_model_event(event, ctx);
+            });
+        }
+
+        if uses_local_tui_profile {
+            ctx.subscribe_to_model(&AISettings::handle(ctx), |me, _, event, ctx| {
+                if matches!(event, AISettingsChangedEvent::TuiExecutionProfile { .. }) {
+                    me.reload_tui_profile(ctx);
+                }
             });
         }
 
@@ -261,6 +301,33 @@ impl AIExecutionProfilesModel {
             .is_some_and(|owner| profile.permissions().owner == owner)
     }
 
+    fn tui_profile_from_settings(ctx: &AppContext) -> AIExecutionProfile {
+        let settings = AISettings::as_ref(ctx);
+        if settings.tui_execution_profile.is_value_explicitly_set() {
+            return settings
+                .tui_execution_profile
+                .value()
+                .clone()
+                .into_profile();
+        }
+
+        let mut profile = super::create_default_from_legacy_settings(ctx);
+        profile.name = "Default (TUI)".to_string();
+        profile.is_default_profile = true;
+        profile
+    }
+
+    fn reload_tui_profile(&mut self, ctx: &mut ModelContext<Self>) {
+        let DefaultProfileState::Tui { id, profile } = &mut self.default_profile_state else {
+            return;
+        };
+        let new_profile = Self::tui_profile_from_settings(ctx);
+        if *profile != new_profile {
+            *profile = new_profile;
+            ctx.emit(AIExecutionProfilesModelEvent::ProfileUpdated(*id));
+        }
+    }
+
     /// This function performs one-time migrations from legacy settings into the default profile.
     /// The issue this solves is that, whenever we migrate an existing setting into the profile object,
     /// users will initialize the new field to its default value. We need to manually check to see if
@@ -296,6 +363,9 @@ impl AIExecutionProfilesModel {
     }
 
     pub fn create_profile(&mut self, ctx: &mut ModelContext<Self>) -> Option<ClientProfileId> {
+        if matches!(self.default_profile_state, DefaultProfileState::Tui { .. }) {
+            return None;
+        }
         let profile_id = ClientProfileId::new();
 
         let Some(owner) = UserWorkspaces::as_ref(ctx).personal_drive(ctx) else {
@@ -325,6 +395,9 @@ impl AIExecutionProfilesModel {
     }
 
     pub fn delete_profile(&mut self, profile_id: ClientProfileId, ctx: &mut ModelContext<Self>) {
+        if matches!(self.default_profile_state, DefaultProfileState::Tui { .. }) {
+            return;
+        }
         let id = self.default_profile_state.id();
         if id == profile_id {
             log::warn!("Attempted to delete default profile (id: {profile_id})");
@@ -351,6 +424,11 @@ impl AIExecutionProfilesModel {
 
     // On logout, we need to clear any existing profile state.
     pub fn reset(&mut self) {
+        if matches!(self.default_profile_state, DefaultProfileState::Tui { .. }) {
+            self.profile_id_to_sync_id.clear();
+            self.active_profiles_per_session.clear();
+            return;
+        }
         self.default_profile_state = DefaultProfileState::Unsynced {
             id: ClientProfileId::new(),
             profile: AIExecutionProfile {
@@ -383,7 +461,9 @@ impl AIExecutionProfilesModel {
 
     pub fn default_profile(&self, ctx: &AppContext) -> AIExecutionProfileInfo {
         match &self.default_profile_state {
-            DefaultProfileState::Unsynced { id, profile } => AIExecutionProfileInfo {
+            DefaultProfileState::Unsynced { id, profile }
+            | DefaultProfileState::Tui { id, profile }
+            | DefaultProfileState::Cli { id, profile } => AIExecutionProfileInfo {
                 id: *id,
                 sync_id: None,
                 data: profile.clone(),
@@ -413,11 +493,6 @@ impl AIExecutionProfilesModel {
                     data,
                 }
             }
-            DefaultProfileState::Cli { id, profile } => AIExecutionProfileInfo {
-                id: *id,
-                sync_id: None,
-                data: profile.clone(),
-            },
         }
     }
 
@@ -443,6 +518,7 @@ impl AIExecutionProfilesModel {
         // Handle an unsynced default profile (including CLI)
         match &self.default_profile_state {
             DefaultProfileState::Unsynced { id, profile }
+            | DefaultProfileState::Tui { id, profile }
             | DefaultProfileState::Cli { id, profile } => {
                 if profile_id == *id {
                     return Some(AIExecutionProfileInfo {
@@ -1244,13 +1320,16 @@ impl AIExecutionProfilesModel {
         );
     }
 
-    /// `edit_profile_internal` edits an AIExecutionProfile and upserts the changed profile to the cloud
+    /// Edits an execution profile and persists it to the profile's backing
+    /// store: the TUI settings file for the local TUI profile, or cloud
+    /// objects for GUI profiles.
     /// Parameters:
     /// * `profile_id`: The id of the profile to edit
-    /// * `edit_fn`: a closure that safely modifies the AIExecutionProfile. It should return `true` if the profile was changed, `false` otherwise. When `true`, it syncs the changes to the cloud, and otherwise exits early to prevent excessive cloud operations if no changes occurred.
+    /// * `edit_fn`: safely modifies the profile and returns whether it changed.
+    ///   Unchanged profiles are not persisted.
     /// * `ctx`: The model context
     ///
-    /// Returns `true` if the profile was actually changed (and synced),
+    /// Returns `true` if the profile was actually changed,
     /// `false` otherwise. Callers can use this to gate side effects such as
     /// telemetry on real changes.
     fn edit_profile_internal(
@@ -1259,6 +1338,26 @@ impl AIExecutionProfilesModel {
         edit_fn: impl FnOnce(&mut AIExecutionProfile) -> bool,
         ctx: &mut ModelContext<Self>,
     ) -> bool {
+        if let DefaultProfileState::Tui { id, profile } = &mut self.default_profile_state {
+            if *id == profile_id {
+                let mut new_profile = profile.clone();
+                if !edit_fn(&mut new_profile) {
+                    return false;
+                }
+
+                *profile = new_profile.clone();
+                let update_result = AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    settings
+                        .tui_execution_profile
+                        .set_value(TuiExecutionProfileConfig::from_profile(new_profile), ctx)
+                });
+                if let Err(error) = update_result {
+                    report_error!(error.context("Failed to persist the TUI execution profile"));
+                }
+                ctx.emit(AIExecutionProfilesModelEvent::ProfileUpdated(profile_id));
+                return true;
+            }
+        }
         // We don't yet support editing the default profile for the CLI.
         if let DefaultProfileState::Cli { id, .. } = &self.default_profile_state {
             if *id == profile_id {
