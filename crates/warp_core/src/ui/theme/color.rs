@@ -100,6 +100,15 @@ impl WarpTheme {
         self.background
     }
 
+    /// Background color for the workspace chrome.
+    pub fn workspace_chrome_background(&self) -> Fill {
+        if self.match_terminal_background {
+            self.background()
+        } else {
+            internal_colors::fg_overlay_1(self)
+        }
+    }
+
     pub fn terminal_colors(&self) -> &TerminalColors {
         &self.terminal_colors
     }
