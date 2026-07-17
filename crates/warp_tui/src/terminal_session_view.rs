@@ -144,26 +144,30 @@ const SHELL_MODE_HINT: &str = "shell mode · esc to exit";
 const COPY_SELECTION_HINT: &str = "copied to clipboard";
 const COPY_FAILED_HINT: &str = "failed to copy to clipboard";
 
+/// Footer keyboard hint shown in idle / post-response state. Both shortcuts
+/// are backed by real behaviors: `↑ to edit` restores the last submitted
+/// message (CODE-1867); `← for conversations` opens the conversation list
+/// (landed in CODE-1868).
+const IDLE_KEYBOARD_HINT: &str = "↑ to edit  ← for conversations";
+
+/// Footer keyboard hint shown while an agent response is in progress.
+/// `/ for commands` is backed by the slash-command menu triggered by typing
+/// `/` in the input.
+const WARPING_KEYBOARD_HINT: &str = "/ for commands";
+
 fn raw_prompt_if_not_blank(input: &str) -> Option<&str> {
     (!input.trim().is_empty()).then_some(input)
 }
 
-fn render_left_footer_hint(
-    hint: Option<(&str, TuiStyle)>,
-    show_conversations_hint: bool,
-    builder: &TuiUiBuilder,
-) -> Option<Box<dyn TuiElement>> {
-    match hint {
-        Some((text, style)) => Some(TuiText::new(text).with_style(style).truncate().finish()),
-        None if show_conversations_hint => Some(
-            TuiText::from_spans([
-                ("←".to_owned(), builder.accent_text_style()),
-                (" for conversations".to_owned(), builder.muted_text_style()),
-            ])
-            .truncate()
-            .finish(),
-        ),
-        None => None,
+/// Returns the contextual keyboard hint for the footer's left slot, shown
+/// when no higher-priority hint (ctrl-c, loading, transient, shell mode) is
+/// active. The hint text varies based on whether the selected conversation
+/// has an in-flight agent response.
+pub(crate) fn contextual_keyboard_hint(is_in_progress: bool) -> &'static str {
+    if is_in_progress {
+        WARPING_KEYBOARD_HINT
+    } else {
+        IDLE_KEYBOARD_HINT
     }
 }
 /// Entry point that requested conversation restoration.
@@ -1436,20 +1440,27 @@ impl TuiTerminalSessionView {
         })
     }
 
+    /// Whether the selected conversation has an in-flight agent response.
+    fn is_active_conversation_in_progress(&self, ctx: &AppContext) -> bool {
+        self.conversation_selection
+            .as_ref(ctx)
+            .selected_conversation(ctx)
+            .is_some_and(|conversation| conversation.status().is_in_progress())
+    }
+
     /// Builds the status footer under the input box. The left slot shows one
     /// hint at a time — the ctrl-c exit confirmation while armed, else a
-    /// transient notice, else the shell-mode callout, else the conversations
-    /// callout while the input is empty and no inline menu is visible; the
-    /// active model and working directory are pushed to the right edge behind a
-    /// flex spacer. Every child truncates to a single row, so the row lays out
-    /// one row tall.
+    /// transient notice, else the shell-mode callout, else a contextual
+    /// keyboard hint; the active model and working directory are pushed to the
+    /// right edge behind a flex spacer. Every child truncates to a single row,
+    /// so the row lays out one row tall.
     fn render_footer(&self, ctx: &AppContext) -> TuiFlex {
         let builder = TuiUiBuilder::from_app(ctx);
         let muted = builder.muted_text_style();
         let mut left = TuiFlex::row();
         // Left slot, highest priority first: while armed, the ctrl-c hint
         // replaces the other hints in place.
-        let hint = if self.exit_confirmation.is_armed() {
+        let hint: Option<(&str, TuiStyle)> = if self.exit_confirmation.is_armed() {
             Some((CTRL_C_EXIT_HINT, muted))
         } else if matches!(
             &self.conversation_restore_state,
@@ -1468,13 +1479,11 @@ impl TuiTerminalSessionView {
         } else if self.is_shell_mode(ctx) {
             Some((SHELL_MODE_HINT, builder.shell_mode_accent_style()))
         } else {
-            None
+            Some((contextual_keyboard_hint(self.is_active_conversation_in_progress(ctx)), muted))
         };
 
-        let show_conversations_hint = self.input_view.as_ref(ctx).is_empty(ctx)
-            && !self.suggestions_mode.as_ref(ctx).mode().is_visible();
-        if let Some(hint) = render_left_footer_hint(hint, show_conversations_hint, &builder) {
-            left = left.child(hint);
+        if let Some((text, style)) = hint {
+            left = left.child(TuiText::new(text).with_style(style).truncate().finish());
         }
         let mut footer = TuiFlex::row().flex_child(left.finish());
         let model_name = LLMPreferences::as_ref(ctx)
