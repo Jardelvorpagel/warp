@@ -46,11 +46,10 @@ use super::set_default_model_modal::{SetDefaultModelModalBody, SetDefaultModelMo
 use super::settings_page::{
     build_sub_header, build_toggle_element, render_body_item_label,
     render_body_item_label_with_icon, render_custom_size_header, render_dropdown_item,
-    render_dropdown_item_label, render_filterable_dropdown_item,
-    render_full_pane_width_ai_button, render_input_list,
-    render_separator, render_settings_info_banner, InputListItem, LocalOnlyIconState, MatchData,
-    PageType, SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, ToggleState,
-    HEADER_PADDING, TOGGLE_BUTTON_RIGHT_PADDING,
+    render_dropdown_item_label, render_filterable_dropdown_item, render_full_pane_width_ai_button,
+    render_input_list, render_separator, render_settings_info_banner, InputListItem,
+    LocalOnlyIconState, MatchData, PageType, SettingsPageMeta, SettingsPageViewHandle,
+    SettingsWidget, ToggleState, HEADER_PADDING, TOGGLE_BUTTON_RIGHT_PADDING,
 };
 use super::{
     editor_text_colors, flags, SettingActionPairContexts, SettingActionPairDescriptions,
@@ -156,9 +155,7 @@ use crate::server::telemetry::{
     AgentModeAutoDetectionSettingOrigin, AutonomySettingToggleSource,
     ToggleCodeSuggestionsSettingSource,
 };
-use crate::settings::{
-    AISettings, VoiceInputLanguage, VoiceInputToggleKey, VOICE_INPUT_LANGUAGES,
-};
+use crate::settings::{AISettings, VoiceInputLanguage, VoiceInputToggleKey, VOICE_INPUT_LANGUAGES};
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
 use crate::util::bindings;
