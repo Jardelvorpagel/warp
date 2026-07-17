@@ -84,7 +84,9 @@ async fn start_reports_unsupported_when_ffmpeg_absent() {
         std::env::set_var("PATH", path);
     }
 
-    let err = result.expect_err("expected RecordingError::Environment when ffmpeg is not on PATH");
+    let err = result
+        .err()
+        .expect("expected RecordingError::Environment when ffmpeg is not on PATH");
     match err {
         // A headless macOS host has no display, so `main_display_dimensions`
         // returns (0, 0) and `start` errors before ffmpeg is ever invoked. The

@@ -8,7 +8,8 @@
 //! ffmpeg input device from `x11grab` (`$DISPLAY`) to `avfoundation`
 //! (`Capture screen 0:none`). The shared
 //! [`RecordingHandle`](crate::RecordingHandle) lifecycle, encode settings, and
-//! bounded-capture (`-t` / `-fs`) contract are identical to Linux; see the
+//! bounded-capture (`-t` input option / `-fs`) and playback-speed (`-vf setpts`)
+//! handling are identical to Linux; see the
 //! code-split note in the REMOTE-2160 spec for why the
 //! `wait_for_first_output` / `ffmpeg_error_tail` / SIGINT-finalize logic is
 //! duplicated between the two recorder modules.
@@ -20,8 +21,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use instant::Instant;
-use nix::sys::signal::Signal;
-use nix::sys::signal::kill;
+use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use tokio::process::{Child, Command};
 
@@ -68,6 +68,15 @@ impl crate::Recorder for Recorder {
             });
         }
 
+        // TODO(vkodithala): implement window-scoped recording for macOS. ffmpeg's
+        // avfoundation input captures a whole display (`Capture screen <N>`), not a
+        // specific window, so `config.target` (`Target::Window { window_id, .. }`)
+        // is currently ignored and the main display is always recorded. Window
+        // scoping needs either a `-vf crop=W:H:X:Y` filter chained off the display
+        // capture (using `mac::window::window_by_id` for CGWindowBounds) or a
+        // ScreenCaptureKit per-window pipeline replacing the avfoundation sidecar.
+        // Follow-on; whole-screen only for now.
+
         let path =
             std::env::temp_dir().join(format!("warp-recording-{}.mp4", uuid::Uuid::new_v4()));
         // ffmpeg's progress log goes to a file so its stderr pipe can never fill
@@ -77,25 +86,7 @@ impl crate::Recorder for Recorder {
             reason: format!("failed to create the recording log file: {e}"),
         })?;
 
-        let mut command = Command::new("ffmpeg");
-        command
-            .arg("-y")
-            .args(["-f", "avfoundation"])
-            .args(["-framerate", &config.frame_rate.to_string()])
-            .args(["-capture_cursor", "1"])
-            .args(["-capture_mouse_clicks", "1"])
-            .args(["-pixel_format", "uyvy422"])
-            .args(["-video_size", &format!("{width}x{height}")])
-            .args(["-i", AVFOUNDATION_INPUT])
-            .args(["-c:v", "libx264"])
-            .args(["-preset", "ultrafast"])
-            .args(["-pix_fmt", "yuv420p"])
-            .args(["-movflags", "+faststart"]);
-        // Enforce capture limits in ffmpeg so abandoned recordings remain bounded.
-        command
-            .arg("-t")
-            .arg(format!("{:.3}", config.max_duration.as_secs_f64()));
-        command.arg("-fs").arg(config.max_size_bytes.to_string());
+        let mut command = new_ffmpeg_capture_command(&config, width, height);
         command
             .arg(&path)
             .stdin(Stdio::null())
@@ -199,6 +190,52 @@ impl crate::Recorder for Recorder {
     }
 }
 
+/// Builds the ffmpeg `avfoundation` capture command for the main display.
+///
+/// Mirrors [`crate::linux::recording::new_ffmpeg_capture_command`] structurally:
+/// the same `-y` / encode (`-c:v libx264 -preset ultrafast -pix_fmt yuv420p`) /
+/// bounded-capture (`-t` input option + `-fs` output option) / playback-speed
+/// (`-vf setpts`) contract, swapping only the input device from `x11grab` to
+/// `avfoundation` (`Capture screen 0:none`) and the avfoundation-specific input
+/// options (`-framerate` / `-capture_cursor` / `-capture_mouse_clicks` /
+/// `-pixel_format uyvy422` / `-video_size`). The output path and stdio
+/// redirection are added by [`Recorder::start`] before spawning, so this builder
+/// is unit-testable without opening a display or launching ffmpeg.
+fn new_ffmpeg_capture_command(config: &RecordingConfig, width: u32, height: u32) -> Command {
+    let mut command = Command::new("ffmpeg");
+    command
+        .arg("-y")
+        .args(["-f", "avfoundation"])
+        .args(["-framerate", &config.frame_rate.to_string()])
+        .args(["-capture_cursor", "1"])
+        .args(["-capture_mouse_clicks", "1"])
+        .args(["-pixel_format", "uyvy422"])
+        .args(["-video_size", &format!("{width}x{height}")])
+        // Limit capture wall-clock time as an INPUT option so the
+        // duration bound is independent of the output setpts speed
+        // filter. As an output option, max_duration would be stretched
+        // by the playback multiplier (e.g. 4x → effectively 40 min at 4x).
+        .arg("-t")
+        .arg(format!("{:.3}", config.max_duration.as_secs_f64()))
+        .args(["-i", AVFOUNDATION_INPUT])
+        .args(["-c:v", "libx264"])
+        .args(["-preset", "ultrafast"])
+        .args(["-pix_fmt", "yuv420p"]);
+    // Apply playback speed: rescale presentation timestamps so the video
+    // plays faster than real time. A multiplier of 4 makes a 4-minute
+    // recording play in 1 minute. Values <= 1 are skipped (real-time).
+    if config.playback_speed_multiplier > 1.0 {
+        let setpts = format!("{:.6}*PTS", 1.0 / config.playback_speed_multiplier);
+        command.args(["-vf", &format!("setpts={setpts}")]);
+    }
+    // Max file size is an output limit; stays as an output option.
+    command
+        .args(["-movflags", "+faststart"])
+        .arg("-fs")
+        .arg(config.max_size_bytes.to_string());
+    command
+}
+
 /// Waits until the recording file has grown (capture is live) or ffmpeg exits.
 async fn wait_for_first_output(path: &Path, process: &mut Child) -> Result<(), String> {
     let deadline = Instant::now() + START_TIMEOUT;
@@ -234,3 +271,7 @@ fn ffmpeg_error_tail(log: &str) -> String {
         format!(" ({tail})")
     }
 }
+
+#[cfg(test)]
+#[path = "recording_tests.rs"]
+mod tests;

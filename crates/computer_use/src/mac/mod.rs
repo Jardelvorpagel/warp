@@ -11,11 +11,11 @@ mod window;
 use async_trait::async_trait;
 use pathfinder_geometry::vector::Vector2I;
 use post::PostTarget;
+pub use recording::Recorder;
 use util::{display_scale_factor_for_window, main_display_scale_factor};
 use warpui_core::r#async::Timer;
 
 use crate::{Action, ActionResult, Options, Target, TargetedAction};
-pub use recording::Recorder;
 
 pub fn is_supported_on_current_platform() -> bool {
     true
