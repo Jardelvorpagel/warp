@@ -1712,7 +1712,7 @@ fn render_vertical_tabs_panel(
     // vertical tabs panel opens the tab configs dropdown.
     let inner = Hoverable::new(state.panel_right_click_mouse_state.clone(), |_| {
         Container::new(panel_with_popup)
-            .with_background(internal_colors::fg_overlay_1(theme))
+            .with_background(theme.workspace_chrome_background())
             .finish()
     })
     .on_click(|ctx, _, _| {

@@ -342,3 +342,96 @@ fn infer_from_foreground_color_test() {
         ColorScheme::DarkOnLight
     );
 }
+
+#[test]
+fn match_terminal_background_defaults_to_false_test() {
+    use super::color::internal_colors;
+    let theme = serde_yaml::from_str::<WarpTheme>(
+        r##"---
+background: "#20a5ba"
+accent: "#20a5ba"
+foreground: "#ffffff"
+details: darker
+terminal_colors:
+  normal:
+    black: "#616161"
+    red: "#ff8272"
+    green: "#b4fa72"
+    yellow: "#fefdc2"
+    blue: "#a5d5fe"
+    magenta: "#ff8ffd"
+    cyan: "#d0d1fe"
+    white: "#f1f1f1"
+  bright:
+    black: "#8e8e8e"
+    red: "#ffc4bd"
+    green: "#d6fcb9"
+    yellow: "#fefdd5"
+    blue: "#c1e3fe"
+    magenta: "#ffb1fe"
+    cyan: "#e5e6fe"
+    white: "#feffff"
+name: test_theme
+"##,
+    )
+    .expect("Couldn't deserialize");
+
+    assert!(!theme.match_terminal_background);
+    assert_eq!(
+        theme.workspace_chrome_background(),
+        internal_colors::fg_overlay_1(&theme)
+    );
+}
+
+#[test]
+fn match_terminal_background_false_is_not_serialized_test() {
+    let theme = WarpTheme::new(
+        Fill::Solid(ColorU::from_u32(0x20A5BAFF)),
+        ColorU::from_u32(0xFFFFFFFF),
+        Fill::Solid(ColorU::from_u32(0x20A5BAFF)),
+        None,
+        Some(Details::Darker),
+        mock_terminal_colors(),
+        None,
+        Some("test_theme".to_string()),
+    );
+    let serialized = serde_yaml::to_string(&theme).expect("Couldn't serialize");
+    assert!(!serialized.contains("match_terminal_background"));
+}
+
+#[test]
+fn match_terminal_background_enabled_matches_terminal_background_test() {
+    let theme = serde_yaml::from_str::<WarpTheme>(
+        r##"---
+background: "#20a5ba"
+accent: "#20a5ba"
+foreground: "#ffffff"
+details: darker
+terminal_colors:
+  normal:
+    black: "#616161"
+    red: "#ff8272"
+    green: "#b4fa72"
+    yellow: "#fefdc2"
+    blue: "#a5d5fe"
+    magenta: "#ff8ffd"
+    cyan: "#d0d1fe"
+    white: "#f1f1f1"
+  bright:
+    black: "#8e8e8e"
+    red: "#ffc4bd"
+    green: "#d6fcb9"
+    yellow: "#fefdd5"
+    blue: "#c1e3fe"
+    magenta: "#ffb1fe"
+    cyan: "#e5e6fe"
+    white: "#feffff"
+name: test_theme
+match_terminal_background: true
+"##,
+    )
+    .expect("Couldn't deserialize");
+
+    assert!(theme.match_terminal_background);
+    assert_eq!(theme.workspace_chrome_background(), theme.background());
+}

@@ -599,6 +599,9 @@ pub struct WarpTheme {
     terminal_colors: TerminalColors,
     // If name is None, we construct the name by processing the theme .yaml file name
     name: Option<String>,
+
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    match_terminal_background: bool,
 }
 
 impl WarpTheme {
@@ -622,6 +625,7 @@ impl WarpTheme {
             terminal_colors,
             background_image,
             name,
+            match_terminal_background: false,
         }
     }
 
