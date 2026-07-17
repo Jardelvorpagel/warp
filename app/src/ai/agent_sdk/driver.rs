@@ -881,19 +881,28 @@ impl AgentDriver {
                         report_error!(e);
                     }
                 }
-                // When WARP_SANDBOX_DEADLINE is set, race run_internal against a deadline
-                // timer so recording finalization and snapshot upload can complete before
-                // the infrastructure's hard kill fires.
+                // Primary: WARP_SANDBOX_DEADLINE client-side timer.
                 //
                 // The server injects WARP_SANDBOX_DEADLINE (Unix timestamp, seconds since
                 // epoch) into the container environment at sandbox creation time for both
-                // Docker Sandbox and Namespace workers. The timer fires SHUTDOWN_WARNING_WINDOW
-                // seconds before the deadline, giving the normal AgentDriver teardown path
-                // — recording upload, snapshot upload — time to finish.
+                // Docker Sandbox and Namespace workers. The sandbox deadline is set to
+                // MaxInstanceRuntime + SandboxShutdownWarningWindow (5 min); this timer
+                // fires SandboxShutdownWarningWindow before that hard kill, giving the
+                // normal AgentDriver teardown path — recording upload, snapshot upload —
+                // time to complete while the agent is still running.
                 //
-                // When the variable is absent or unparseable, run_internal runs to completion
-                // without any timer, preserving the existing behaviour for local and
-                // self-hosted runs.
+                // Backup: SIGTERM detection (Unix only).
+                //
+                // Both Docker Sandbox and Namespace send SIGTERM ~10-20 seconds before
+                // SIGKILL at the instance deadline. In practice this arm should never
+                // fire — the primary timer starts cleanup 5 minutes earlier and
+                // completes well before SIGTERM arrives. This is defense-in-depth for
+                // edge cases (e.g. WARP_SANDBOX_DEADLINE absent, or clock skew). The
+                // SIGTERM handler is unregistered after run_internal resolves to restore
+                // the default terminate disposition.
+                //
+                // When WARP_SANDBOX_DEADLINE is absent and no SIGTERM arrives, run_internal
+                // runs to completion as before (local and self-hosted runs are unaffected).
                 let result = {
                     use std::time::SystemTime;
                     use warpui::r#async::Timer;
@@ -918,7 +927,77 @@ impl AgentDriver {
                             }
                         });
 
-                    if let Some(wait) = maybe_wait {
+                    // Unix: primary timer + SIGTERM backup both active.
+                    #[cfg(unix)]
+                    let result = {
+                        use std::sync::atomic::{AtomicBool, Ordering};
+
+                        let sigterm_flag = std::sync::Arc::new(AtomicBool::new(false));
+                        // Register the backup SIGTERM handler. Failures are non-fatal;
+                        // we capture sig_id to restore the default disposition after
+                        // run_internal resolves.
+                        let sigterm_sig_id = signal_hook::flag::register(
+                            signal_hook::consts::SIGTERM,
+                            std::sync::Arc::clone(&sigterm_flag),
+                        )
+                        .ok();
+                        let flag = std::sync::Arc::clone(&sigterm_flag);
+                        // Poll the flag every 100ms — async sleep, zero CPU cost.
+                        let sigterm_future = async move {
+                            loop {
+                                if flag.load(Ordering::Acquire) {
+                                    break;
+                                }
+                                Timer::after(Duration::from_millis(100)).await;
+                            }
+                        };
+
+                        let result = if let Some(wait) = maybe_wait {
+                            futures::select! {
+                                r = Self::run_internal(task, foreground.clone()).fuse() => r,
+                                _ = Timer::after(wait).fuse() => {
+                                    log::info!(
+                                        "Sandbox deadline approaching (WARP_SANDBOX_DEADLINE); \
+                                         aborting run_internal to allow recording finalization"
+                                    );
+                                    Ok(())
+                                }
+                                _ = sigterm_future.fuse() => {
+                                    // Backup path — should not fire in normal operation.
+                                    // The primary timer provides 5 minutes of cleanup time;
+                                    // SIGTERM only arrives ~10-20s before SIGKILL.
+                                    log::warn!(
+                                        "SIGTERM received before pre-deadline timer fired; \
+                                         aborting run_internal to attempt recording finalization \
+                                         (backup path, limited grace period)"
+                                    );
+                                    Ok(())
+                                }
+                            }
+                        } else {
+                            futures::select! {
+                                r = Self::run_internal(task, foreground.clone()).fuse() => r,
+                                _ = sigterm_future.fuse() => {
+                                    log::warn!(
+                                        "SIGTERM received (WARP_SANDBOX_DEADLINE not set); \
+                                         aborting run_internal to attempt recording finalization"
+                                    );
+                                    Ok(())
+                                }
+                            }
+                        };
+
+                        // Restore the default SIGTERM disposition so any subsequent
+                        // SIGTERM during cleanup causes the process to terminate normally.
+                        if let Some(sig_id) = sigterm_sig_id {
+                            signal_hook::low_level::unregister(sig_id);
+                        }
+                        result
+                    };
+
+                    // Non-Unix (WASM, Windows): primary timer only, no SIGTERM handling.
+                    #[cfg(not(unix))]
+                    let result = if let Some(wait) = maybe_wait {
                         futures::select! {
                             r = Self::run_internal(task, foreground.clone()).fuse() => r,
                             _ = Timer::after(wait).fuse() => {
@@ -931,7 +1010,9 @@ impl AgentDriver {
                         }
                     } else {
                         Self::run_internal(task, foreground.clone()).await
-                    }
+                    };
+
+                    result
                 };
 
                 // Stop accepting CLI session status updates now that the run
